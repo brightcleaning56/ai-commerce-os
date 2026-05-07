@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "functions": {
+    "app/api/agents/pipeline/route.ts": { "maxDuration": 60 },
+    "app/api/agents/trend-hunter/route.ts": { "maxDuration": 30 },
+    "app/api/agents/buyer-discovery/route.ts": { "maxDuration": 30 },
+    "app/api/agents/outreach/route.ts": { "maxDuration": 30 },
+    "app/api/signals/scrape/route.ts": { "maxDuration": 30 }
+  }
+}
