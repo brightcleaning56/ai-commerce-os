@@ -5,5 +5,5 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ products: store.getProducts() });
+  return NextResponse.json({ products: await store.getProducts() });
 }

@@ -52,15 +52,104 @@ vercel env add ANTHROPIC_MODEL_CHEAP    # claude-haiku-4-5
 vercel env add ANTHROPIC_MODEL_SMART    # claude-sonnet-4-6
 ```
 
-## Step 4 — Promote to production
+## Step 4 — Add the cron secret (auto-pipeline)
+
+The auto-pipeline runs every 6 hours via Vercel cron. To prevent unauthenticated abuse, set a secret:
+
+```bash
+# Generate one
+openssl rand -hex 32
+
+# Set it in Vercel
+vercel env add CRON_SECRET production
+```
+
+Vercel automatically sends `Authorization: Bearer ${CRON_SECRET}` with every cron-triggered request. The route checks the header and rejects unauthorized calls.
+
+To pause cron without redeploying:
+
+```bash
+vercel env add CRON_ENABLED production    # value: false
+```
+
+To re-enable, change it back to `true` (or remove it).
+
+## Step 5 — (Optional) Real email delivery
+
+Drafts approved in `/approvals` can fire actual emails through Postmark or Resend. Without a provider, sends are simulated locally — useful for demos.
+
+```bash
+# Pick one provider:
+vercel env add POSTMARK_TOKEN production       # https://postmarkapp.com
+# or:
+vercel env add RESEND_TOKEN production          # https://resend.com
+
+# Required:
+vercel env add EMAIL_FROM production            # e.g. outreach@yourdomain.com
+vercel env add EMAIL_FROM_NAME production       # e.g. "AVYN Wholesale"
+
+# Strongly recommended for staging:
+vercel env add EMAIL_TEST_RECIPIENT production  # e.g. you@yourdomain.com — every send redirects here
+
+# Required to actually deliver to real buyer addresses:
+vercel env add EMAIL_LIVE production            # value: true
+```
+
+**Safety logic** (in `lib/email.ts`):
+
+1. No token → simulated send, no network call
+2. Token + `EMAIL_TEST_RECIPIENT` set → real send via provider, but always to the test address
+3. Token + `EMAIL_LIVE=true` → real send to actual buyer email
+
+The default for `EMAIL_LIVE` is off, so a fresh deploy will never accidentally email the fake/sample buyer addresses that the agents generate. To go live, you must explicitly set `EMAIL_LIVE=true`.
+
+## Step 6 — (Optional) Inbound replies → autonomous negotiation
+
+When a real buyer replies to a sent email, Postmark can forward it to a webhook that auto-fires the Negotiation Agent. This closes the loop — replies turn into counter-offers without anyone touching the UI.
+
+### Set up the inbound stream
+
+1. In Postmark: **Servers → your server → Inbound stream → Settings**
+2. Postmark will give you an inbound forwarding address (e.g. `1a2b3c@inbound.postmarkapp.com`). To receive replies, you need recipients to send to this address — typically you do this by setting up a custom domain inbound MX record (see Postmark's [domain inbound docs](https://postmarkapp.com/manual#inbound-domain)).
+3. Set the inbound webhook URL to: `https://YOUR-DOMAIN/api/webhooks/postmark/inbound`
+4. Enable **Basic Auth** in Postmark and set a username + password.
+
+### Mirror the credentials in Vercel
+
+```bash
+vercel env add POSTMARK_INBOUND_USER production
+vercel env add POSTMARK_INBOUND_PASSWORD production
+vercel --prod
+```
+
+The webhook validates `Authorization: Basic …` against these env vars. Without them, requests are accepted unauthenticated — useful for local ngrok testing but unsafe in production.
+
+### How matching works
+
+The route runs `lib/inbound.ts` which tries (most → least confident):
+
+1. **`In-Reply-To` header** matches a stored `messageId` on a draft → strong match
+2. **From-address + normalized subject** matches the original outbound → solid match
+3. **From-address only** when there's exactly one (or most-recent) draft sent to that address
+
+Once matched, the buyer's quoted-reply chain is stripped, the cleaned text is fed to the Negotiation Agent, and a counter-offer lands in the draft thread automatically.
+
+### Test locally without Postmark
+
+Click **Simulate inbound reply** on any sent draft in `/outreach` — it hits `/api/inbound/test`, runs the same matcher + Negotiation Agent on a sample reply, and updates the thread.
+
+## Step 7 — Promote to production
 
 ```bash
 vercel --prod
 ```
 
-Your live URL is now serving real Claude-backed agents. Open `/pipeline` and click **Run Pipeline** — Reddit + HN scrape + 3 Claude calls should complete in 5–10 seconds.
+Your live URL is now serving real Claude-backed agents. Open `/pipeline` and:
+- Click **Run Pipeline** for a manual run — Reddit + HN scrape + 4 Claude calls in ~5–10s
+- The **Auto-pipeline** card shows the next scheduled cron fire and the last run's results
+- Vercel cron will fire `/api/cron/pipeline` automatically on the schedule defined in `vercel.json` (default `0 */6 * * *` = every 6 hours UTC)
 
-## Step 5 — (Optional) Custom domain
+## Step 8 — (Optional) Custom domain
 
 ```bash
 vercel domains add yourdomain.com

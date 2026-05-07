@@ -8,9 +8,10 @@ import {
   Sparkles,
   TrendingUp,
   Workflow,
+  Zap,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Drawer from "@/components/ui/Drawer";
 import {
   DEALS,
@@ -21,12 +22,15 @@ import {
   type DealStage,
 } from "@/lib/deals";
 
+type LiveDeal = Deal & { draftId?: string };
+
 function formatMoney(n: number) {
   if (n >= 1000) return `$${(n / 1000).toFixed(1)}K`;
   return `$${n.toLocaleString()}`;
 }
 
-function DealCard({ d, onClick }: { d: Deal; onClick: () => void }) {
+function DealCard({ d, onClick }: { d: LiveDeal; onClick: () => void }) {
+  const isLive = !!d.draftId;
   return (
     <button
       onClick={onClick}
@@ -34,7 +38,17 @@ function DealCard({ d, onClick }: { d: Deal; onClick: () => void }) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="truncate text-sm font-semibold">{d.company}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-sm font-semibold">{d.company}</span>
+            {isLive && (
+              <span
+                className="rounded bg-accent-green/15 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wider text-accent-green"
+                title="Live deal — backed by a real draft"
+              >
+                Live
+              </span>
+            )}
+          </div>
           <div className="truncate text-[11px] text-ink-tertiary">{d.product}</div>
         </div>
         <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-brand text-[10px] font-bold">
@@ -69,9 +83,9 @@ function DealDetail({
   onAdvance,
   onBuildQuote,
 }: {
-  d: Deal;
-  onAdvance: (d: Deal) => void;
-  onBuildQuote: (d: Deal) => void;
+  d: LiveDeal;
+  onAdvance: (d: LiveDeal) => void;
+  onBuildQuote: (d: LiveDeal) => void;
 }) {
   const stages: DealStage[] = ["Prospecting", "Contacted", "Negotiation", "Quotation", "Closed Won", "Closed Lost"];
   const idx = stages.indexOf(d.stage);
@@ -178,27 +192,63 @@ function DealDetail({
 }
 
 export default function CrmPage() {
-  const [open, setOpen] = useState<Deal | null>(null);
+  const [open, setOpen] = useState<LiveDeal | null>(null);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"kanban" | "list">("kanban");
-  const [deals, setDeals] = useState<Deal[]>(DEALS);
+  const [staticDeals, setStaticDeals] = useState<LiveDeal[]>(DEALS);
+  const [liveDeals, setLiveDeals] = useState<LiveDeal[]>([]);
+  const [source, setSource] = useState<"all" | "live" | "demo">("all");
   const [toast, setToast] = useState<string | null>(null);
   const router = useRouter();
+
+  // Live deals merge: drafts (slice 35) shaped as Deal records
+  async function loadLiveDeals() {
+    try {
+      const res = await fetch("/api/crm/deals");
+      if (!res.ok) return;
+      const json = await res.json();
+      setLiveDeals(json.deals ?? []);
+    } catch {}
+  }
+  useEffect(() => {
+    loadLiveDeals();
+    const t = setInterval(loadLiveDeals, 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   function showToast(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 2500);
   }
 
-  function handleAdvance(d: Deal) {
+  async function handleAdvance(d: LiveDeal) {
     const stages: DealStage[] = ["Prospecting", "Contacted", "Negotiation", "Quotation", "Closed Won", "Closed Lost"];
     const idx = stages.indexOf(d.stage);
     if (idx < 0 || idx >= stages.length - 2) return;
     const next = stages[idx + 1];
     const newProb = next === "Closed Won" ? 100 : Math.min(95, d.probability + 15);
-    setDeals((prev) =>
-      prev.map((x) => (x.id === d.id ? { ...x, stage: next, probability: newProb, lastTouch: "just now" } : x))
-    );
+
+    // Live deals (real drafts) persist via API; static deals stay client-side
+    if (d.draftId) {
+      try {
+        const res = await fetch("/api/crm/deals", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ draftId: d.draftId, stage: next }),
+        });
+        if (!res.ok) throw new Error("Stage update failed");
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Stage update failed");
+        return;
+      }
+      setLiveDeals((prev) =>
+        prev.map((x) => (x.id === d.id ? { ...x, stage: next, probability: newProb, lastTouch: "just now" } : x))
+      );
+    } else {
+      setStaticDeals((prev) =>
+        prev.map((x) => (x.id === d.id ? { ...x, stage: next, probability: newProb, lastTouch: "just now" } : x))
+      );
+    }
     setOpen({ ...d, stage: next, probability: newProb });
     showToast(`Advanced to ${next}`);
   }
@@ -208,19 +258,25 @@ export default function CrmPage() {
     router.push(`/deals?company=${encodeURIComponent(d.company)}&product=${encodeURIComponent(d.product)}`);
   }
 
+  const merged = useMemo<LiveDeal[]>(() => {
+    if (source === "live") return liveDeals;
+    if (source === "demo") return staticDeals;
+    return [...liveDeals, ...staticDeals];
+  }, [source, liveDeals, staticDeals]);
+
   const filtered = useMemo(() => {
-    if (!query) return deals;
+    if (!query) return merged;
     const q = query.toLowerCase();
-    return deals.filter(
+    return merged.filter(
       (d) =>
         d.company.toLowerCase().includes(q) ||
         d.product.toLowerCase().includes(q) ||
         d.owner.toLowerCase().includes(q)
     );
-  }, [query, deals]);
+  }, [query, merged]);
 
-  const byStage: Record<DealStage, Deal[]> = useMemo(() => {
-    const out = {} as Record<DealStage, Deal[]>;
+  const byStage: Record<DealStage, LiveDeal[]> = useMemo(() => {
+    const out = {} as Record<DealStage, LiveDeal[]>;
     for (const s of STAGES) out[s] = [];
     for (const d of filtered) out[d.stage].push(d);
     return out;
@@ -252,6 +308,27 @@ export default function CrmPage() {
               placeholder="Search deals…"
               className="h-9 w-64 rounded-lg border border-bg-border bg-bg-card pl-9 pr-3 text-sm placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
             />
+          </div>
+          <div className="flex overflow-hidden rounded-lg border border-bg-border">
+            {(["all", "live", "demo"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSource(s)}
+                className={`px-3 text-xs capitalize ${
+                  source === s ? "bg-brand-500/15 text-brand-200" : "bg-bg-card text-ink-secondary"
+                }`}
+                title={
+                  s === "live"
+                    ? "Only deals backed by real drafts"
+                    : s === "demo"
+                    ? "Only sample/demo deals"
+                    : "Live + demo deals"
+                }
+              >
+                {s === "live" && <Zap className="mr-1 inline h-3 w-3" />}
+                {s}
+              </button>
+            ))}
           </div>
           <div className="flex overflow-hidden rounded-lg border border-bg-border">
             <button

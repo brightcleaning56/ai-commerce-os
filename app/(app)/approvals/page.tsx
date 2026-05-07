@@ -1,0 +1,563 @@
+"use client";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Filter,
+  Mail,
+  RefreshCw,
+  Send,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  XCircle,
+  Zap,
+} from "lucide-react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useToast } from "@/components/Toast";
+
+type Severity = "Critical" | "High" | "Medium" | "Low";
+
+type DraftItem = {
+  id: string;
+  createdAt: string;
+  buyerCompany: string;
+  buyerName: string;
+  productName: string;
+  status: "draft" | "approved" | "sent" | "rejected";
+  email: { subject: string };
+  estCostUsd?: number;
+  modelUsed: string;
+  sentAt?: string;
+  sentToEmail?: string;
+  redirectedFromEmail?: string;
+  messageId?: string;
+  emailProvider?: "postmark" | "resend" | "fallback";
+  sendSimulated?: boolean;
+  sendError?: string;
+};
+
+type RiskFlag = {
+  id: string;
+  source: "agent" | "static";
+  agent?: string;
+  createdAt: string;
+  severity: Severity;
+  category: string;
+  title: string;
+  detail: string;
+  recommended: string;
+  subjectName?: string;
+};
+
+type Policies = {
+  autoApproveDrafts: boolean;
+  autoApproveDraftMaxBatch: number; // applied via bulk action
+  autoSnoozeLowSeverity: boolean;
+};
+
+const POLICY_KEY = "aicos:approval-policies:v1";
+
+const DEFAULT_POLICIES: Policies = {
+  autoApproveDrafts: false,
+  autoApproveDraftMaxBatch: 5,
+  autoSnoozeLowSeverity: true,
+};
+
+const SEV_TONE: Record<Severity, { bg: string; text: string }> = {
+  Critical: { bg: "bg-accent-red/15", text: "text-accent-red" },
+  High: { bg: "bg-accent-amber/15", text: "text-accent-amber" },
+  Medium: { bg: "bg-accent-blue/15", text: "text-accent-blue" },
+  Low: { bg: "bg-bg-hover", text: "text-ink-tertiary" },
+};
+
+function relAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
+  return `${Math.floor(ms / 86_400_000)}d ago`;
+}
+
+export default function ApprovalsPage() {
+  const [drafts, setDrafts] = useState<DraftItem[]>([]);
+  const [flags, setFlags] = useState<RiskFlag[]>([]);
+  const [riskActions, setRiskActions] = useState<Record<string, string>>({});
+  const [policies, setPolicies] = useState<Policies>(DEFAULT_POLICIES);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<"all" | "drafts" | "risks">("all");
+  const { toast } = useToast();
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const [dRes, fRes] = await Promise.all([
+        fetch("/api/drafts").then((r) => r.json()),
+        fetch("/api/risk-flags").then((r) => r.json()),
+      ]);
+      setDrafts(dRes.drafts ?? []);
+      setFlags(fRes.flags ?? []);
+    } catch {}
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    refresh();
+    try {
+      const raw = localStorage.getItem(POLICY_KEY);
+      if (raw) setPolicies({ ...DEFAULT_POLICIES, ...JSON.parse(raw) });
+      const ra = localStorage.getItem("aicos:risk-actions:v1");
+      if (ra) setRiskActions(JSON.parse(ra));
+    } catch {}
+  }, []);
+
+  function persistPolicies(next: Policies) {
+    setPolicies(next);
+    try {
+      localStorage.setItem(POLICY_KEY, JSON.stringify(next));
+    } catch {}
+  }
+
+  function persistRiskActions(next: Record<string, string>) {
+    setRiskActions(next);
+    try {
+      localStorage.setItem("aicos:risk-actions:v1", JSON.stringify(next));
+    } catch {}
+  }
+
+  async function setDraftStatus(id: string, status: DraftItem["status"]) {
+    setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, status } : d)));
+    try {
+      await fetch("/api/drafts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, status }),
+      });
+    } catch {}
+  }
+
+  async function sendDraft(id: string) {
+    try {
+      const res = await fetch("/api/drafts/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error ?? "Send failed", "error");
+        if (data.draft) {
+          setDrafts((prev) => prev.map((d) => (d.id === id ? data.draft : d)));
+        }
+        return;
+      }
+      setDrafts((prev) => prev.map((d) => (d.id === id ? data.draft : d)));
+      const r = data.result;
+      if (r.simulated) {
+        toast(`Sent (simulated · no provider configured) · message id ${r.messageId}`, "info");
+      } else if (r.redirectedFrom) {
+        toast(`Sent via ${r.provider} · redirected from ${r.redirectedFrom} → ${r.sentTo}`, "info");
+      } else {
+        toast(`Sent via ${r.provider} to ${r.sentTo}`);
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Send failed", "error");
+    }
+  }
+
+  async function bulkApproveDrafts() {
+    const pending = drafts.filter((d) => d.status === "draft");
+    const toApprove = pending.slice(0, policies.autoApproveDraftMaxBatch);
+    if (toApprove.length === 0) {
+      toast("No pending drafts to auto-approve", "info");
+      return;
+    }
+    await Promise.all(toApprove.map((d) => setDraftStatus(d.id, "approved")));
+    toast(`Auto-approved ${toApprove.length} draft${toApprove.length === 1 ? "" : "s"}`);
+  }
+
+  function bulkSnoozeLowSeverity() {
+    const candidates = flags.filter((f) => (f.severity === "Low" || f.severity === "Medium") && !riskActions[f.id]);
+    if (candidates.length === 0) {
+      toast("No low/medium-severity flags to snooze", "info");
+      return;
+    }
+    const next = { ...riskActions };
+    candidates.forEach((f) => {
+      next[f.id] = "snoozed";
+    });
+    persistRiskActions(next);
+    toast(`Snoozed ${candidates.length} low/medium-severity flag${candidates.length === 1 ? "" : "s"}`);
+  }
+
+  function handleRiskAction(id: string, action: "applied" | "dismissed" | "snoozed") {
+    persistRiskActions({ ...riskActions, [id]: action });
+    toast(`${action === "applied" ? "Applied" : action === "dismissed" ? "Dismissed" : "Snoozed"} risk flag`);
+  }
+
+  // Build the unified queue
+  const pendingDrafts = drafts.filter((d) => d.status === "draft");
+  const pendingFlags = flags.filter(
+    (f) => (f.severity === "Critical" || f.severity === "High") && !riskActions[f.id]
+  );
+  const lowMediumFlags = flags.filter(
+    (f) => (f.severity === "Medium" || f.severity === "Low") && !riskActions[f.id]
+  );
+
+  const totalPending = pendingDrafts.length + pendingFlags.length;
+
+  const visible = useMemo(() => {
+    if (filter === "drafts") return { drafts: pendingDrafts, flags: [] as RiskFlag[] };
+    if (filter === "risks") return { drafts: [] as DraftItem[], flags: pendingFlags };
+    return { drafts: pendingDrafts, flags: pendingFlags };
+  }, [filter, pendingDrafts, pendingFlags]);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-brand shadow-glow">
+            <ShieldCheck className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold">Approvals</h1>
+            <p className="text-xs text-ink-secondary">
+              {totalPending} pending · human-in-the-loop queue for high-stakes agent actions
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={refresh}
+          disabled={loading}
+          className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="Total pending" v={totalPending} Icon={Clock} />
+        <Stat label="Outreach drafts" v={pendingDrafts.length} Icon={Mail} />
+        <Stat label="Critical/High flags" v={pendingFlags.length} Icon={ShieldAlert} />
+        <Stat label="Low/Med flags" v={lowMediumFlags.length} Icon={AlertTriangle} hint="not in queue" />
+      </div>
+
+      {/* Policy controls */}
+      <div className="rounded-xl border border-brand-500/30 bg-gradient-to-br from-brand-500/5 to-transparent p-5">
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-brand-500/20">
+            <Zap className="h-5 w-5 text-brand-200" />
+          </div>
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-brand-200">Auto-approval policies</div>
+            <p className="mt-1 text-xs text-ink-secondary">
+              Stored in your browser. Changes take effect on the next bulk action.
+            </p>
+
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <PolicyToggle
+                label="Auto-approve outreach drafts in batches"
+                hint={`Bulk-approve up to ${policies.autoApproveDraftMaxBatch} drafts at a time`}
+                value={policies.autoApproveDrafts}
+                onChange={(v) => persistPolicies({ ...policies, autoApproveDrafts: v })}
+              />
+              <PolicyToggle
+                label="Auto-snooze low/medium-severity risk flags"
+                hint="Keeps the queue focused on Critical + High issues"
+                value={policies.autoSnoozeLowSeverity}
+                onChange={(v) => persistPolicies({ ...policies, autoSnoozeLowSeverity: v })}
+              />
+            </div>
+
+            <div className="mt-4 flex items-center gap-2">
+              <span className="text-[11px] text-ink-tertiary">Max batch size:</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={policies.autoApproveDraftMaxBatch}
+                onChange={(e) =>
+                  persistPolicies({
+                    ...policies,
+                    autoApproveDraftMaxBatch: Math.max(1, Math.min(50, +e.target.value || 1)),
+                  })
+                }
+                className="h-7 w-16 rounded-md border border-bg-border bg-bg-card px-2 text-xs"
+              />
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                onClick={bulkApproveDrafts}
+                disabled={!policies.autoApproveDrafts || pendingDrafts.length === 0}
+                className="flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 py-1.5 text-xs font-semibold shadow-glow disabled:opacity-50"
+              >
+                <CheckCircle2 className="h-3 w-3" /> Apply: bulk-approve drafts
+              </button>
+              <button
+                onClick={bulkSnoozeLowSeverity}
+                disabled={!policies.autoSnoozeLowSeverity || lowMediumFlags.length === 0}
+                className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-xs hover:bg-bg-hover disabled:opacity-50"
+              >
+                <Clock className="h-3 w-3" /> Apply: snooze low/medium flags
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter tabs */}
+      <div className="flex flex-wrap items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs w-fit">
+        {(
+          [
+            ["all", "All", totalPending],
+            ["drafts", "Drafts", pendingDrafts.length],
+            ["risks", "Risk flags", pendingFlags.length],
+          ] as const
+        ).map(([k, label, n]) => (
+          <button
+            key={k}
+            onClick={() => setFilter(k)}
+            className={`flex items-center gap-2 rounded-md px-3 py-1.5 ${
+              filter === k
+                ? "bg-brand-500/15 text-brand-200"
+                : "text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+            }`}
+          >
+            {label}
+            <span className={`rounded ${filter === k ? "bg-brand-500/20" : "bg-bg-hover"} px-1.5 text-[10px]`}>
+              {n}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* Empty state */}
+      {totalPending === 0 ? (
+        <div className="rounded-xl border border-bg-border bg-bg-card p-12 text-center">
+          <CheckCircle2 className="mx-auto h-8 w-8 text-accent-green" />
+          <div className="mt-3 text-base font-semibold">Inbox zero</div>
+          <p className="mt-1 text-xs text-ink-tertiary">
+            Nothing waiting for human approval. Run{" "}
+            <Link href="/pipeline" className="text-brand-300 hover:text-brand-200">
+              the Pipeline
+            </Link>{" "}
+            to surface new items.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {/* Risk flags first — usually higher urgency */}
+          {visible.flags.map((f) => {
+            const tone = SEV_TONE[f.severity];
+            return (
+              <div
+                key={f.id}
+                className={`relative rounded-xl border bg-bg-card p-4 ${
+                  f.source === "agent" ? "border-brand-500/40" : "border-bg-border"
+                }`}
+              >
+                {f.source === "agent" && (
+                  <span className="absolute -top-2 left-3 flex items-center gap-1 rounded-full bg-gradient-brand px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider shadow-glow">
+                    <Sparkles className="h-2.5 w-2.5" /> Live
+                  </span>
+                )}
+                <div className="flex items-start gap-3">
+                  <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${tone.bg}`}>
+                    <ShieldAlert className={`h-4 w-4 ${tone.text}`} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${tone.bg} ${tone.text}`}>
+                        {f.severity}
+                      </span>
+                      <span className="rounded-md bg-bg-hover/60 px-2 py-0.5 text-[10px] text-ink-secondary">
+                        {f.category}
+                      </span>
+                      <span className="text-[11px] text-ink-tertiary">{relAgo(f.createdAt)}</span>
+                    </div>
+                    <div className="mt-1.5 text-sm font-semibold">{f.title}</div>
+                    <p className="mt-1 text-xs text-ink-secondary">{f.detail}</p>
+                    <div className="mt-2 rounded-md border border-brand-500/30 bg-brand-500/5 px-3 py-2 text-[11px]">
+                      <span className="font-semibold text-brand-200">Recommended: </span>
+                      <span className="text-ink-secondary">{f.recommended}</span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => handleRiskAction(f.id, "applied")}
+                        className="flex items-center gap-1 rounded-md bg-gradient-brand px-3 py-1.5 text-xs font-semibold shadow-glow"
+                      >
+                        <CheckCircle2 className="h-3 w-3" /> Apply action
+                      </button>
+                      <button
+                        onClick={() => handleRiskAction(f.id, "snoozed")}
+                        className="flex items-center gap-1 rounded-md border border-bg-border bg-bg-hover/40 px-3 py-1.5 text-xs hover:bg-bg-hover"
+                      >
+                        <Clock className="h-3 w-3" /> Snooze 7d
+                      </button>
+                      <button
+                        onClick={() => handleRiskAction(f.id, "dismissed")}
+                        className="flex items-center gap-1 rounded-md border border-bg-border bg-bg-hover/40 px-3 py-1.5 text-xs text-ink-secondary hover:text-ink-primary"
+                      >
+                        <XCircle className="h-3 w-3" /> Dismiss
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Drafts */}
+          {visible.drafts.map((d) => (
+            <div key={d.id} className="rounded-xl border border-bg-border bg-bg-card p-4">
+              <div className="flex items-start gap-3">
+                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-cyan/15">
+                  <Mail className="h-4 w-4 text-accent-cyan" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-md bg-accent-amber/15 px-2 py-0.5 text-[10px] font-semibold text-accent-amber">
+                      Outreach draft
+                    </span>
+                    <span className="text-[11px] text-ink-tertiary">
+                      {relAgo(d.createdAt)}
+                      {d.estCostUsd != null && d.estCostUsd > 0 && <> · ${d.estCostUsd.toFixed(5)}</>}
+                      {" · "}
+                      {d.modelUsed}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 text-sm font-semibold">{d.email.subject}</div>
+                  <div className="mt-0.5 text-[11px] text-ink-tertiary">
+                    → <span className="text-ink-secondary">{d.buyerName}</span> @{" "}
+                    <span className="text-ink-secondary">{d.buyerCompany}</span> · for{" "}
+                    <span className="text-brand-300">{d.productName}</span>
+                  </div>
+                  {d.sentAt && (
+                    <div className="mt-1 text-[11px] text-accent-green">
+                      Sent {relAgo(d.sentAt)} → {d.sentToEmail}
+                      {d.sendSimulated && " (simulated)"}
+                      {d.redirectedFromEmail && ` (redirected from ${d.redirectedFromEmail})`}
+                    </div>
+                  )}
+                  {d.sendError && !d.sentAt && (
+                    <div className="mt-1 text-[11px] text-accent-red">
+                      Send failed: {d.sendError}
+                    </div>
+                  )}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => setDraftStatus(d.id, "approved")}
+                      className="flex items-center gap-1 rounded-md bg-gradient-brand px-3 py-1.5 text-xs font-semibold shadow-glow"
+                    >
+                      <CheckCircle2 className="h-3 w-3" /> Approve
+                    </button>
+                    <button
+                      onClick={() => sendDraft(d.id)}
+                      className="flex items-center gap-1 rounded-md border border-bg-border bg-bg-hover/40 px-3 py-1.5 text-xs hover:bg-bg-hover"
+                    >
+                      <Send className="h-3 w-3" /> Send email
+                    </button>
+                    <button
+                      onClick={() => setDraftStatus(d.id, "rejected")}
+                      className="flex items-center gap-1 rounded-md border border-bg-border bg-bg-hover/40 px-3 py-1.5 text-xs text-ink-secondary hover:bg-accent-red/10 hover:text-accent-red"
+                    >
+                      <XCircle className="h-3 w-3" /> Reject
+                    </button>
+                    <Link
+                      href="/outreach"
+                      className="ml-auto text-[11px] text-brand-300 hover:text-brand-200"
+                    >
+                      View full draft →
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {filter === "all" && visible.drafts.length === 0 && visible.flags.length === 0 && (
+            <div className="rounded-xl border border-bg-border bg-bg-card p-8 text-center text-xs text-ink-tertiary">
+              Nothing in this filter.
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="rounded-xl border border-bg-border bg-bg-card p-5">
+        <div className="flex items-start gap-3">
+          <Filter className="mt-0.5 h-4 w-4 shrink-0 text-ink-tertiary" />
+          <div className="text-xs text-ink-secondary">
+            <div className="text-sm font-semibold text-ink-primary">What lands here</div>
+            <ul className="mt-2 space-y-1">
+              <li>• <strong>Outreach drafts</strong> — every new draft from the Outreach Agent waits here unless auto-approved</li>
+              <li>• <strong>Critical / High risk flags</strong> — anything from the Risk Agent at those severities</li>
+              <li>• Low and Medium severity flags stay on the{" "}
+                <Link href="/risk" className="text-brand-300 hover:text-brand-200">Risk Center</Link>{" "}
+                page (or auto-snoozed if the policy is on)
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PolicyToggle({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-3 rounded-lg border border-bg-border bg-bg-card p-3">
+      <div className="flex-1">
+        <div className="text-xs font-medium">{label}</div>
+        <div className="mt-0.5 text-[10px] text-ink-tertiary">{hint}</div>
+      </div>
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          onChange(!value);
+        }}
+        className={`relative h-5 w-9 shrink-0 rounded-full transition ${
+          value ? "bg-gradient-brand" : "bg-bg-hover"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${
+            value ? "left-[18px]" : "left-0.5"
+          }`}
+        />
+      </button>
+    </label>
+  );
+}
+
+function Stat({
+  label,
+  v,
+  Icon,
+  hint,
+}: {
+  label: string;
+  v: number;
+  Icon: React.ComponentType<{ className?: string }>;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      <Icon className="h-4 w-4 text-brand-300" />
+      <div className="mt-2 text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
+      <div className="mt-1 text-2xl font-bold">{v}</div>
+      {hint && <div className="text-[10px] text-ink-tertiary">{hint}</div>}
+    </div>
+  );
+}

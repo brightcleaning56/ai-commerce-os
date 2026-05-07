@@ -5,7 +5,22 @@
     "app/api/agents/pipeline/route.ts": { "maxDuration": 60 },
     "app/api/agents/trend-hunter/route.ts": { "maxDuration": 30 },
     "app/api/agents/buyer-discovery/route.ts": { "maxDuration": 30 },
+    "app/api/agents/supplier-finder/route.ts": { "maxDuration": 30 },
     "app/api/agents/outreach/route.ts": { "maxDuration": 30 },
-    "app/api/signals/scrape/route.ts": { "maxDuration": 30 }
-  }
+    "app/api/agents/negotiation/route.ts": { "maxDuration": 30 },
+    "app/api/signals/scrape/route.ts": { "maxDuration": 30 },
+    "app/api/cron/pipeline/route.ts": { "maxDuration": 60 },
+    "app/api/cron/followups/route.ts": { "maxDuration": 60 },
+    "app/api/webhooks/postmark/inbound/route.ts": { "maxDuration": 60 }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/pipeline",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/followups",
+      "schedule": "30 9 * * *"
+    }
+  ]
 }

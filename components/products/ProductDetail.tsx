@@ -48,9 +48,39 @@ export default function ProductDetail({ p }: { p: Product }) {
   const [findingBuyers, setFindingBuyers] = useState(false);
   const [buyerResult, setBuyerResult] = useState<{ count: number; usedFallback: boolean; cost?: number } | null>(null);
   const [buyerError, setBuyerError] = useState<string | null>(null);
+  const [findingSuppliers, setFindingSuppliers] = useState(false);
+  const [supplierResult, setSupplierResult] = useState<{ count: number; usedFallback: boolean; cost?: number } | null>(null);
+  const [supplierError, setSupplierError] = useState<string | null>(null);
   const watchlist = useLocalSet("aicos:watchlist:v1");
   const isSaved = watchlist.has(p.id);
   const [showSources, setShowSources] = useState(false);
+
+  async function findSuppliers() {
+    setFindingSuppliers(true);
+    setSupplierError(null);
+    try {
+      const res = await fetch("/api/agents/supplier-finder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productName: p.name,
+          productCategory: p.category,
+          productNiche: p.niche,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Supplier Finder failed");
+      setSupplierResult({
+        count: data.run.supplierCount ?? 0,
+        usedFallback: data.run.usedFallback,
+        cost: data.run.estCostUsd,
+      });
+    } catch (e) {
+      setSupplierError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setFindingSuppliers(false);
+    }
+  }
 
   async function findBuyers() {
     setFindingBuyers(true);
@@ -209,6 +239,33 @@ export default function ProductDetail({ p }: { p: Product }) {
         </div>
       )}
 
+      {(supplierResult || supplierError) && (
+        <div
+          className={`rounded-lg border p-3 text-xs ${
+            supplierError
+              ? "border-accent-red/30 bg-accent-red/5 text-accent-red"
+              : "border-accent-green/30 bg-accent-green/5"
+          }`}
+        >
+          {supplierError ? (
+            <>Failed: {supplierError}</>
+          ) : supplierResult ? (
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-3.5 w-3.5 text-accent-green" />
+              <span className="text-ink-secondary">
+                Supplier Finder returned <span className="font-semibold text-accent-green">{supplierResult.count}</span> matched suppliers.
+                {supplierResult.usedFallback ? (
+                  <> Using fallback (no API key).</>
+                ) : (
+                  <> Live · cost ${supplierResult.cost?.toFixed(5) ?? "—"}</>
+                )}
+                {" "}<a href="/suppliers" className="font-semibold text-brand-300 hover:text-brand-200">View on Suppliers page →</a>
+              </span>
+            </div>
+          ) : null}
+        </div>
+      )}
+
       {showSources && (
         <div className="rounded-lg border border-bg-border bg-bg-card p-4">
           <div className="flex items-center justify-between">
@@ -253,12 +310,17 @@ export default function ProductDetail({ p }: { p: Product }) {
             <><Send className="h-4 w-4" /> Send to Buyer Agent</>
           )}
         </button>
-        <Link
-          href={`/suppliers?product=${encodeURIComponent(p.name)}`}
-          className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card py-2.5 text-sm hover:bg-bg-hover"
+        <button
+          onClick={findSuppliers}
+          disabled={findingSuppliers}
+          className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card py-2.5 text-sm hover:bg-bg-hover disabled:opacity-60"
         >
-          <ShoppingBag className="h-4 w-4" /> Find Suppliers
-        </Link>
+          {findingSuppliers ? (
+            <><Loader2 className="h-4 w-4 animate-spin" /> Finding suppliers…</>
+          ) : (
+            <><ShoppingBag className="h-4 w-4" /> Find Suppliers</>
+          )}
+        </button>
         <button
           onClick={() => watchlist.toggle(p.id)}
           className={`flex items-center justify-center gap-2 rounded-lg border py-2.5 text-sm ${

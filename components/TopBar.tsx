@@ -27,13 +27,19 @@ type DraftPreview = {
 const AGENT_LABEL: Record<string, string> = {
   "trend-hunter": "Trend Hunter",
   "buyer-discovery": "Buyer Discovery",
+  "supplier-finder": "Supplier Finder",
   outreach: "Outreach",
+  negotiation: "Negotiation",
+  risk: "Risk Agent",
 };
 
 const AGENT_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   "trend-hunter": Package,
   "buyer-discovery": Users,
+  "supplier-finder": Package,
   outreach: Send,
+  negotiation: Send,
+  risk: Bot,
 };
 
 function relativeTime(iso: string) {

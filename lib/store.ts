@@ -1,71 +1,66 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { Buyer } from "@/lib/buyers";
 import type { Product } from "@/lib/products";
 import type { ScrapeResult } from "@/lib/scrapers";
+import type { Supplier } from "@/lib/suppliers";
+import { FileBackend } from "@/lib/store-backends/file";
+import { KvBackend } from "@/lib/store-backends/kv";
+import type { StoreBackend } from "@/lib/store-backends/types";
 
-// On Vercel the project filesystem is read-only — only /tmp is writable.
-// In dev, we use ./data so persistence survives restarts.
-// Either way, we keep an in-memory mirror so reads never hit disk twice
-// in the same lambda warm window.
-const DATA_DIR = process.env.VERCEL
-  ? "/tmp/ai-commerce-os"
-  : path.join(process.cwd(), "data");
+// ─── Storage keys ──────────────────────────────────────────────────────────
+// Backend-agnostic — the file backend resolves these under DATA_DIR;
+// the KV backend uses them as Redis key names directly.
 
-const PRODUCTS_FILE = path.join(DATA_DIR, "products.json");
-const RUNS_FILE = path.join(DATA_DIR, "agent-runs.json");
-const SIGNALS_FILE = path.join(DATA_DIR, "signals.json");
-const BUYERS_FILE = path.join(DATA_DIR, "discovered-buyers.json");
-const DRAFTS_FILE = path.join(DATA_DIR, "drafts.json");
+const PRODUCTS_FILE = "products.json";
+const RUNS_FILE = "agent-runs.json";
+const SIGNALS_FILE = "signals.json";
+const BUYERS_FILE = "discovered-buyers.json";
+const DRAFTS_FILE = "drafts.json";
+const SUPPLIERS_FILE = "discovered-suppliers.json";
+const CRON_RUNS_FILE = "cron-runs.json";
+const RISK_FLAGS_FILE = "risk-flags.json";
+const PIPELINE_RUNS_FILE = "pipeline-runs.json";
+const QUOTES_FILE = "quotes.json";
+const SPEND_LEDGER_FILE = "spend-ledger.json";
 
-// In-memory mirror — stays warm across requests on the same lambda instance,
-// resets on cold start. Acts as the single source of truth when fs is read-only.
-const memCache = new Map<string, unknown>();
-let fsWritable: boolean | null = null;
+// ─── Backend selection ─────────────────────────────────────────────────────
+// STORE_BACKEND=kv  →  Vercel KV / Upstash (production)
+// STORE_BACKEND=file (default) → JSON files in ./data or /tmp on Vercel
+//
+// Once chosen, the backend is a singleton for the lifetime of the lambda.
+// Switching at runtime is not supported — restart with new env vars.
 
-function checkFsWritable(): boolean {
-  if (fsWritable !== null) return fsWritable;
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    const probe = path.join(DATA_DIR, ".probe");
-    fs.writeFileSync(probe, "ok");
-    fs.unlinkSync(probe);
-    fsWritable = true;
-  } catch {
-    fsWritable = false;
-    if (typeof console !== "undefined") {
-      console.warn("[store] filesystem not writable; using in-memory cache");
-    }
+let _backend: StoreBackend | null = null;
+export function getBackend(): StoreBackend {
+  if (_backend) return _backend;
+  const choice = (process.env.STORE_BACKEND ?? "file").toLowerCase();
+  if (choice === "kv" || choice === "vercel-kv" || choice === "upstash") {
+    _backend = new KvBackend();
+  } else {
+    _backend = new FileBackend();
   }
-  return fsWritable;
+  return _backend;
 }
 
-function readJSON<T>(file: string, fallback: T): T {
-  // Prefer warm cache
-  if (memCache.has(file)) return memCache.get(file) as T;
-  if (!checkFsWritable()) return fallback;
-  try {
-    if (!fs.existsSync(file)) return fallback;
-    const raw = fs.readFileSync(file, "utf-8");
-    const parsed = raw.trim() ? (JSON.parse(raw) as T) : fallback;
-    memCache.set(file, parsed);
-    return parsed;
-  } catch (e) {
-    console.error("[store] read failed:", file, e);
-    return fallback;
-  }
+/**
+ * Override the backend (testing only). Pass null to revert to env-driven choice.
+ */
+export function __setBackendForTesting(b: StoreBackend | null) {
+  _backend = b;
 }
 
-function writeJSON(file: string, data: unknown) {
-  // Always update the warm cache so subsequent reads are correct
-  // even if disk write fails on a read-only filesystem.
-  memCache.set(file, data);
-  if (!checkFsWritable()) return;
-  try {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf-8");
-  } catch (e) {
-    console.error("[store] write failed:", file, e);
-  }
+const all_keys = [
+  PRODUCTS_FILE, RUNS_FILE, SIGNALS_FILE, BUYERS_FILE, DRAFTS_FILE,
+  SUPPLIERS_FILE, CRON_RUNS_FILE, RISK_FLAGS_FILE, PIPELINE_RUNS_FILE,
+  QUOTES_FILE, SPEND_LEDGER_FILE,
+];
+
+/**
+ * Best-effort warmup. Useful at lambda boot for KV backends so cold-start reads
+ * are populated. Safe to call repeatedly and from any path.
+ */
+export async function warmupStore(): Promise<void> {
+  const b = getBackend();
+  if (b.warmup) await b.warmup(all_keys);
 }
 
 export type DiscoveredProduct = Product & {
@@ -78,7 +73,7 @@ export type DiscoveredProduct = Product & {
 
 export type AgentRun = {
   id: string;
-  agent: "trend-hunter" | "buyer-discovery" | "outreach";
+  agent: "trend-hunter" | "buyer-discovery" | "supplier-finder" | "outreach" | "negotiation" | "risk";
   startedAt: string;
   finishedAt: string;
   durationMs: number;
@@ -87,6 +82,7 @@ export type AgentRun = {
   inputProductName?: string;
   productCount: number;
   buyerCount?: number;
+  supplierCount?: number;
   modelUsed: string;
   inputTokens?: number;
   outputTokens?: number;
@@ -106,9 +102,243 @@ export type DiscoveredBuyer = Buyer & {
   forProduct: string; // product name this buyer was discovered for
 };
 
+export type DiscoveredSupplier = Supplier & {
+  source: "agent";
+  agent: string;
+  discoveredAt: string;
+  runId: string;
+  rationale: string;
+  forProduct: string;
+};
+
+/**
+ * Quote (slice 37) — formal pricing artifact tied to a draft.
+ * Generated by the Quote Agent when the operator clicks "Build quote" on a
+ * draft (typically after negotiation has surfaced a workable price/terms).
+ *
+ * Quotes have their own share-able URL via /api/quotes/[id]?t=<token>.
+ */
+export type Quote = {
+  id: string;
+  createdAt: string;
+  draftId: string;       // parent draft
+  pipelineId?: string;   // for cross-linking the run
+  buyerCompany: string;
+  buyerName: string;
+  productName: string;
+  // Line items
+  unitPrice: number;
+  quantity: number;
+  subtotal: number;
+  discountPct: number;
+  discountAmount: number;
+  total: number;
+  currency: string;       // "USD"
+  // Terms
+  paymentTerms: string;   // "Net 30", "Net 45", "50% upfront, 50% on delivery"
+  leadTimeDays: number;
+  validForDays: number;   // days the quote is valid from createdAt
+  shippingTerms: string;  // "FOB Origin", "DDP", etc.
+  notes?: string;
+  // Lifecycle
+  status: "draft" | "sent" | "accepted" | "rejected" | "expired";
+  acceptedAt?: string;
+  rejectedAt?: string;
+  // Tracked share link for the quote view
+  shareToken: string;
+  shareExpiresAt: string;
+  // Audit
+  modelUsed: string;
+  estCostUsd?: number;
+  usedFallback: boolean;
+  generatedRationale?: string;  // AI's reasoning for the price/terms
+};
+
+export type RiskFlag = {
+  id: string;
+  source: "agent" | "static";
+  agent?: string;
+  runId?: string;
+  createdAt: string;
+  severity: "Critical" | "High" | "Medium" | "Low";
+  category: "Supplier Fraud" | "Buyer Fraud" | "Trademark" | "Restricted Product" | "Payment" | "Compliance";
+  title: string;
+  detail: string;
+  recommended: string;
+  subjectType: "supplier" | "buyer" | "product" | "general";
+  subjectId?: string;
+  subjectName?: string;
+};
+
+/**
+ * Persisted pipeline-run snapshot. Used by the public /share/[id] view.
+ * Token is required to access the share URL — IDs alone won't reveal data.
+ */
+export type ShareAccessEntry = {
+  ts: string;          // ISO timestamp of the view
+  ip?: string;         // best-effort, may be empty behind some proxies
+  userAgent?: string;  // truncated to 200 chars
+  referer?: string;    // where the click came from (null if direct)
+  linkToken?: string;  // which named link was used (omitted = legacy/default token)
+  linkLabel?: string;  // captured at view time so a later relabel doesn't rewrite history
+};
+
+/**
+ * Public-viewer scope for a share link.
+ *
+ * - "full":      sees the entire run including OTHER buyers + drafts.
+ *                Legacy default (back-compat) for the unnamed shareToken.
+ *                Use ONLY for internal sharing (you, your team).
+ *
+ * - "recipient": product trends + suppliers + risk are visible, but
+ *                buyerSummaries and draftSummaries are STRIPPED at the API.
+ *                Default for new named per-recipient links — safe to send
+ *                to a prospect without leaking who else you're pitching.
+ *
+ * Undefined on a named link is treated as "recipient" (safe default).
+ * Undefined on the legacy default link is treated as "full" (back-compat).
+ */
+export type ShareScope = "full" | "recipient";
+
+/**
+ * A named, per-recipient share link. Multiple links can co-exist on one run —
+ * each gets its own token, label, expiry, scope, and revoke state.
+ */
+export type ShareLink = {
+  token: string;          // 24-char hex, unguessable
+  label: string;          // human-friendly name shown in the dashboard ("John @ Acme")
+  createdAt: string;
+  expiresAt?: string;     // ISO; if absent, never-expires
+  scope?: ShareScope;     // undefined → "recipient" for safety
+  revoked?: boolean;
+  revokedAt?: string;
+};
+
+export type StoredPipelineRun = {
+  id: string;
+  shareToken: string;
+  /**
+   * ISO timestamp after which the share link should return 410 Gone.
+   * Older runs without this field are treated as never-expiring (back-compat).
+   */
+  shareExpiresAt?: string;
+  /**
+   * If true, the share link returns 410 Gone immediately regardless of expiry.
+   * Set by an explicit POST /api/share/[id]/revoke. Cannot be undone — sender must run a new pipeline.
+   */
+  revoked?: boolean;
+  revokedAt?: string;
+  /**
+   * Append-only log of successful views, capped at 50 most recent.
+   * Lets the sender see if/when the link was opened by the recipient.
+   */
+  accessLog?: ShareAccessEntry[];
+  /**
+   * Named, per-recipient share links. Each has its own token + expiry + revoke state.
+   * The legacy shareToken (above) acts as the unnamed default link for backward compat.
+   */
+  shareLinks?: ShareLink[];
+  triggeredBy: "manual" | "cron";
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  totals: {
+    products: number;
+    buyers: number;
+    suppliers: number;
+    drafts: number;
+    riskFlags: number;
+    totalCost: number;
+  };
+  // Compact summaries — drop sensitive fields like buyer.email
+  productSummaries: Array<{
+    id: string;
+    name: string;
+    category: string;
+    emoji: string;
+    demandScore: number;
+    rationale?: string;
+  }>;
+  buyerSummaries: Array<{
+    id: string;
+    company: string;
+    type: string;
+    location: string;
+    fit: number;
+    intentScore: number;
+    forProduct: string;
+    rationale?: string;
+  }>;
+  supplierSummaries: Array<{
+    id: string;
+    name: string;
+    country: string;
+    type: string;
+    unitPrice: number;
+    moq: number;
+    leadTimeDays: number;
+    riskScore: number;
+    forProduct: string;
+    rationale?: string;
+  }>;
+  draftSummaries: Array<{
+    id: string;
+    buyerCompany: string;
+    buyerName: string;
+    productName: string;
+    emailSubject: string;
+    emailPreview: string;
+  }>;
+  riskFlagSummaries: Array<{
+    severity: string;
+    category: string;
+    title: string;
+    detail: string;
+  }>;
+  steps: Array<{
+    agent: string;
+    status: "success" | "error";
+    durationMs: number;
+    detail: string;
+  }>;
+};
+
+export type CronRun = {
+  id: string;
+  ranAt: string;
+  durationMs: number;
+  status: "success" | "error";
+  pipelineId: string;
+  totals: {
+    products: number;
+    buyers: number;
+    suppliers: number;
+    drafts: number;
+    totalCost: number;
+  };
+  errorMessage?: string;
+};
+
+export type ThreadMessage = {
+  id: string;
+  role: "agent" | "buyer";
+  subject?: string;
+  body: string;
+  at: string;
+  runId?: string;        // for agent-generated counter-offers
+  cost?: number;
+  summary?: string;       // AI rationale (counter-offer)
+  recommendedAction?: string;
+};
+
 export type OutreachDraft = {
   id: string;
   runId: string;
+  /**
+   * Pipeline run that produced this draft. Populated by pipeline.finalize().
+   * Older drafts (pre-slice-28) won't have this — fall back gracefully at send time.
+   */
+  pipelineId?: string;
   createdAt: string;
   buyerId: string;
   buyerCompany: string;
@@ -122,53 +352,447 @@ export type OutreachDraft = {
   modelUsed: string;
   estCostUsd?: number;
   usedFallback: boolean;
+  thread?: ThreadMessage[]; // additional messages after the original draft
+  sentAt?: string;
+  sentToEmail?: string;
+  redirectedFromEmail?: string;
+  messageId?: string;
+  emailProvider?: "postmark" | "resend" | "fallback";
+  sendSimulated?: boolean;
+  sendError?: string;
+  /**
+   * Body actually sent to the email provider — typically the Claude-generated
+   * email.body PLUS an appended "View proposal: <url>" line. Kept separate from
+   * email.body so the review UI keeps showing the original generated content.
+   */
+  sentBody?: string;
+  /**
+   * Token of the recipient-scoped share link auto-minted at send time. Pairs with
+   * the draft's pipelineId — together they identify the link in the parent run's
+   * shareLinks[] array. Null when send-time minting failed (no pipelineId on draft,
+   * or store error).
+   */
+  shareLinkToken?: string;
+  shareLinkUrl?: string;
+  /**
+   * Per-channel send state (slice 36). The email-only fields above stay for
+   * back-compat. Each channel gets its own tracked share link variant so opens
+   * can be attributed to the channel that drove them.
+   */
+  smsSentAt?: string;
+  smsSentTo?: string;
+  smsSimulated?: boolean;
+  smsMessageId?: string;
+  smsShareLinkToken?: string;
+  smsShareLinkUrl?: string;
+  smsSentBody?: string;
+  smsSendError?: string;
+  linkedinSentAt?: string;
+  linkedinSentTo?: string;
+  linkedinSimulated?: boolean;
+  linkedinShareLinkToken?: string;
+  linkedinShareLinkUrl?: string;
+  linkedinSentBody?: string;
+  linkedinSendError?: string;
+  /**
+   * If this draft is a follow-up to a previous one, points back at it. Lets the
+   * UI render the lineage and prevents the follow-up agent from generating
+   * an infinite chain of re-pitches.
+   */
+  parentDraftId?: string;
+  followupNumber?: number;  // 1 = first follow-up, 2 = second, etc.
+  followupReason?: string;  // why this followup was generated ("no opens in 3d")
+  // CRM stage override (slice 35). Without this, stage is derived from lifecycle:
+  //   draft → Prospecting; sent → Contacted; buyer-replied → Negotiation; rejected → Closed Lost
+  dealStage?:
+    | "Prospecting"
+    | "Contacted"
+    | "Negotiation"
+    | "Quotation"
+    | "Closed Won"
+    | "Closed Lost";
+  dealValue?: number;       // estimated annual contract value, USD
+  dealUnits?: number;       // estimated initial order size
 };
 
+// ─── Spend ledger (slice: production hardening) ────────────────────────────
+// Tracks per-day Anthropic spend so the circuit breaker can refuse calls
+// when the daily budget is exceeded. One entry per UTC date.
+export type SpendLedgerEntry = {
+  date: string;        // YYYY-MM-DD UTC
+  callCount: number;
+  totalCostUsd: number;
+  byAgent: Record<string, { calls: number; cost: number }>;
+};
+
+// ─── Public store API — all async, backend-agnostic ───────────────────────
+
 export const store = {
-  getProducts(): DiscoveredProduct[] {
-    return readJSON<DiscoveredProduct[]>(PRODUCTS_FILE, []);
+  // Products
+  async getProducts(): Promise<DiscoveredProduct[]> {
+    return getBackend().read<DiscoveredProduct[]>(PRODUCTS_FILE, []);
   },
-  saveProducts(items: DiscoveredProduct[]) {
-    const existing = store.getProducts();
+  async saveProducts(items: DiscoveredProduct[]): Promise<void> {
+    const existing = await store.getProducts();
     const all = [...items, ...existing].slice(0, 200);
-    writeJSON(PRODUCTS_FILE, all);
+    await getBackend().write(PRODUCTS_FILE, all);
   },
-  getRuns(): AgentRun[] {
-    return readJSON<AgentRun[]>(RUNS_FILE, []);
+
+  // Agent runs
+  async getRuns(): Promise<AgentRun[]> {
+    return getBackend().read<AgentRun[]>(RUNS_FILE, []);
   },
-  saveRun(run: AgentRun) {
-    const existing = store.getRuns();
+  async saveRun(run: AgentRun): Promise<void> {
+    const existing = await store.getRuns();
     const all = [run, ...existing].slice(0, 100);
-    writeJSON(RUNS_FILE, all);
+    await getBackend().write(RUNS_FILE, all);
   },
-  getSignals(): ScrapeResult | null {
-    return readJSON<ScrapeResult | null>(SIGNALS_FILE, null);
+
+  // Signals (singleton, latest scrape)
+  async getSignals(): Promise<ScrapeResult | null> {
+    return getBackend().read<ScrapeResult | null>(SIGNALS_FILE, null);
   },
-  saveSignals(result: ScrapeResult) {
-    writeJSON(SIGNALS_FILE, result);
+  async saveSignals(result: ScrapeResult): Promise<void> {
+    await getBackend().write(SIGNALS_FILE, result);
   },
-  getDiscoveredBuyers(): DiscoveredBuyer[] {
-    return readJSON<DiscoveredBuyer[]>(BUYERS_FILE, []);
+
+  // Discovered buyers
+  async getDiscoveredBuyers(): Promise<DiscoveredBuyer[]> {
+    return getBackend().read<DiscoveredBuyer[]>(BUYERS_FILE, []);
   },
-  saveDiscoveredBuyers(items: DiscoveredBuyer[]) {
-    const existing = store.getDiscoveredBuyers();
+  async saveDiscoveredBuyers(items: DiscoveredBuyer[]): Promise<void> {
+    const existing = await store.getDiscoveredBuyers();
     const all = [...items, ...existing].slice(0, 200);
-    writeJSON(BUYERS_FILE, all);
+    await getBackend().write(BUYERS_FILE, all);
   },
-  getDrafts(): OutreachDraft[] {
-    return readJSON<OutreachDraft[]>(DRAFTS_FILE, []);
+
+  // Discovered suppliers
+  async getDiscoveredSuppliers(): Promise<DiscoveredSupplier[]> {
+    return getBackend().read<DiscoveredSupplier[]>(SUPPLIERS_FILE, []);
   },
-  saveDraft(draft: OutreachDraft) {
-    const existing = store.getDrafts();
+  async saveDiscoveredSuppliers(items: DiscoveredSupplier[]): Promise<void> {
+    const existing = await store.getDiscoveredSuppliers();
+    const all = [...items, ...existing].slice(0, 200);
+    await getBackend().write(SUPPLIERS_FILE, all);
+  },
+
+  // Cron runs
+  async getCronRuns(): Promise<CronRun[]> {
+    return getBackend().read<CronRun[]>(CRON_RUNS_FILE, []);
+  },
+  async saveCronRun(run: CronRun): Promise<void> {
+    const existing = await store.getCronRuns();
+    const all = [run, ...existing].slice(0, 50);
+    await getBackend().write(CRON_RUNS_FILE, all);
+  },
+
+  // Risk flags
+  async getRiskFlags(): Promise<RiskFlag[]> {
+    return getBackend().read<RiskFlag[]>(RISK_FLAGS_FILE, []);
+  },
+  async saveRiskFlags(flags: RiskFlag[]): Promise<void> {
+    const existing = await store.getRiskFlags();
+    const all = [...flags, ...existing].slice(0, 200);
+    await getBackend().write(RISK_FLAGS_FILE, all);
+  },
+
+  // Pipeline runs (snapshots for /share/[id])
+  async getPipelineRuns(): Promise<StoredPipelineRun[]> {
+    return getBackend().read<StoredPipelineRun[]>(PIPELINE_RUNS_FILE, []);
+  },
+  async getPipelineRun(id: string): Promise<StoredPipelineRun | null> {
+    const runs = await store.getPipelineRuns();
+    return runs.find((r) => r.id === id) ?? null;
+  },
+  async savePipelineRun(run: StoredPipelineRun): Promise<void> {
+    const existing = await store.getPipelineRuns();
+    const all = [run, ...existing].slice(0, 50);
+    await getBackend().write(PIPELINE_RUNS_FILE, all);
+  },
+  async appendShareAccess(id: string, entry: ShareAccessEntry): Promise<StoredPipelineRun | null> {
+    const runs = await store.getPipelineRuns();
+    const idx = runs.findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    const log = runs[idx].accessLog ?? [];
+    runs[idx].accessLog = [entry, ...log].slice(0, 50);
+    await getBackend().write(PIPELINE_RUNS_FILE, runs);
+    return runs[idx];
+  },
+  async revokeShareToken(id: string): Promise<StoredPipelineRun | null> {
+    const runs = await store.getPipelineRuns();
+    const idx = runs.findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    if (runs[idx].revoked) return runs[idx];
+    runs[idx].revoked = true;
+    runs[idx].revokedAt = new Date().toISOString();
+    await getBackend().write(PIPELINE_RUNS_FILE, runs);
+    return runs[idx];
+  },
+  async addShareLink(
+    id: string,
+    link: ShareLink,
+  ): Promise<{ run: StoredPipelineRun; link: ShareLink } | null> {
+    const runs = await store.getPipelineRuns();
+    const idx = runs.findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    const links = runs[idx].shareLinks ?? [];
+    runs[idx].shareLinks = [link, ...links].slice(0, 25);
+    await getBackend().write(PIPELINE_RUNS_FILE, runs);
+    return { run: runs[idx], link };
+  },
+  async revokeShareLink(id: string, token: string): Promise<StoredPipelineRun | null> {
+    const runs = await store.getPipelineRuns();
+    const idx = runs.findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    const links = runs[idx].shareLinks ?? [];
+    const linkIdx = links.findIndex((l) => l.token === token);
+    if (linkIdx === -1) return null;
+    if (links[linkIdx].revoked) return runs[idx];
+    links[linkIdx].revoked = true;
+    links[linkIdx].revokedAt = new Date().toISOString();
+    runs[idx].shareLinks = links;
+    await getBackend().write(PIPELINE_RUNS_FILE, runs);
+    return runs[idx];
+  },
+  /**
+   * Pure function — synchronous on purpose. Resolves a presented token
+   * against the legacy default OR a named link in the GIVEN run snapshot.
+   * No I/O, callable from anywhere.
+   */
+  resolveShareToken(
+    run: StoredPipelineRun,
+    token: string,
+  ):
+    | {
+        kind: "default";
+        expiresAt?: string;
+        revoked: boolean;
+        revokedAt?: string;
+        label: string;
+        scope: ShareScope;
+      }
+    | { kind: "named"; link: ShareLink; scope: ShareScope }
+    | null {
+    if (!token) return null;
+    if (token === run.shareToken) {
+      return {
+        kind: "default",
+        expiresAt: run.shareExpiresAt,
+        revoked: run.revoked === true,
+        revokedAt: run.revokedAt,
+        label: "Default link",
+        scope: "full",
+      };
+    }
+    const named = run.shareLinks?.find((l) => l.token === token);
+    if (named) {
+      const scope: ShareScope = named.scope ?? "recipient";
+      return { kind: "named", link: named, scope };
+    }
+    return null;
+  },
+
+  // Drafts
+  async getDrafts(): Promise<OutreachDraft[]> {
+    return getBackend().read<OutreachDraft[]>(DRAFTS_FILE, []);
+  },
+  async saveDraft(draft: OutreachDraft): Promise<void> {
+    const existing = await store.getDrafts();
     const all = [draft, ...existing].slice(0, 200);
-    writeJSON(DRAFTS_FILE, all);
+    await getBackend().write(DRAFTS_FILE, all);
   },
-  updateDraftStatus(id: string, status: OutreachDraft["status"]) {
-    const drafts = store.getDrafts();
+  async updateDraftStatus(id: string, status: OutreachDraft["status"]): Promise<OutreachDraft | null> {
+    const drafts = await store.getDrafts();
     const idx = drafts.findIndex((d) => d.id === id);
     if (idx === -1) return null;
     drafts[idx].status = status;
-    writeJSON(DRAFTS_FILE, drafts);
+    await getBackend().write(DRAFTS_FILE, drafts);
     return drafts[idx];
+  },
+  async patchDraft(id: string, patch: Partial<OutreachDraft>): Promise<OutreachDraft | null> {
+    const drafts = await store.getDrafts();
+    const idx = drafts.findIndex((d) => d.id === id);
+    if (idx === -1) return null;
+    drafts[idx] = { ...drafts[idx], ...patch };
+    await getBackend().write(DRAFTS_FILE, drafts);
+    return drafts[idx];
+  },
+  async attachPipelineToDraft(draftId: string, pipelineId: string): Promise<OutreachDraft | null> {
+    const drafts = await store.getDrafts();
+    const idx = drafts.findIndex((d) => d.id === draftId);
+    if (idx === -1) return null;
+    if (drafts[idx].pipelineId === pipelineId) return drafts[idx];
+    drafts[idx].pipelineId = pipelineId;
+    await getBackend().write(DRAFTS_FILE, drafts);
+    return drafts[idx];
+  },
+  async appendToThread(id: string, message: ThreadMessage): Promise<OutreachDraft | null> {
+    const drafts = await store.getDrafts();
+    const idx = drafts.findIndex((d) => d.id === id);
+    if (idx === -1) return null;
+    const current = drafts[idx].thread ?? [];
+    drafts[idx].thread = [...current, message];
+    await getBackend().write(DRAFTS_FILE, drafts);
+    return drafts[idx];
+  },
+  async getDraft(id: string): Promise<OutreachDraft | null> {
+    const drafts = await store.getDrafts();
+    return drafts.find((d) => d.id === id) ?? null;
+  },
+
+  // Quotes
+  async getQuotes(): Promise<Quote[]> {
+    return getBackend().read<Quote[]>(QUOTES_FILE, []);
+  },
+  async getQuote(id: string): Promise<Quote | null> {
+    const quotes = await store.getQuotes();
+    return quotes.find((q) => q.id === id) ?? null;
+  },
+  async saveQuote(quote: Quote): Promise<void> {
+    const existing = await store.getQuotes();
+    const all = [quote, ...existing].slice(0, 200);
+    await getBackend().write(QUOTES_FILE, all);
+  },
+  async patchQuote(id: string, patch: Partial<Quote>): Promise<Quote | null> {
+    const quotes = await store.getQuotes();
+    const idx = quotes.findIndex((q) => q.id === id);
+    if (idx === -1) return null;
+    quotes[idx] = { ...quotes[idx], ...patch };
+    await getBackend().write(QUOTES_FILE, quotes);
+    return quotes[idx];
+  },
+
+  // ─── Spend ledger (production: daily-budget circuit breaker) ────────────
+  async getSpendLedger(): Promise<SpendLedgerEntry[]> {
+    return getBackend().read<SpendLedgerEntry[]>(SPEND_LEDGER_FILE, []);
+  },
+  /**
+   * Atomic-ish bump: read, increment, write. NOT thread-safe across lambdas
+   * (file backend) — KV backend gets it close. For higher-volume usage with
+   * KV, swap to INCRBY + HINCRBY.
+   */
+  async addSpend(args: { agent: string; cost: number }): Promise<void> {
+    const date = new Date().toISOString().slice(0, 10);
+    const ledger = await store.getSpendLedger();
+    let entry = ledger.find((e) => e.date === date);
+    if (!entry) {
+      entry = { date, callCount: 0, totalCostUsd: 0, byAgent: {} };
+      ledger.unshift(entry);
+    }
+    entry.callCount += 1;
+    entry.totalCostUsd += args.cost;
+    const a = entry.byAgent[args.agent] ?? { calls: 0, cost: 0 };
+    a.calls += 1;
+    a.cost += args.cost;
+    entry.byAgent[args.agent] = a;
+    // Cap at 90 days of history
+    const trimmed = ledger.slice(0, 90);
+    await getBackend().write(SPEND_LEDGER_FILE, trimmed);
+  },
+  async getTodaySpend(): Promise<{ cost: number; calls: number }> {
+    const date = new Date().toISOString().slice(0, 10);
+    const ledger = await store.getSpendLedger();
+    const entry = ledger.find((e) => e.date === date);
+    if (!entry) return { cost: 0, calls: 0 };
+    return { cost: entry.totalCostUsd, calls: entry.callCount };
+  },
+
+  // ─── GDPR / forget-buyer ───────────────────────────────────────────────
+  /**
+   * Purge all data tied to a buyer email. Returns counts of what was removed.
+   * Does NOT touch pipeline-runs (they store anonymized summaries — buyer
+   * email is never persisted there).
+   */
+  async forgetBuyer(email: string): Promise<{
+    drafts: number;
+    threadMessages: number;
+    discoveredBuyers: number;
+    accessLogEntries: number;
+  }> {
+    const target = email.trim().toLowerCase();
+    if (!target) {
+      return { drafts: 0, threadMessages: 0, discoveredBuyers: 0, accessLogEntries: 0 };
+    }
+    let drafts = 0;
+    let threadMessages = 0;
+    let discoveredBuyers = 0;
+    let accessLogEntries = 0;
+
+    // 1. Purge drafts that match (by sentToEmail OR redirectedFromEmail)
+    const allDrafts = await store.getDrafts();
+    const keepDrafts: OutreachDraft[] = [];
+    const removedDraftIds = new Set<string>();
+    for (const d of allDrafts) {
+      const sentTo = (d.sentToEmail ?? "").toLowerCase();
+      const redirectedFrom = (d.redirectedFromEmail ?? "").toLowerCase();
+      if (sentTo === target || redirectedFrom === target) {
+        drafts += 1;
+        threadMessages += (d.thread ?? []).length;
+        removedDraftIds.add(d.id);
+      } else {
+        keepDrafts.push(d);
+      }
+    }
+    if (keepDrafts.length !== allDrafts.length) {
+      await getBackend().write(DRAFTS_FILE, keepDrafts);
+    }
+
+    // 2. Purge discovered buyers with that email
+    const buyers = await store.getDiscoveredBuyers();
+    const keepBuyers = buyers.filter((b) => {
+      const e = (b.email ?? "").toLowerCase();
+      if (e === target) {
+        discoveredBuyers += 1;
+        return false;
+      }
+      return true;
+    });
+    if (keepBuyers.length !== buyers.length) {
+      await getBackend().write(BUYERS_FILE, keepBuyers);
+    }
+
+    // 3. Drop access-log entries with the buyer's IP would over-purge
+    //    (IPs aren't email-bound). Instead, drop access entries tied to a
+    //    revoked/removed draft's shareLinkToken.
+    const removedTokens = new Set<string>();
+    for (const d of allDrafts) {
+      if (!removedDraftIds.has(d.id)) continue;
+      if (d.shareLinkToken) removedTokens.add(d.shareLinkToken);
+      if (d.smsShareLinkToken) removedTokens.add(d.smsShareLinkToken);
+      if (d.linkedinShareLinkToken) removedTokens.add(d.linkedinShareLinkToken);
+    }
+    if (removedTokens.size > 0) {
+      const runs = await store.getPipelineRuns();
+      let touched = false;
+      for (const run of runs) {
+        const log = run.accessLog ?? [];
+        const filtered = log.filter((e) => {
+          if (e.linkToken && removedTokens.has(e.linkToken)) {
+            accessLogEntries += 1;
+            return false;
+          }
+          return true;
+        });
+        if (filtered.length !== log.length) {
+          run.accessLog = filtered;
+          touched = true;
+        }
+        // Also revoke the named links so any cached reference returns 410
+        if (run.shareLinks) {
+          for (const link of run.shareLinks) {
+            if (removedTokens.has(link.token) && !link.revoked) {
+              link.revoked = true;
+              link.revokedAt = new Date().toISOString();
+              touched = true;
+            }
+          }
+        }
+      }
+      if (touched) {
+        await getBackend().write(PIPELINE_RUNS_FILE, runs);
+      }
+    }
+
+    return { drafts, threadMessages, discoveredBuyers, accessLogEntries };
   },
 };

@@ -22,7 +22,7 @@ export async function POST() {
 
   try {
     const result = await scrapeAllSources();
-    store.saveSignals(result);
+    await store.saveSignals(result);
     return NextResponse.json({ result });
   } catch (e) {
     return NextResponse.json(

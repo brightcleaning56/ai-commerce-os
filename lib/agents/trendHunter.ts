@@ -1,4 +1,4 @@
-import { estimateCost, getAnthropicClient, MODEL_CHEAP } from "@/lib/anthropic";
+import { checkSpendBudget, estimateCost, getAnthropicClient, MODEL_CHEAP, recordSpend } from "@/lib/anthropic";
 import { scrapeAllSources, type ScrapeResult } from "@/lib/scrapers";
 import { store, type AgentRun, type DiscoveredProduct } from "@/lib/store";
 
@@ -150,7 +150,7 @@ export async function runTrendHunter(
   if (options.useLiveSignals !== false) {
     try {
       scrape = await scrapeAllSources();
-      store.saveSignals(scrape);
+      await store.saveSignals(scrape);
     } catch (e) {
       console.error("[trendHunter] scrape failed:", e);
     }
@@ -166,6 +166,7 @@ export async function runTrendHunter(
     if (!client) {
       payload = fakeResults(category);
     } else {
+      await checkSpendBudget();
       const res = await client.messages.create({
         model: MODEL_CHEAP,
         max_tokens: 2000,
@@ -176,6 +177,7 @@ export async function runTrendHunter(
 
       inputTokens = res.usage.input_tokens;
       outputTokens = res.usage.output_tokens;
+      await recordSpend({ agent: "trend-hunter", cost: estimateCost(MODEL_CHEAP, inputTokens, outputTokens) });
 
       const toolUse = res.content.find((b) => b.type === "tool_use");
       if (!toolUse || toolUse.type !== "tool_use") {
@@ -225,7 +227,7 @@ export async function runTrendHunter(
   }));
 
   if (status === "success") {
-    store.saveProducts(products);
+    await store.saveProducts(products);
   }
 
   const signalSources: string[] = [];
@@ -250,6 +252,6 @@ export async function runTrendHunter(
     signalsUsed: scrape?.totalSignals ?? 0,
     signalSources,
   };
-  store.saveRun(run);
+  await store.saveRun(run);
   return run;
 }

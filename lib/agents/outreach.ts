@@ -1,4 +1,5 @@
-import { estimateCost, getAnthropicClient, MODEL_SMART } from "@/lib/anthropic";
+import { checkSpendBudget, estimateCost, getAnthropicClient, MODEL_SMART, recordSpend } from "@/lib/anthropic";
+import { getOperator, getOperatorFirstName, getOperatorSignature } from "@/lib/operator";
 import { store, type AgentRun, type OutreachDraft } from "@/lib/store";
 
 const OUTREACH_TOOL = {
@@ -56,6 +57,7 @@ function buildPrompt(input: {
 }) {
   const buyerContext = input.buyerRationale ? `\n- Why they fit: ${input.buyerRationale}` : "";
   const productContext = input.productRationale ? `\n- Why it's trending: ${input.productRationale}` : "";
+  const op = getOperator();
 
   return `You are the Outreach Agent in an AI commerce operating system. Your job: draft a personalized outreach package for a wholesale buyer about a trending product.
 
@@ -75,11 +77,11 @@ function buildPrompt(input: {
 - Use the decision-maker's first name only in greetings (e.g. "Hi Sarah")
 - Reference one specific detail about their store mix or recent expansion
 - The ask should be soft: "open to a 15-min call?" or "want me to send a deck?"
-- Sender name: Marcus from AVYN Wholesale
+- Sender: ${op.name}, ${op.title} at ${op.company}. Sign emails with "${op.name}" on its own line, then "${op.title} · ${op.company}".
 - No buzzwords ("synergy", "circle back", "leverage", "robust"). No exclamation marks.
 - Email: 70-110 words, plain text, 3 short paragraphs max
 - LinkedIn: ≤ 50 words, connection-request style
-- SMS: ≤ 160 chars, casual but professional
+- SMS: ≤ 160 chars, casual but professional. Identify yourself as ${op.name} from ${op.company}.
 
 Call the draft_outreach tool with the three channel drafts.`;
 }
@@ -91,18 +93,60 @@ function fakeDrafts(input: {
   buyerIndustry: string;
 }): OutreachToolPayload {
   const fn = input.buyerName.split(" ")[0];
+  const op = getOperator();
+  const sig = getOperatorSignature();
   return {
     email: {
       subject: `Quick idea for ${input.buyerCompany}`,
-      body: `Hi ${fn},\n\nNoticed ${input.buyerCompany} has been expanding ${input.buyerIndustry.toLowerCase()} SKUs this quarter. We've got the ${input.productName} trending hard right now — strong margin at your typical retail and clean fit for your store mix.\n\nHappy to send the spec sheet or hop on a 15-minute call this week. Whichever's easier?\n\nMarcus\nAVYN Wholesale`,
+      body: `Hi ${fn},\n\nNoticed ${input.buyerCompany} has been expanding ${input.buyerIndustry.toLowerCase()} SKUs this quarter. We've got the ${input.productName} trending hard right now — strong margin at your typical retail and clean fit for your store mix.\n\nHappy to send the spec sheet or hop on a 15-minute call this week. Whichever's easier?\n\n${sig}`,
     },
     linkedin: {
       body: `Hi ${fn} — saw ${input.buyerCompany} expanding into ${input.buyerIndustry.toLowerCase()}. We've got the ${input.productName} pulling +180% trend velocity. Worth a quick chat about exclusive terms?`,
     },
     sms: {
-      body: `Hey ${fn}, Marcus from AVYN Wholesale. ${input.productName} is trending hard this week — would 15 min next Tue work to walk you through pricing?`,
+      body: `Hey ${fn}, ${getOperatorFirstName()} from ${op.company}. ${input.productName} is trending hard this week — would 15 min next Tue work to walk you through pricing?`,
     },
   };
+}
+
+/**
+ * Dedupe window: don't generate a new outreach draft for the same
+ * (buyerCompany, productName) within this many days. Tunable via
+ * OUTREACH_DEDUPE_DAYS env var. Default 14 days.
+ *
+ * Set OUTREACH_DEDUPE_DAYS=0 to disable dedupe entirely (allow re-pitches
+ * any time — but you almost never want this; it spams prospects).
+ */
+function getDedupeWindowDays(): number {
+  const raw = process.env.OUTREACH_DEDUPE_DAYS;
+  if (raw === undefined) return 14;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 14;
+}
+
+/**
+ * Find an existing draft to the same buyer + product within the dedupe window.
+ * Returns the draft if found, null otherwise. Excludes rejected drafts (those
+ * mean the human explicitly killed the pitch — can re-try with a fresh angle).
+ */
+async function findRecentDraft(
+  buyerCompany: string,
+  productName: string,
+  windowDays: number,
+): Promise<OutreachDraft | null> {
+  if (windowDays <= 0) return null;
+  const cutoff = Date.now() - windowDays * 24 * 60 * 60 * 1000;
+  const drafts = await store.getDrafts();
+  const targetCompany = buyerCompany.trim().toLowerCase();
+  const targetProduct = productName.trim().toLowerCase();
+  for (const d of drafts) {
+    if (d.status === "rejected") continue;
+    if (d.buyerCompany.trim().toLowerCase() !== targetCompany) continue;
+    if (d.productName.trim().toLowerCase() !== targetProduct) continue;
+    const ts = new Date(d.createdAt).getTime();
+    if (Number.isFinite(ts) && ts >= cutoff) return d;
+  }
+  return null;
 }
 
 export async function runOutreach(input: {
@@ -118,7 +162,32 @@ export async function runOutreach(input: {
   productCategory: string;
   productNiche: string;
   productRationale?: string;
-}): Promise<{ run: AgentRun; draft: OutreachDraft }> {
+}): Promise<{ run: AgentRun; draft: OutreachDraft; deduped?: boolean }> {
+  // ─── Dedupe check ──────────────────────────────────────────────────────
+  // If we already pitched this buyer/product within the dedupe window, return
+  // the existing draft instead of spending Claude tokens on a duplicate.
+  // Synthetic AgentRun mirrors what the live path returns so callers don't
+  // need to special-case this.
+  const dedupeDays = getDedupeWindowDays();
+  const existing = await findRecentDraft(input.buyerCompany, input.productName, dedupeDays);
+  if (existing) {
+    const synthetic: AgentRun = {
+      id: existing.runId,
+      agent: "outreach",
+      startedAt: existing.createdAt,
+      finishedAt: existing.createdAt,
+      durationMs: 0,
+      status: "success",
+      inputCategory: null,
+      inputProductName: existing.productName,
+      productCount: 0,
+      buyerCount: 0,
+      modelUsed: existing.modelUsed,
+      usedFallback: existing.usedFallback,
+    };
+    return { run: synthetic, draft: existing, deduped: true };
+  }
+
   const startedAt = new Date();
   const runId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
   const draftId = `draft_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -135,6 +204,7 @@ export async function runOutreach(input: {
     if (!client) {
       payload = fakeDrafts(input);
     } else {
+      await checkSpendBudget();
       const res = await client.messages.create({
         model: MODEL_SMART,
         max_tokens: 1500,
@@ -145,6 +215,7 @@ export async function runOutreach(input: {
 
       inputTokens = res.usage.input_tokens;
       outputTokens = res.usage.output_tokens;
+      await recordSpend({ agent: "outreach", cost: estimateCost(MODEL_SMART, inputTokens, outputTokens) });
 
       const toolUse = res.content.find((b) => b.type === "tool_use");
       if (!toolUse || toolUse.type !== "tool_use") {
@@ -180,7 +251,7 @@ export async function runOutreach(input: {
   };
 
   if (status === "success") {
-    store.saveDraft(draft);
+    await store.saveDraft(draft);
   }
 
   const run: AgentRun = {
@@ -201,6 +272,6 @@ export async function runOutreach(input: {
     usedFallback,
     errorMessage,
   };
-  store.saveRun(run);
+  await store.saveRun(run);
   return { run, draft };
 }

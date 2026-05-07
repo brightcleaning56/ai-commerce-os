@@ -13,10 +13,18 @@ import {
   Truck,
   Zap,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Drawer from "@/components/ui/Drawer";
 import { useToast } from "@/components/Toast";
 import { SUPPLIERS, type Supplier } from "@/lib/suppliers";
+
+type DiscoveredSupplier = Supplier & {
+  source?: "agent";
+  agent?: string;
+  discoveredAt?: string;
+  rationale?: string;
+  forProduct?: string;
+};
 
 const SHIP_ICON = { Sea: Anchor, Air: Plane, Express: Zap } as const;
 
@@ -197,7 +205,51 @@ export default function SuppliersPage() {
   const [countries, setCountries] = useState<string[]>([]);
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [maxRisk, setMaxRisk] = useState(100);
+  const [discovered, setDiscovered] = useState<DiscoveredSupplier[]>([]);
+  const [scanning, setScanning] = useState(false);
   const { toast } = useToast();
+
+  async function runFinderForLatest() {
+    setScanning(true);
+    try {
+      // Try to use the most recent discovered product as the seed, falling back to a generic scan
+      const productsRes = await fetch("/api/products");
+      const productsData = await productsRes.json();
+      const seed = productsData.products?.[0];
+      const body = seed
+        ? { productName: seed.name, productCategory: seed.category, productNiche: seed.niche }
+        : { productName: "Trending product", productCategory: "Home & Kitchen", productNiche: "Kitchen Gadgets" };
+
+      const res = await fetch("/api/agents/supplier-finder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Supplier scan failed");
+
+      // Refresh
+      const ref = await fetch("/api/discovered-suppliers").then((r) => r.json());
+      setDiscovered(ref.suppliers ?? []);
+      toast(`Supplier Finder returned ${data.run.supplierCount} suppliers for "${body.productName}"`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Scan failed", "error");
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  useEffect(() => {
+    fetch("/api/discovered-suppliers")
+      .then((r) => r.json())
+      .then((d) => setDiscovered(d.suppliers ?? []))
+      .catch(() => {});
+  }, []);
+
+  const allSuppliers: DiscoveredSupplier[] = useMemo(
+    () => [...discovered, ...SUPPLIERS],
+    [discovered]
+  );
 
   function handleRequestQuote(s: Supplier) {
     toast(`Quote requested from ${s.name} · expect reply in ${s.responseHours}h`);
@@ -210,7 +262,7 @@ export default function SuppliersPage() {
   }
 
   const list = useMemo(() => {
-    return SUPPLIERS.filter((s) => {
+    return allSuppliers.filter((s) => {
       if (query && !s.name.toLowerCase().includes(query.toLowerCase())) return false;
       if (types.length && !types.includes(s.type)) return false;
       if (countries.length && !countries.includes(s.country)) return false;
@@ -218,7 +270,7 @@ export default function SuppliersPage() {
       if (s.riskScore > maxRisk) return false;
       return true;
     }).sort((a, b) => a.riskScore - b.riskScore);
-  }, [query, types, countries, verifiedOnly, maxRisk]);
+  }, [allSuppliers, query, types, countries, verifiedOnly, maxRisk]);
 
   const toggle = (arr: string[], v: string) =>
     arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
@@ -233,15 +285,23 @@ export default function SuppliersPage() {
           <div>
             <h1 className="text-2xl font-bold">Supplier Finder</h1>
             <p className="text-xs text-ink-secondary">
-              {list.length} suppliers · scanning Alibaba, 1688, Made-in-China + 4 directories
+              {list.length} of {allSuppliers.length} suppliers
+              {discovered.length > 0 && (
+                <> · <span className="text-brand-300">{discovered.length} live</span> from agent runs</>
+              )}
+            </p>
+            <p className="text-[11px] text-ink-tertiary">
+              scanning Alibaba, 1688, Made-in-China + 4 directories
             </p>
           </div>
         </div>
         <button
-          onClick={() => toast("Supplier Finder agent queued — scanning Alibaba, 1688, Made-in-China…")}
-          className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
+          onClick={runFinderForLatest}
+          disabled={scanning}
+          className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow disabled:opacity-60"
         >
-          <Sparkles className="h-4 w-4" /> Find New Suppliers
+          <Sparkles className={`h-4 w-4 ${scanning ? "animate-spin" : ""}`} />
+          {scanning ? "Finding suppliers…" : "Find New Suppliers"}
         </button>
       </div>
 
@@ -347,12 +407,20 @@ export default function SuppliersPage() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {list.map((s) => {
             const r = riskTone(s.riskScore);
+            const isLive = (s as DiscoveredSupplier).source === "agent";
             return (
               <button
                 key={s.id}
                 onClick={() => setOpen(s)}
-                className="rounded-xl border border-bg-border bg-bg-card p-4 text-left transition hover:border-brand-500/50 hover:shadow-glow"
+                className={`relative rounded-xl border bg-bg-card p-4 text-left transition hover:border-brand-500/50 hover:shadow-glow ${
+                  isLive ? "border-brand-500/40" : "border-bg-border"
+                }`}
               >
+                {isLive && (
+                  <span className="absolute -top-2 left-3 flex items-center gap-1 rounded-full bg-gradient-brand px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider shadow-glow">
+                    <Sparkles className="h-2.5 w-2.5" /> Live
+                  </span>
+                )}
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
@@ -363,6 +431,9 @@ export default function SuppliersPage() {
                     </div>
                     <div className="text-[11px] text-ink-tertiary">
                       {s.city}, {s.country} · {s.type}
+                      {(s as DiscoveredSupplier).forProduct && (
+                        <> · for <span className="text-brand-300">{(s as DiscoveredSupplier).forProduct}</span></>
+                      )}
                     </div>
                   </div>
                   <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${r.bg} ${r.text}`}>

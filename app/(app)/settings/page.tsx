@@ -1,5 +1,6 @@
 "use client";
-import { Bell, Check, Globe, Shield, Sparkles, User } from "lucide-react";
+import { ArrowRight, Bell, Check, Globe, Shield, ShieldCheck, Sparkles, User } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 const STORAGE_KEY = "aicos:settings:v1";
@@ -219,6 +220,8 @@ export default function SettingsPage() {
         </div>
       </Section>
 
+      <ApprovalPoliciesLink />
+
       <Section title="Security" Icon={Shield}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
@@ -263,6 +266,28 @@ export default function SettingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ApprovalPoliciesLink() {
+  return (
+    <Link
+      href="/approvals"
+      className="block rounded-xl border border-brand-500/30 bg-gradient-to-br from-brand-500/5 to-transparent p-5 transition hover:border-brand-500/50 hover:shadow-glow"
+    >
+      <div className="flex items-center gap-4">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-brand-500/15">
+          <ShieldCheck className="h-5 w-5 text-brand-300" />
+        </div>
+        <div className="flex-1">
+          <div className="text-sm font-semibold">Approval policies</div>
+          <p className="mt-0.5 text-xs text-ink-secondary">
+            Configure auto-approval rules and review high-stakes agent actions in the dedicated queue.
+          </p>
+        </div>
+        <ArrowRight className="h-4 w-4 text-brand-300" />
+      </div>
+    </Link>
   );
 }
 

@@ -1,5 +1,5 @@
 import type { Buyer } from "@/lib/buyers";
-import { estimateCost, getAnthropicClient, MODEL_CHEAP } from "@/lib/anthropic";
+import { checkSpendBudget, estimateCost, getAnthropicClient, MODEL_CHEAP, recordSpend } from "@/lib/anthropic";
 import { store, type AgentRun, type DiscoveredBuyer } from "@/lib/store";
 
 const BUYER_TOOL = {
@@ -149,6 +149,7 @@ export async function runBuyerDiscovery(input: {
     if (!client) {
       payload = fakeBuyers(input.productName, input.productCategory);
     } else {
+      await checkSpendBudget();
       const res = await client.messages.create({
         model: MODEL_CHEAP,
         max_tokens: 2500,
@@ -164,6 +165,7 @@ export async function runBuyerDiscovery(input: {
 
       inputTokens = res.usage.input_tokens;
       outputTokens = res.usage.output_tokens;
+      await recordSpend({ agent: "buyer-discovery", cost: estimateCost(MODEL_CHEAP, inputTokens, outputTokens) });
 
       const toolUse = res.content.find((b) => b.type === "tool_use");
       if (!toolUse || toolUse.type !== "tool_use") {
@@ -212,7 +214,7 @@ export async function runBuyerDiscovery(input: {
   });
 
   if (status === "success") {
-    store.saveDiscoveredBuyers(buyers);
+    await store.saveDiscoveredBuyers(buyers);
   }
 
   const run: AgentRun = {
@@ -233,6 +235,6 @@ export async function runBuyerDiscovery(input: {
     usedFallback,
     errorMessage,
   };
-  store.saveRun(run);
+  await store.saveRun(run);
   return run;
 }

@@ -1,0 +1,54 @@
+# Netlify deployment config for AI Commerce OS.
+#
+# Deploy:
+#   1. netlify init (or connect via the Netlify dashboard)
+#   2. Set env vars (see NETLIFY.md for the full list, including ADMIN_TOKEN, ANTHROPIC_API_KEY, etc.)
+#   3. Push to your connected branch — Netlify auto-builds with @netlify/plugin-nextjs.
+#
+# Cron is implemented as Netlify Scheduled Functions (netlify/functions/cron-*.mjs)
+# that internally call our /api/cron/* endpoints. Schedules below are mirrored from
+# vercel.json (kept as-is for reference but ignored by Netlify).
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+# The official Next.js plugin handles App Router routes, API routes, middleware,
+# and edge functions. Required.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Use esbuild for faster cold starts on Netlify Functions
+[functions]
+  node_bundler = "esbuild"
+
+# ─── Scheduled functions ───────────────────────────────────────────────────
+# Every 6 hours: trigger the autonomous pipeline run
+[functions."cron-pipeline"]
+  schedule = "0 */6 * * *"
+
+# Daily at 09:30 UTC: scan for stale drafts and generate followups
+[functions."cron-followups"]
+  schedule = "30 9 * * *"
+
+# ─── Headers ───────────────────────────────────────────────────────────────
+# Defense-in-depth: deny framing of the operator dashboard, declare strict
+# content security on the marketing landing.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), camera=(), microphone=()"
+
+# Public share + quote viewers can be embedded (e.g., in pitch decks)
+[[headers]]
+  for = "/share/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+
+[[headers]]
+  for = "/quote/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"

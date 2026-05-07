@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock,
   CreditCard,
+  Loader2,
   Lock,
   Mail,
   Package,
@@ -36,6 +37,7 @@ type RiskItem = {
   source: string;
   ago: string;
   recommended: string;
+  isLive?: boolean;
 };
 
 const RISKS: RiskItem[] = [
@@ -148,11 +150,36 @@ const CATEGORIES: Category[] = [
 
 type RiskAction = "applied" | "dismissed" | "snoozed";
 
+type LiveFlag = {
+  id: string;
+  source: "agent";
+  agent?: string;
+  runId?: string;
+  createdAt: string;
+  severity: Severity;
+  category: Category;
+  title: string;
+  detail: string;
+  recommended: string;
+  subjectType?: string;
+  subjectName?: string;
+};
+
+function relAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
+  return `${Math.floor(ms / 86_400_000)}d ago`;
+}
+
 export default function RiskPage() {
   const [filterSev, setFilterSev] = useState<Severity | "All">("All");
   const [filterCat, setFilterCat] = useState<Category | "All">("All");
   const [actions, setActions] = useState<Record<string, RiskAction>>({});
   const [showResolved, setShowResolved] = useState(false);
+  const [liveFlags, setLiveFlags] = useState<LiveFlag[]>([]);
+  const [scanning, setScanning] = useState(false);
   const { toast } = useToast();
 
   // Hydrate actions from localStorage
@@ -162,6 +189,30 @@ export default function RiskPage() {
       if (raw) setActions(JSON.parse(raw));
     } catch {}
   }, []);
+
+  // Fetch live agent-flagged risks
+  useEffect(() => {
+    fetch("/api/risk-flags")
+      .then((r) => r.json())
+      .then((d) => setLiveFlags(d.flags ?? []))
+      .catch(() => {});
+  }, []);
+
+  async function runRiskScan() {
+    setScanning(true);
+    try {
+      const res = await fetch("/api/agents/risk", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Risk scan failed");
+      const refresh = await fetch("/api/risk-flags").then((r) => r.json());
+      setLiveFlags(refresh.flags ?? []);
+      toast(`Risk Agent surfaced ${data.run.productCount === 0 ? "" : ""}new flags · evaluated ${data.run.supplierCount ?? 0} suppliers + ${data.run.buyerCount ?? 0} buyers`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Risk scan failed", "error");
+    } finally {
+      setScanning(false);
+    }
+  }
 
   function persist(next: Record<string, RiskAction>) {
     setActions(next);
@@ -183,7 +234,21 @@ export default function RiskPage() {
     toast(`Snoozed 7 days · "${title}"`);
   }
 
-  const filtered = RISKS.filter(
+  // Merge: live agent flags first (most recent), then static
+  const liveAsRisks: RiskItem[] = liveFlags.map((f) => ({
+    id: f.id,
+    title: f.title,
+    detail: f.detail,
+    category: f.category,
+    severity: f.severity,
+    source: "Risk Agent",
+    ago: relAgo(f.createdAt),
+    recommended: f.recommended,
+    isLive: true,
+  }));
+  const allRisks: RiskItem[] = [...liveAsRisks, ...RISKS];
+
+  const filtered = allRisks.filter(
     (r) =>
       (filterSev === "All" || r.severity === filterSev) &&
       (filterCat === "All" || r.category === filterCat) &&
@@ -191,10 +256,10 @@ export default function RiskPage() {
   );
 
   const counts = {
-    Critical: RISKS.filter((r) => r.severity === "Critical").length,
-    High: RISKS.filter((r) => r.severity === "High").length,
-    Medium: RISKS.filter((r) => r.severity === "Medium").length,
-    Low: RISKS.filter((r) => r.severity === "Low").length,
+    Critical: allRisks.filter((r) => r.severity === "Critical").length,
+    High: allRisks.filter((r) => r.severity === "High").length,
+    Medium: allRisks.filter((r) => r.severity === "Medium").length,
+    Low: allRisks.filter((r) => r.severity === "Low").length,
   };
 
   return (
@@ -207,7 +272,11 @@ export default function RiskPage() {
           <div>
             <h1 className="text-2xl font-bold">Risk Center</h1>
             <p className="text-xs text-ink-secondary">
-              {RISKS.length} open issues across {CATEGORIES.length} categories · scanned 24/7
+              {allRisks.length} open issues across {CATEGORIES.length} categories
+              {liveFlags.length > 0 && (
+                <> · <span className="text-brand-300">{liveFlags.length} live</span> from Risk Agent</>
+              )}
+              {" · scanned 24/7"}
             </p>
           </div>
         </div>
@@ -221,6 +290,17 @@ export default function RiskPage() {
             />
             Show resolved ({Object.keys(actions).length})
           </label>
+          <button
+            onClick={runRiskScan}
+            disabled={scanning}
+            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow disabled:opacity-60"
+          >
+            {scanning ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> Scanning…</>
+            ) : (
+              <><Sparkles className="h-4 w-4" /> Run Risk Scan</>
+            )}
+          </button>
           <button className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover">
             <Lock className="h-4 w-4" /> Compliance Settings
           </button>
@@ -300,8 +380,15 @@ export default function RiskPage() {
               return (
                 <div
                   key={r.id}
-                  className="rounded-xl border border-bg-border bg-bg-card p-4"
+                  className={`relative rounded-xl border bg-bg-card p-4 ${
+                    r.isLive ? "border-brand-500/40" : "border-bg-border"
+                  }`}
                 >
+                  {r.isLive && (
+                    <span className="absolute -top-2 left-3 flex items-center gap-1 rounded-full bg-gradient-brand px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider shadow-glow">
+                      <Sparkles className="h-2.5 w-2.5" /> Live
+                    </span>
+                  )}
                   <div className="flex items-start gap-3">
                     <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${tone.bg}`}>
                       <Icon className={`h-4 w-4 ${tone.text}`} />

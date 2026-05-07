@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ drafts: store.getDrafts() });
+  return NextResponse.json({ drafts: await store.getDrafts() });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -18,7 +18,7 @@ export async function PATCH(req: NextRequest) {
   if (!body.id || !body.status) {
     return NextResponse.json({ error: "Missing id or status" }, { status: 400 });
   }
-  const updated = store.updateDraftStatus(body.id, body.status);
+  const updated = await store.updateDraftStatus(body.id, body.status);
   if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ draft: updated });
 }
