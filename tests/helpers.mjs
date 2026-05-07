@@ -28,13 +28,28 @@ function loadAdminToken() {
 }
 export const ADMIN_TOKEN = loadAdminToken();
 
+// Paths the middleware leaves open — must match middleware.ts. Tests targeting
+// these paths don't get the admin bearer header attached (matches real-world use).
+const PUBLIC_PREFIXES = [
+  "/api/share/",
+  "/api/quotes/",
+  "/api/webhooks/",
+  "/api/cron/",
+  "/api/operator",
+  "/api/auth/",
+];
+function isPublicPath(p) {
+  return PUBLIC_PREFIXES.some((prefix) => p.startsWith(prefix));
+}
+
 export async function api(path, init = {}) {
   const headers = {
     "Content-Type": "application/json",
     ...(init.headers || {}),
   };
-  // Auto-attach admin auth for admin endpoints when token is available
-  if (ADMIN_TOKEN && (path.startsWith("/api/admin/") || path === "/api/admin/health")) {
+  // Auto-attach admin auth for ALL gated endpoints when token is available.
+  // Public paths are explicitly excluded so 401-on-public tests still work.
+  if (ADMIN_TOKEN && !isPublicPath(path) && !headers["Authorization"]) {
     headers["Authorization"] = `Bearer ${ADMIN_TOKEN}`;
   }
   const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });

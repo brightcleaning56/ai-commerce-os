@@ -35,6 +35,8 @@ import { NextRequest, NextResponse } from "next/server";
 const PUBLIC_PATHS = [
   "/welcome",
   "/signin",
+  "/api/operator",          // public profile (name+email — same info we sign emails with)
+  "/api/auth/signin",       // sign-in form submits here
 ];
 const PUBLIC_PREFIXES = [
   "/share/",
