@@ -1,12 +1,10 @@
-/**
- * Netlify Scheduled Function: followup cron.
- *
- * Schedule defined in netlify.toml: `30 9 * * *` (daily at 09:30 UTC).
- *
- * Scans for sent drafts that have gone silent past the configured window
- * and generates re-pitch drafts in the approval queue. See
- * /api/cron/followups for the actual logic.
- */
+// Netlify Scheduled Function: followup cron.
+//
+// Schedule defined in netlify.toml — runs daily at 09:30 UTC.
+//
+// Scans for sent drafts that have gone silent past the configured window
+// and generates re-pitch drafts in the approval queue. See
+// /api/cron/followups for the actual logic.
 
 export default async () => {
   const baseUrl =

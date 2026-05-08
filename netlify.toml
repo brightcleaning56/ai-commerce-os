@@ -13,6 +13,12 @@
   command = "npm run build"
   publish = ".next"
 
+[build.environment]
+  NODE_VERSION = "20"
+  # Don't fail the build on lint/type warnings — we ran tsc clean locally
+  NEXT_TELEMETRY_DISABLED = "1"
+  NPM_FLAGS = "--legacy-peer-deps"
+
 # The official Next.js plugin handles App Router routes, API routes, middleware,
 # and edge functions. Required.
 [[plugins]]

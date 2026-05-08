@@ -1,16 +1,15 @@
-/**
- * Netlify Scheduled Function: pipeline cron.
- *
- * Schedule defined in netlify.toml: `0 */6 * * *` (every 6 hours).
- *
- * This function is a thin wrapper — it calls the existing /api/cron/pipeline
- * route on the same site, passing the CRON_SECRET as Bearer auth. Keeps the
- * pipeline code path unified across deploy targets (Vercel cron also calls
- * /api/cron/pipeline directly).
- *
- * Errors are logged to Netlify Function logs (visible in the dashboard) but
- * never throw — a failed cron tick should NOT block the next scheduled run.
- */
+// Netlify Scheduled Function: pipeline cron.
+//
+// Schedule defined in netlify.toml — runs every 6 hours.
+// (Cron expression in the toml is the standard 5-field form for "0 minute, every 6 hours".)
+//
+// This function is a thin wrapper — it calls the existing /api/cron/pipeline
+// route on the same site, passing the CRON_SECRET as Bearer auth. Keeps the
+// pipeline code path unified across deploy targets (Vercel cron also calls
+// /api/cron/pipeline directly).
+//
+// Errors are logged to Netlify Function logs (visible in the dashboard) but
+// never throw — a failed cron tick should NOT block the next scheduled run.
 
 export default async () => {
   const baseUrl =
