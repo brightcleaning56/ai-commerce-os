@@ -160,6 +160,25 @@ export default function AutomationsPage() {
         </button>
       </div>
 
+      {/* Preview banner */}
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+        <div className="flex items-start gap-3 text-[12px]">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <Sparkles className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1">
+            <span className="font-semibold text-accent-amber">Rule builder preview</span>
+            <span className="text-ink-secondary">
+              {" "}
+              — Toggle and shape rules locally; the runtime trigger engine ships in a follow-up.
+              The autonomous pipeline already runs every 6 hours via cron — see{" "}
+              <a href="/pipeline" className="text-brand-300 hover:text-brand-200 underline">Pipeline</a>{" "}
+              for that real automation.
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Active" value={enabled} hint="enabled rules" />
         <Stat label="Runs 7d" value={totalRuns} hint={`avg ${Math.round(totalRuns / 7)}/day`} />

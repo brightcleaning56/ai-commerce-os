@@ -249,6 +249,26 @@ export default function AgentStorePage() {
         </button>
       </div>
 
+      {/* Preview banner — agent installation flow not yet live */}
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+        <div className="flex items-start gap-3 text-[12px]">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <Award className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1">
+            <span className="font-semibold text-accent-amber">Catalog preview</span>
+            <span className="text-ink-secondary">
+              {" "}
+              — Browse-and-install for third-party agents is in active build. Install actions below
+              persist locally so you can shape your shortlist; the runtime install pipeline lands
+              with the next release. The 9 first-party agents that ship with AVYN are live now —
+              see them on{" "}
+              <a href="/agents" className="text-brand-300 hover:text-brand-200 underline">/agents</a>.
+            </span>
+          </div>
+        </div>
+      </div>
+
       {!showInstalled && cat === "All" && !query && (
         <div className="rounded-xl border border-brand-500/30 bg-gradient-to-br from-brand-500/10 to-transparent p-5">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand-200">

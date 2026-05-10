@@ -62,6 +62,27 @@ export default function LearningPage() {
         </div>
       </div>
 
+      {/* Preview banner */}
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+        <div className="flex items-start gap-3 text-[12px]">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <Brain className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1">
+            <span className="font-semibold text-accent-amber">Showcase</span>
+            <span className="text-ink-secondary">
+              {" "}
+              — Prompt versioning + auto-tuning is in the roadmap. Today the agents use fixed
+              system prompts (see <code className="rounded bg-bg-hover px-1 text-[10px]">lib/agents/*.ts</code>).
+              Real per-agent token spend and success rates already land on{" "}
+              <a href="/agents" className="text-brand-300 hover:text-brand-200 underline">/agents</a>{" "}
+              and{" "}
+              <a href="/reports" className="text-brand-300 hover:text-brand-200 underline">/reports</a>.
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Prompt versions tested" v="14" />
         <Stat label="Active experiments" v="4" />
