@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useCommandPalette } from "./CommandPalette";
 
+type OperatorProfile = { name: string; title: string; initials: string };
+
 type AgentRunPreview = {
   id: string;
   agent: "trend-hunter" | "buyer-discovery" | "outreach";
@@ -57,6 +59,7 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const [mailOpen, setMailOpen] = useState(false);
   const [runs, setRuns] = useState<AgentRunPreview[]>([]);
   const [drafts, setDrafts] = useState<DraftPreview[]>([]);
+  const [operator, setOperator] = useState<OperatorProfile>({ name: "", title: "", initials: "" });
   const bellRef = useRef<HTMLDivElement>(null);
   const mailRef = useRef<HTMLDivElement>(null);
 
@@ -64,6 +67,58 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
     if (typeof navigator !== "undefined") {
       setIsMac(/Mac|iPod|iPhone|iPad/.test(navigator.platform));
     }
+  }, []);
+
+  // Identity is API-authoritative. Server-side `getOperator()` (lib/operator.ts)
+  // is the single source of truth — driven by OPERATOR_* env vars or built-in
+  // defaults. localStorage is treated as a *write target* only: after the API
+  // resolves we sync localStorage to match, so the Settings page never shows
+  // a stale name like "John Smith" left over from the original demo seed.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/operator", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((op) => {
+        if (cancelled || !op?.name) return;
+        const next = {
+          name: op.name as string,
+          title: (op.title as string) || "Owner",
+          initials:
+            (op.initials as string) ||
+            (op.name as string).split(/\s+/).slice(0, 2).map((w: string) => w[0]?.toUpperCase() ?? "").join("") ||
+            "?",
+        };
+        setOperator(next);
+
+        // Sync localStorage so Settings page shows the same identity. Only
+        // write keys we own; preserve other settings the user may have set.
+        try {
+          const raw = localStorage.getItem("aicos:settings:v1");
+          const prev = raw ? JSON.parse(raw) : {};
+          const merged = { ...prev, name: op.name, email: op.email ?? prev.email };
+          localStorage.setItem("aicos:settings:v1", JSON.stringify(merged));
+        } catch {}
+      })
+      .catch(() => {
+        // Last-resort fallback to localStorage if the API genuinely fails (offline, etc.)
+        try {
+          const raw = localStorage.getItem("aicos:settings:v1");
+          if (raw) {
+            const s = JSON.parse(raw);
+            if (s.name && typeof s.name === "string" && s.name !== "John Smith") {
+              setOperator({
+                name: s.name,
+                title: "Owner",
+                initials:
+                  s.name.split(/\s+/).slice(0, 2).map((w: string) => w[0]?.toUpperCase() ?? "").join("") || "?",
+              });
+            }
+          }
+        } catch {}
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Fetch latest runs + drafts when a panel opens
@@ -318,11 +373,11 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
         className="flex shrink-0 items-center gap-2 rounded-lg border border-bg-border bg-bg-card pl-1 pr-2 py-1 hover:bg-bg-hover sm:pr-3"
       >
         <div className="grid h-8 w-8 place-items-center rounded-md bg-gradient-brand text-xs font-bold">
-          JS
+          {operator.initials || "?"}
         </div>
         <div className="hidden text-right sm:block">
-          <div className="text-xs font-medium leading-tight">John Smith</div>
-          <div className="text-[10px] text-brand-300">Super Admin</div>
+          <div className="text-xs font-medium leading-tight">{operator.name || "Loading…"}</div>
+          <div className="text-[10px] text-brand-300">{operator.title || "Owner"}</div>
         </div>
         <ChevronDown className="hidden h-3.5 w-3.5 text-ink-tertiary sm:block" />
       </Link>
