@@ -38,88 +38,102 @@ type RiskItem = {
   ago: string;
   recommended: string;
   isLive?: boolean;
+  isSample?: boolean;
 };
 
+// Sample risk patterns — shape of flags the Risk Agent can produce. These are
+// catalog entries, not real findings. Real flags arrive via /api/risk-flags
+// after "Run Risk Scan" hits Anthropic and writes to the store. Source labels
+// are intentionally generic ("Pattern catalog") so they're never confused with
+// real Stripe/Postmark/Risk-Agent output.
 const RISKS: RiskItem[] = [
   {
     id: "r1",
-    title: "Shenzhen Unitop Tech flagged as high-risk supplier",
-    detail: "Negative review burst (-32 reviews in 14d) and recently re-registered domain.",
+    title: "Supplier with recent negative review burst + re-registered domain",
+    detail: "Pattern: -30 or more reviews in 14d combined with domain age < 180d. Common scam-supplier signal.",
     category: "Supplier Fraud",
     severity: "Critical",
-    source: "Risk Agent",
-    ago: "2m ago",
+    source: "Pattern catalog",
+    ago: "Sample",
     recommended: "Pause outreach. Require sample order with escrow before any volume order.",
+    isSample: true,
   },
   {
     id: "r2",
-    title: '"FlexiGlow" may infringe existing trademark',
-    detail: 'USPTO filing 97/422,118 for "FlexiGlow Pro" registered to a different LLC.',
+    title: "Product name may infringe existing trademark",
+    detail: "Pattern: chosen SKU brand matches a registered USPTO mark held by a different LLC.",
     category: "Trademark",
     severity: "High",
-    source: "Risk Agent",
-    ago: "1h ago",
+    source: "Pattern catalog",
+    ago: "Sample",
     recommended: "Rebrand the SKU before publishing or pivot to alternate brand variants.",
+    isSample: true,
   },
   {
     id: "r3",
-    title: "Buyer 'BrightHome Living' has chargeback history",
-    detail: "Open Stripe disputes in last 90 days; D&B credit risk score 71/100.",
+    title: "Buyer has chargeback history",
+    detail: "Pattern: open Stripe disputes in last 90 days and/or D&B credit risk score above 60.",
     category: "Buyer Fraud",
     severity: "High",
-    source: "Risk Agent",
-    ago: "4h ago",
+    source: "Pattern catalog",
+    ago: "Sample",
     recommended: "Require deposit + ACH only. No net terms until 2 paid invoices clear.",
+    isSample: true,
   },
   {
     id: "r4",
-    title: "Massage Gun listing borders on FDA medical device claim",
-    detail: 'Description includes "treats chronic pain" — flagged as unapproved claim.',
+    title: "Listing borders on FDA medical device claim",
+    detail: "Pattern: product description includes treatment/diagnosis language (e.g. \"treats chronic pain\") — unapproved claim.",
     category: "Compliance",
     severity: "Medium",
-    source: "Risk Agent",
-    ago: "Yesterday",
+    source: "Pattern catalog",
+    ago: "Sample",
     recommended: "Soften copy to wellness/recovery language. Remove medical terminology.",
+    isSample: true,
   },
   {
     id: "r5",
-    title: "Restricted product: Magnetic Eyelashes in EU markets",
-    detail: "Some EU member states require notification under cosmetic regulation EC 1223/2009.",
+    title: "Restricted product in EU markets",
+    detail: "Pattern: cosmetic SKUs require CPNP notification (EC 1223/2009) before EU outreach.",
     category: "Restricted Product",
     severity: "Medium",
-    source: "Risk Agent",
-    ago: "Yesterday",
+    source: "Pattern catalog",
+    ago: "Sample",
     recommended: "Geo-block EU outreach until CPNP notification is filed.",
+    isSample: true,
   },
   {
     id: "r6",
-    title: "Stripe payout pending review on $24,500 wire",
-    detail: "Large first-time payout from new buyer triggered hold.",
+    title: "Large first-time payout flagged for review",
+    detail: "Pattern: Stripe payout above $20K from a new buyer triggers manual review hold.",
     category: "Payment",
     severity: "High",
-    source: "Stripe",
-    ago: "5h ago",
+    source: "Pattern catalog",
+    ago: "Sample",
     recommended: "Submit invoice + PO to Stripe support to clear hold within 48h.",
+    isSample: true,
   },
   {
     id: "r7",
-    title: "Outreach reply rate spike on 'BeautyTrend' contact list",
-    detail: "Replies marked 'spam' jumped 4.8% — domain reputation at risk.",
+    title: "Outreach domain reputation slipping",
+    detail: "Pattern: spam-mark rate jumps above 3% on a contact segment — postmark/sender reputation at risk.",
     category: "Compliance",
     severity: "Medium",
-    source: "Postmark",
-    ago: "2 days ago",
+    source: "Pattern catalog",
+    ago: "Sample",
     recommended: "Pause that segment. Re-warm domain with a smaller verified list.",
+    isSample: true,
   },
   {
     id: "r8",
-    title: "Supplier 'Dropship USA Net' unverified for 21 days",
-    detail: "Verification documents requested but not returned. Capacity claims unconfirmed.",
+    title: "Supplier unverified beyond grace period",
+    detail: "Pattern: verification documents requested but not returned after 21+ days. Capacity claims unconfirmed.",
     category: "Supplier Fraud",
     severity: "Low",
-    source: "Risk Agent",
-    ago: "3 days ago",
+    source: "Pattern catalog",
+    ago: "Sample",
     recommended: "Move to backup supplier list until verification arrives.",
+    isSample: true,
   },
 ];
 
@@ -272,11 +286,11 @@ export default function RiskPage() {
           <div>
             <h1 className="text-2xl font-bold">Risk Center</h1>
             <p className="text-xs text-ink-secondary">
-              {allRisks.length} open issues across {CATEGORIES.length} categories
-              {liveFlags.length > 0 && (
-                <> · <span className="text-brand-300">{liveFlags.length} live</span> from Risk Agent</>
+              {liveFlags.length > 0 ? (
+                <><span className="text-brand-300">{liveFlags.length} live flag{liveFlags.length === 1 ? "" : "s"}</span> from Risk Agent · {RISKS.length} sample patterns below · trigger a scan to surface new flags</>
+              ) : (
+                <>{RISKS.length} sample patterns shown · trigger a scan to surface real flags</>
               )}
-              {" · scanned 24/7"}
             </p>
           </div>
         </div>
@@ -381,12 +395,17 @@ export default function RiskPage() {
                 <div
                   key={r.id}
                   className={`relative rounded-xl border bg-bg-card p-4 ${
-                    r.isLive ? "border-brand-500/40" : "border-bg-border"
+                    r.isLive ? "border-brand-500/40" : r.isSample ? "border-bg-border opacity-90" : "border-bg-border"
                   }`}
                 >
                   {r.isLive && (
                     <span className="absolute -top-2 left-3 flex items-center gap-1 rounded-full bg-gradient-brand px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider shadow-glow">
                       <Sparkles className="h-2.5 w-2.5" /> Live
+                    </span>
+                  )}
+                  {r.isSample && (
+                    <span className="absolute -top-2 left-3 rounded-full bg-bg-hover px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-ink-tertiary">
+                      Sample
                     </span>
                   )}
                   <div className="flex items-start gap-3">
