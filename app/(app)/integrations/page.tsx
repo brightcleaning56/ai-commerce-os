@@ -1,6 +1,6 @@
 "use client";
-import { CheckCircle2, Plug, Plus, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Plug, Plus, Search, Sparkles } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { useLocalSet } from "@/lib/useLocalSet";
 
@@ -10,40 +10,45 @@ type Integration = {
   emoji: string;
   category: "Email" | "CRM" | "Comms" | "Commerce" | "Finance" | "Productivity";
   description: string;
-  connected: boolean;
+  /** True only for integrations actually wired in this codebase. */
+  isLive?: boolean;
   popular?: boolean;
 };
 
+// Catalog of integrations. Only `isLive: true` entries are actually wired
+// (Stripe Connect for payouts, Postmark/Resend transport for outbound email).
+// Everything else is roadmap — the "Connect" toggle below saves to
+// localStorage for visual preview only and does not perform OAuth.
 const INTEGRATIONS: Integration[] = [
-  { id: "gmail", name: "Gmail", emoji: "📧", category: "Email", description: "Send + sync outbound from your Gmail account", connected: true, popular: true },
-  { id: "outlook", name: "Microsoft 365 Outlook", emoji: "🅰️", category: "Email", description: "Send + sync outbound from Microsoft 365", connected: true, popular: true },
-  { id: "smtp", name: "Custom SMTP / Postmark", emoji: "✉️", category: "Email", description: "Bring your own outbound infra", connected: false },
+  { id: "smtp", name: "Postmark / Resend (outbound)", emoji: "✉️", category: "Email", description: "Lifecycle email transport — already wired via lib/email.ts (Postmark, Resend, or simulated fallback).", isLive: true, popular: true },
+  { id: "gmail", name: "Gmail", emoji: "📧", category: "Email", description: "Send + sync outbound from your Gmail account", popular: true },
+  { id: "outlook", name: "Microsoft 365 Outlook", emoji: "🅰️", category: "Email", description: "Send + sync outbound from Microsoft 365", popular: true },
 
-  { id: "hubspot", name: "HubSpot", emoji: "🟧", category: "CRM", description: "2-way sync with HubSpot deals + contacts", connected: true, popular: true },
-  { id: "salesforce", name: "Salesforce", emoji: "☁️", category: "CRM", description: "Bidirectional sync with Salesforce CRM", connected: false, popular: true },
-  { id: "pipedrive", name: "Pipedrive", emoji: "🐱", category: "CRM", description: "Sync deals + activities", connected: false },
-  { id: "close", name: "Close", emoji: "🔚", category: "CRM", description: "Sync to Close CRM", connected: false },
+  { id: "hubspot", name: "HubSpot", emoji: "🟧", category: "CRM", description: "2-way sync with HubSpot deals + contacts", popular: true },
+  { id: "salesforce", name: "Salesforce", emoji: "☁️", category: "CRM", description: "Bidirectional sync with Salesforce CRM", popular: true },
+  { id: "pipedrive", name: "Pipedrive", emoji: "🐱", category: "CRM", description: "Sync deals + activities" },
+  { id: "close", name: "Close", emoji: "🔚", category: "CRM", description: "Sync to Close CRM" },
 
-  { id: "slack", name: "Slack", emoji: "💼", category: "Comms", description: "Notifications + approval queues in Slack", connected: true, popular: true },
-  { id: "teams", name: "Microsoft Teams", emoji: "🟦", category: "Comms", description: "Notifications + commands", connected: false },
-  { id: "twilio", name: "Twilio (SMS + Voice)", emoji: "💬", category: "Comms", description: "Outbound SMS + voice via Twilio", connected: true },
-  { id: "calendly", name: "Calendly", emoji: "📅", category: "Comms", description: "Auto-book meetings on reply", connected: true },
-  { id: "cal", name: "Cal.com", emoji: "🗓️", category: "Comms", description: "Open-source meeting scheduling", connected: false },
+  { id: "slack", name: "Slack", emoji: "💼", category: "Comms", description: "Notifications + approval queues in Slack", popular: true },
+  { id: "teams", name: "Microsoft Teams", emoji: "🟦", category: "Comms", description: "Notifications + commands" },
+  { id: "twilio", name: "Twilio (SMS + Voice)", emoji: "💬", category: "Comms", description: "Outbound SMS + voice via Twilio" },
+  { id: "calendly", name: "Calendly", emoji: "📅", category: "Comms", description: "Auto-book meetings on reply" },
+  { id: "cal", name: "Cal.com", emoji: "🗓️", category: "Comms", description: "Open-source meeting scheduling" },
 
-  { id: "shopify", name: "Shopify", emoji: "🛍️", category: "Commerce", description: "Pull product catalog + push orders", connected: true, popular: true },
-  { id: "woo", name: "WooCommerce", emoji: "🛒", category: "Commerce", description: "WooCommerce store sync", connected: false },
-  { id: "amazon", name: "Amazon Seller Central", emoji: "📦", category: "Commerce", description: "FBA listings + order pull", connected: false },
-  { id: "tiktok", name: "TikTok Shop", emoji: "🎵", category: "Commerce", description: "Catalog + order sync", connected: false },
+  { id: "shopify", name: "Shopify", emoji: "🛍️", category: "Commerce", description: "Pull product catalog + push orders", popular: true },
+  { id: "woo", name: "WooCommerce", emoji: "🛒", category: "Commerce", description: "WooCommerce store sync" },
+  { id: "amazon", name: "Amazon Seller Central", emoji: "📦", category: "Commerce", description: "FBA listings + order pull" },
+  { id: "tiktok", name: "TikTok Shop", emoji: "🎵", category: "Commerce", description: "Catalog + order sync" },
 
-  { id: "stripe", name: "Stripe", emoji: "💳", category: "Finance", description: "Charge + payout · escrow released to bank", connected: true, popular: true },
-  { id: "qb", name: "QuickBooks", emoji: "📚", category: "Finance", description: "Auto-create invoices on close", connected: true },
-  { id: "xero", name: "Xero", emoji: "🟢", category: "Finance", description: "Auto-create invoices on close", connected: false },
-  { id: "plaid", name: "Plaid", emoji: "🏦", category: "Finance", description: "Bank verification for buyers", connected: false },
+  { id: "stripe", name: "Stripe Connect", emoji: "💳", category: "Finance", description: "Destination charges to supplier accounts · escrow + auto-release — already wired via /api/transactions.", isLive: true, popular: true },
+  { id: "qb", name: "QuickBooks", emoji: "📚", category: "Finance", description: "Auto-create invoices on close" },
+  { id: "xero", name: "Xero", emoji: "🟢", category: "Finance", description: "Auto-create invoices on close" },
+  { id: "plaid", name: "Plaid", emoji: "🏦", category: "Finance", description: "Bank verification for buyers" },
 
-  { id: "zapier", name: "Zapier", emoji: "⚡", category: "Productivity", description: "Connect to 5,000+ apps via Zapier", connected: false, popular: true },
-  { id: "make", name: "Make.com", emoji: "🟪", category: "Productivity", description: "Visual workflow automation", connected: false },
-  { id: "n8n", name: "n8n", emoji: "🟧", category: "Productivity", description: "Self-hosted workflow automation", connected: false },
-  { id: "notion", name: "Notion", emoji: "📓", category: "Productivity", description: "Sync deal notes + reports to Notion", connected: false },
+  { id: "zapier", name: "Zapier", emoji: "⚡", category: "Productivity", description: "Connect to 5,000+ apps via Zapier", popular: true },
+  { id: "make", name: "Make.com", emoji: "🟪", category: "Productivity", description: "Visual workflow automation" },
+  { id: "n8n", name: "n8n", emoji: "🟧", category: "Productivity", description: "Self-hosted workflow automation" },
+  { id: "notion", name: "Notion", emoji: "📓", category: "Productivity", description: "Sync deal notes + reports to Notion" },
 ];
 
 const CATS = ["All", "Email", "CRM", "Comms", "Commerce", "Finance", "Productivity"] as const;
@@ -55,25 +60,21 @@ export default function IntegrationsPage() {
   const conn = useLocalSet("aicos:connected-integrations:v1");
   const { toast } = useToast();
 
-  // Seed with default-connected integrations on first ever visit
-  useEffect(() => {
-    if (!conn.hydrated) return;
-    if (typeof window === "undefined") return;
-    if (localStorage.getItem("aicos:connected-integrations:v1:seeded")) return;
-    const seed = INTEGRATIONS.filter((i) => i.connected).map((i) => i.id);
-    seed.forEach((id) => conn.add(id));
-    try {
-      localStorage.setItem("aicos:connected-integrations:v1:seeded", "1");
-    } catch {}
-  }, [conn.hydrated, conn]);
-
-  const isConnected = (i: Integration) =>
-    conn.hydrated ? conn.has(i.id) : i.connected;
+  // Live integrations are always on (Stripe + email transport are wired in code).
+  // Everything else toggles a localStorage preview state.
+  const isConnected = (i: Integration) => {
+    if (i.isLive) return true;
+    return conn.hydrated ? conn.has(i.id) : false;
+  };
 
   function handleToggle(i: Integration) {
-    const wasConnected = isConnected(i);
+    if (i.isLive) {
+      toast(`${i.name} is wired in code — toggle not applicable`, "info");
+      return;
+    }
+    const wasConnected = conn.has(i.id);
     conn.toggle(i.id);
-    toast(wasConnected ? `Disconnected ${i.name}` : `Connected ${i.name}`);
+    toast(wasConnected ? `Disconnected ${i.name} (preview only)` : `Connected ${i.name} (preview only — no OAuth)`);
   }
 
   const filtered = useMemo(() => {
@@ -87,6 +88,7 @@ export default function IntegrationsPage() {
   }, [cat, query, connectedOnly, conn.items, conn.hydrated]);
 
   const connectedCount = INTEGRATIONS.filter((i) => isConnected(i)).length;
+  const liveCount = INTEGRATIONS.filter((i) => i.isLive).length;
 
   return (
     <div className="space-y-5">
@@ -98,13 +100,25 @@ export default function IntegrationsPage() {
           <div>
             <h1 className="text-2xl font-bold">Integrations</h1>
             <p className="text-xs text-ink-secondary">
-              {connectedCount} of {INTEGRATIONS.length} connected · across {CATS.length - 1} categories
+              {liveCount} wired live · {connectedCount - liveCount} preview-only · catalog of {INTEGRATIONS.length} across {CATS.length - 1} categories
             </p>
           </div>
         </div>
         <button className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm">
           <Plus className="h-4 w-4" /> Request integration
         </button>
+      </div>
+
+      <div className="flex items-start gap-2 rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-3 text-xs">
+        <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+          <Sparkles className="h-3.5 w-3.5 text-accent-amber" />
+        </div>
+        <div className="flex-1 text-ink-secondary">
+          <span className="font-semibold text-accent-amber">Integration catalog</span>
+          {" "}— Only the two cards marked{" "}
+          <span className="rounded bg-accent-green/15 px-1 py-0.5 text-[10px] font-semibold text-accent-green">LIVE</span>
+          {" "}are actually wired today (Stripe Connect for payouts and Postmark/Resend transport for outbound email). Toggling Connect on the rest saves to localStorage for visual preview only — there&apos;s no OAuth flow behind them yet.
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -166,22 +180,30 @@ export default function IntegrationsPage() {
                   <div className="text-[11px] text-ink-tertiary">{i.category}</div>
                 </div>
               </div>
-              {isConnected(i) && (
+              {i.isLive ? (
                 <span className="flex items-center gap-1 rounded-md bg-accent-green/15 px-2 py-0.5 text-[10px] font-semibold text-accent-green">
-                  <CheckCircle2 className="h-3 w-3" /> Connected
+                  <CheckCircle2 className="h-3 w-3" /> Live
                 </span>
-              )}
+              ) : isConnected(i) ? (
+                <span className="rounded-md bg-bg-hover px-2 py-0.5 text-[10px] font-semibold text-ink-tertiary">
+                  Preview
+                </span>
+              ) : null}
             </div>
             <p className="mt-3 text-xs text-ink-secondary">{i.description}</p>
             <button
               onClick={() => handleToggle(i)}
+              disabled={i.isLive}
+              title={i.isLive ? "Wired in code — always on" : undefined}
               className={`mt-4 w-full rounded-md py-2 text-xs font-semibold ${
-                isConnected(i)
-                  ? "border border-bg-border bg-bg-hover/40 hover:bg-bg-hover"
-                  : "bg-gradient-brand shadow-glow"
+                i.isLive
+                  ? "border border-accent-green/30 bg-accent-green/10 text-accent-green opacity-80 cursor-default"
+                  : isConnected(i)
+                    ? "border border-bg-border bg-bg-hover/40 hover:bg-bg-hover"
+                    : "bg-gradient-brand shadow-glow"
               }`}
             >
-              {isConnected(i) ? "Disconnect" : "Connect"}
+              {i.isLive ? "Always on" : isConnected(i) ? "Disconnect (preview)" : "Connect (preview)"}
             </button>
           </div>
         ))}
