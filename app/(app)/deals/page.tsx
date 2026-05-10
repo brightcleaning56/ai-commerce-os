@@ -1,10 +1,48 @@
 "use client";
-import { Calculator, Download, FileText, Plus, Send, Sparkles, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Calculator, CheckCircle2, Clock, Download, ExternalLink, FileText, Link2, Plus, Send, Sparkles, Trash2, XCircle } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { downloadCSV } from "@/lib/csv";
 
 type Line = { id: string; product: string; sku: string; qty: number; cost: number; price: number };
+
+type RealQuote = {
+  id: string;
+  createdAt: string;
+  buyerCompany: string;
+  buyerName: string;
+  productName: string;
+  unitPrice: number;
+  quantity: number;
+  subtotal: number;
+  total: number;
+  paymentTerms: string;
+  leadTimeDays: number;
+  status: "draft" | "sent" | "accepted" | "rejected" | "expired";
+  shareToken: string;
+  shareExpiresAt: string;
+};
+
+const QUOTE_STATUS_TONE: Record<RealQuote["status"], { bg: string; text: string; Icon: React.ComponentType<{ className?: string }> }> = {
+  draft: { bg: "bg-bg-hover", text: "text-ink-secondary", Icon: FileText },
+  sent: { bg: "bg-accent-blue/15", text: "text-accent-blue", Icon: Send },
+  accepted: { bg: "bg-accent-green/15", text: "text-accent-green", Icon: CheckCircle2 },
+  rejected: { bg: "bg-accent-red/15", text: "text-accent-red", Icon: XCircle },
+  expired: { bg: "bg-accent-amber/15", text: "text-accent-amber", Icon: Clock },
+};
+
+function fmtRelTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "just now";
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
 
 const PRODUCT_CATALOG = [
   { name: "Portable Blender Cup", sku: "PBC-001", cost: 6.4, price: 24.99 },
@@ -29,7 +67,35 @@ export default function DealsPage() {
     { id: "L2", product: "Pet Hair Remover Roller", sku: "PHR-014", qty: 300, cost: 4.2, price: 13.5 },
   ]);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const [realQuotes, setRealQuotes] = useState<RealQuote[] | null>(null);
   const { toast } = useToast();
+
+  // Live quotes from /api/quotes — these are AI-generated from accepted
+  // outreach drafts via lib/agents/quote.ts. The builder above is a manual
+  // bulk-quote preview; the real flow is Outreach → Draft → Quote.
+  useEffect(() => {
+    let cancelled = false;
+    function load() {
+      fetch("/api/quotes", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (cancelled) return;
+          const list: RealQuote[] = d?.quotes ?? [];
+          // Newest first
+          list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setRealQuotes(list);
+        })
+        .catch(() => {
+          if (!cancelled) setRealQuotes([]);
+        });
+    }
+    load();
+    const id = setInterval(load, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   function addLine() {
     const c = PRODUCT_CATALOG[0];
@@ -97,7 +163,10 @@ export default function DealsPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold">Deals &amp; Quotes</h1>
-            <p className="text-xs text-ink-secondary">Build a wholesale quote in seconds</p>
+            <p className="text-xs text-ink-secondary">
+              {realQuotes ? `${realQuotes.length} live quote${realQuotes.length === 1 ? "" : "s"}` : "Loading…"}
+              {" · bulk quote builder below"}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -118,6 +187,28 @@ export default function DealsPage() {
           >
             <Send className="h-4 w-4" /> Send Quote
           </button>
+        </div>
+      </div>
+
+      {/* Live quotes — auto-generated from accepted outreach drafts */}
+      <RealQuotesPanel quotes={realQuotes} />
+
+      {/* Preview banner explaining the manual builder below */}
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+        <div className="flex items-start gap-3 text-[12px]">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <Sparkles className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1">
+            <span className="font-semibold text-accent-amber">Bulk quote preview</span>
+            <span className="text-ink-secondary">
+              {" "}
+              — The single-product flow above is how AVYN actually generates quotes today: AI Outreach Agent
+              drafts → buyer accepts → Quote Agent prices it. The multi-line builder below is a preview of
+              the bulk-quote feature; the &quot;Send&quot; button currently exports CSV / shows a toast and
+              does NOT create a Quote in the store.
+            </span>
+          </div>
         </div>
       </div>
 
@@ -333,6 +424,138 @@ function Row({
     <div className="flex items-center justify-between">
       <span className="text-ink-secondary">{label}</span>
       <span className={`${bold ? "text-base font-bold" : ""} ${tone ?? ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function RealQuotesPanel({ quotes }: { quotes: RealQuote[] | null }) {
+  if (!quotes) {
+    return (
+      <div className="rounded-xl border border-bg-border bg-bg-card p-5 text-sm text-ink-tertiary">
+        Loading quotes…
+      </div>
+    );
+  }
+
+  if (quotes.length === 0) {
+    return (
+      <div className="rounded-xl border border-brand-500/30 bg-gradient-to-br from-brand-500/5 to-transparent p-5">
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 place-items-center rounded-lg bg-brand-500/15">
+            <FileText className="h-5 w-5 text-brand-300" />
+          </div>
+          <div className="flex-1">
+            <div className="text-sm font-semibold">No quotes generated yet</div>
+            <p className="mt-1 text-xs text-ink-secondary">
+              Quotes are auto-generated from accepted outreach drafts. Send a draft from{" "}
+              <Link href="/outreach" className="text-brand-300 hover:text-brand-200 underline">/outreach</Link>{" "}
+              and the Quote Agent prices it. Each quote gets its own public buyer link.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link
+                href="/outreach"
+                className="flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 py-1.5 text-xs font-semibold shadow-glow"
+              >
+                <Send className="h-3 w-3" /> Open Outreach
+              </Link>
+              <Link
+                href="/pipeline"
+                className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-xs hover:bg-bg-hover"
+              >
+                <Sparkles className="h-3 w-3" /> Run pipeline
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card">
+      <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <FileText className="h-4 w-4 text-brand-300" /> Live Quotes — auto-generated from drafts
+        </div>
+        <span className="text-[11px] text-ink-tertiary">{quotes.length} total · refreshes every 20s</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
+            <tr>
+              <th className="px-5 py-2.5 text-left font-medium">Quote</th>
+              <th className="px-3 py-2.5 text-left font-medium">Buyer</th>
+              <th className="px-3 py-2.5 text-left font-medium">Product</th>
+              <th className="px-3 py-2.5 text-right font-medium">Total</th>
+              <th className="px-3 py-2.5 text-left font-medium">Terms</th>
+              <th className="px-3 py-2.5 text-left font-medium">Status</th>
+              <th className="px-5 py-2.5 text-right font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {quotes.slice(0, 10).map((q) => {
+              const tone = QUOTE_STATUS_TONE[q.status];
+              return (
+                <tr key={q.id} className="border-t border-bg-border hover:bg-bg-hover/30">
+                  <td className="px-5 py-3">
+                    <div className="font-mono text-[11px] text-ink-tertiary">{q.id.slice(0, 14)}…</div>
+                    <div className="text-[10px] text-ink-tertiary">{fmtRelTime(q.createdAt)}</div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="font-medium">{q.buyerCompany}</div>
+                    <div className="text-[11px] text-ink-tertiary">{q.buyerName}</div>
+                  </td>
+                  <td className="px-3 py-3 text-ink-secondary">
+                    {q.productName} <span className="text-ink-tertiary">× {q.quantity.toLocaleString()}</span>
+                  </td>
+                  <td className="px-3 py-3 text-right">
+                    <div className="font-bold">${q.total.toLocaleString()}</div>
+                    <div className="text-[10px] text-ink-tertiary">${q.unitPrice.toFixed(2)}/u</div>
+                  </td>
+                  <td className="px-3 py-3 text-[11px] text-ink-secondary">
+                    {q.paymentTerms}
+                    <div className="text-[10px] text-ink-tertiary">{q.leadTimeDays}d lead</div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className={`flex w-fit items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${tone.bg} ${tone.text}`}>
+                      <tone.Icon className="h-3 w-3" />
+                      {q.status}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    <div className="inline-flex items-center gap-1.5">
+                      <Link
+                        href={`/quote/${q.id}?t=${q.shareToken}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-secondary hover:text-ink-primary"
+                        title="Open buyer view"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </Link>
+                      <button
+                        onClick={() => {
+                          const url = `${window.location.origin}/quote/${q.id}?t=${q.shareToken}`;
+                          navigator.clipboard.writeText(url).catch(() => {});
+                        }}
+                        className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-secondary hover:text-ink-primary"
+                        title="Copy public link"
+                      >
+                        <Link2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {quotes.length > 10 && (
+        <div className="border-t border-bg-border px-5 py-2.5 text-center text-[11px] text-ink-tertiary">
+          Showing 10 of {quotes.length}. Older quotes still accessible via direct buyer link.
+        </div>
+      )}
     </div>
   );
 }
