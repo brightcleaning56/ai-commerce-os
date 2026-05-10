@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import ProductHistory from "@/components/products/ProductHistory";
 import Sparkline from "@/components/ui/Sparkline";
 import type { Product } from "@/lib/products";
 import { useLocalSet } from "@/lib/useLocalSet";
@@ -139,6 +140,9 @@ export default function ProductDetail({ p }: { p: Product }) {
         <Stat label="Cost" value={`$${p.cost.toFixed(2)}`} hint={`Retail $${p.retail.toFixed(2)}`} />
         <Stat label="MOQ" value={p.moq} hint={`${p.shippingDays}d shipping`} />
       </div>
+
+      {/* Relationship history — drafts + transactions + buyer/supplier matches */}
+      <ProductHistory productName={p.name} />
 
       <div>
         <div className="mb-2 flex items-center justify-between text-xs">
