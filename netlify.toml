@@ -52,6 +52,12 @@
 [functions."cron-auto-release"]
   schedule = "0 2-23/6 * * *"
 
+# Daily at 09:00 UTC: email the operator a summary of yesterday's activity
+# and what needs attention today. Skipped automatically when there's nothing
+# to report. Disable via CRON_ENABLED=false.
+[functions."cron-daily-digest"]
+  schedule = "0 9 * * *"
+
 # ─── Headers ───────────────────────────────────────────────────────────────
 # Defense-in-depth: deny framing of the operator dashboard, declare strict
 # content security on the marketing landing.

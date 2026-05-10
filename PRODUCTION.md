@@ -312,6 +312,32 @@ end-to-end so the operator UI can be demoed: a synthetic `sim_acct_*`
 gets persisted, and the panel always reads "Charges + payouts enabled."
 This lets you build the workflow without needing real Stripe creds.
 
+### Daily operator digest
+
+A morning summary email lands in the operator's inbox at 09:00 UTC each
+day with two sections:
+
+  Yesterday (last 24h)
+    Agent runs (success + fail counts), drafts created, outreach sent,
+    transactions opened/completed, disputes opened, risk flags raised,
+    rough platform fees recognized.
+
+  Needs your attention today
+    Critical/high risk flags, open disputes, deliveries with <24h to
+    auto-release, drafts awaiting approval, transactions ready to ship.
+    Same categories as the dashboard's NeedsAttention panel, surfaced
+    with deep-link URLs the operator can click straight from the email.
+
+Auto-skips when there's nothing to report — no spam on quiet weekends.
+Composed via `lib/email.ts` so the simulated/sandbox/live provider
+modes work uniformly. Disable workspace-wide with CRON_ENABLED=false.
+
+```bash
+# Manual trigger for testing (CRON_SECRET-bearer)
+curl -H "Authorization: Bearer $CRON_SECRET" \
+  https://your-domain/api/cron/daily-digest
+```
+
 ### Lifecycle emails (buyer + operator notifications)
 
 Every state transition that affects the buyer fires an automatic email
