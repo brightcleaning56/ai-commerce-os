@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import RefundsPanel from "@/components/earnings/RefundsPanel";
 import { useToast } from "@/components/Toast";
 import {
   Bar,
@@ -268,6 +269,9 @@ export default function EarningsPage() {
           </div>
         </div>
       )}
+
+      {/* Refund attribution — split refunds out so net revenue is honest */}
+      <RefundsPanel />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiCard
