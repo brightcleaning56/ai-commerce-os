@@ -1,5 +1,6 @@
 "use client";
 import {
+  ArrowLeftRight,
   Boxes,
   Building2,
   ChevronRight,
@@ -23,6 +24,13 @@ import { PRODUCTS } from "@/lib/products";
 import { BUYERS } from "@/lib/buyers";
 import { SUPPLIERS } from "@/lib/suppliers";
 
+type LiveData = {
+  products: Array<{ id: string; name: string; category?: string; emoji?: string; demandScore?: number }>;
+  buyers: Array<{ id: string; company: string; type?: string; location?: string; industry?: string; country?: string }>;
+  suppliers: Array<{ id: string; name: string; type?: string; country?: string; city?: string }>;
+  transactions: Array<{ id: string; buyerCompany: string; productName: string; state: string; productTotalCents: number }>;
+};
+
 type Item = {
   id: string;
   label: string;
@@ -45,6 +53,7 @@ export default function CommandPaletteProvider({
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
+  const [live, setLive] = useState<LiveData | null>(null);
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -55,6 +64,32 @@ export default function CommandPaletteProvider({
     setQuery("");
     setActiveIdx(0);
   };
+
+  // Fetch live data on first open and every time the palette opens —
+  // /api/* are admin-gated which is fine since the palette is inside
+  // the (app) auth shell. Cache in component state so subsequent opens
+  // are instant; refresh in the background.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    Promise.all([
+      fetch("/api/products", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/discovered-buyers", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/discovered-suppliers", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/transactions", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([p, b, s, t]) => {
+      if (cancelled) return;
+      setLive({
+        products: p?.products ?? [],
+        buyers: b?.buyers ?? [],
+        suppliers: s?.suppliers ?? [],
+        transactions: t?.transactions ?? [],
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   // Build search corpus
   const items: Item[] = useMemo(() => {
@@ -77,34 +112,51 @@ export default function CommandPaletteProvider({
       })),
     ];
 
-    const productItems: Item[] = PRODUCTS.slice(0, 25).map((p) => ({
+    // Live data first (operator's actual workspace), seed lists as fallback
+    // when the workspace is fresh and there's no real data yet
+    const liveProducts = live?.products ?? [];
+    const productItems: Item[] = (liveProducts.length > 0 ? liveProducts : PRODUCTS.slice(0, 25)).map((p) => ({
       id: `p-${p.id}`,
       label: p.name,
-      hint: `${p.category} · Demand ${p.demandScore}`,
+      hint: `${p.category ?? ""}${(p as any).demandScore != null ? ` · Demand ${(p as any).demandScore}` : ""}${liveProducts.length === 0 ? " · seed" : ""}`,
       href: "/products",
-      group: "Products",
+      group: liveProducts.length > 0 ? "Products" : "Products (seed)",
       icon: Package,
-      keywords: `${p.category} ${p.niche} ${p.emoji}`,
+      keywords: `${p.category ?? ""} ${(p as any).niche ?? ""} ${p.emoji ?? ""}`,
     }));
 
-    const buyerItems: Item[] = BUYERS.slice(0, 30).map((b) => ({
+    const liveBuyers = live?.buyers ?? [];
+    const buyerItems: Item[] = (liveBuyers.length > 0 ? liveBuyers : BUYERS.slice(0, 30)).map((b) => ({
       id: `b-${b.id}`,
       label: b.company,
-      hint: `${b.type} · ${b.location}`,
+      hint: `${(b as any).type ?? ""} · ${(b as any).location ?? (b as any).country ?? ""}${liveBuyers.length === 0 ? " · seed" : ""}`,
       href: "/buyers",
-      group: "Buyers",
+      group: liveBuyers.length > 0 ? "Buyers" : "Buyers (seed)",
       icon: Building2,
-      keywords: `${b.industry} ${b.type} ${b.country}`,
+      keywords: `${(b as any).industry ?? ""} ${(b as any).type ?? ""} ${(b as any).country ?? ""}`,
     }));
 
-    const supplierItems: Item[] = SUPPLIERS.map((s) => ({
+    const liveSuppliers = live?.suppliers ?? [];
+    const supplierItems: Item[] = (liveSuppliers.length > 0 ? liveSuppliers : SUPPLIERS).map((s) => ({
       id: `s-${s.id}`,
       label: s.name,
-      hint: `${s.type} · ${s.country}`,
+      hint: `${(s as any).type ?? ""} · ${(s as any).country ?? ""}${liveSuppliers.length === 0 ? " · seed" : ""}`,
       href: "/suppliers",
-      group: "Suppliers",
+      group: liveSuppliers.length > 0 ? "Suppliers" : "Suppliers (seed)",
       icon: Factory,
-      keywords: `${s.city} ${s.country}`,
+      keywords: `${(s as any).city ?? ""} ${(s as any).country ?? ""}`,
+    }));
+
+    // Real transactions — only when they exist; no seed fallback since
+    // transactions are operator-driven, not catalog data
+    const transactionItems: Item[] = (live?.transactions ?? []).slice(0, 50).map((t) => ({
+      id: `t-${t.id}`,
+      label: `${t.buyerCompany} · ${t.productName}`,
+      hint: `${t.state.replace(/_/g, " ")} · $${(t.productTotalCents / 100).toLocaleString()}`,
+      href: "/transactions",
+      group: "Transactions",
+      icon: ArrowLeftRight,
+      keywords: `${t.id} ${t.state} txn deal`,
     }));
 
     const actions: Item[] = [
@@ -118,8 +170,15 @@ export default function CommandPaletteProvider({
       { id: "act-marketplace", label: "Open Marketplace", hint: "Live RFQs and listings", group: "Actions", icon: Boxes, href: "/marketplace" },
     ];
 
-    return [...navItems, ...actions, ...productItems, ...buyerItems, ...supplierItems];
-  }, [router]);
+    return [
+      ...navItems,
+      ...actions,
+      ...transactionItems,  // real ops data first — operators search for these most
+      ...productItems,
+      ...buyerItems,
+      ...supplierItems,
+    ];
+  }, [router, live]);
 
   // Filter
   const results = useMemo(() => {
