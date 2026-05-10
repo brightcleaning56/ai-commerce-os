@@ -7,11 +7,11 @@ import {
   Info,
   Pause,
   Play,
+  RefreshCw,
   Search,
   XCircle,
-  Zap,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { downloadCSV } from "@/lib/csv";
 
@@ -19,6 +19,7 @@ type LogLevel = "info" | "warn" | "error" | "success";
 type LogEntry = {
   id: string;
   ts: string;
+  tsIso: string;
   level: LogLevel;
   agent: string;
   jobId: string;
@@ -26,38 +27,46 @@ type LogEntry = {
   meta?: Record<string, string | number | boolean>;
 };
 
-const AGENTS = [
-  "Trend Hunter",
-  "Demand Intel",
-  "Buyer Discovery",
-  "Outreach Agent",
-  "Negotiation",
-  "Risk Agent",
-  "CRM Intel",
-  "Supplier Finder",
-  "Learning Agent",
-];
+type AgentRun = {
+  id: string;
+  agent: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  status: "success" | "error";
+  inputCategory: string | null;
+  inputProductName?: string;
+  productCount: number;
+  buyerCount?: number;
+  supplierCount?: number;
+  modelUsed: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  estCostUsd?: number;
+  usedFallback: boolean;
+  errorMessage?: string;
+  signalsUsed?: number;
+};
 
-const SAMPLE_LOGS: LogEntry[] = [
-  { id: "l1", ts: "12:42:18.124", level: "info", agent: "Trend Hunter", jobId: "trd-9842", message: "Started scan of TikTok #pets · velocity threshold 200%" },
-  { id: "l2", ts: "12:42:18.901", level: "info", agent: "Trend Hunter", jobId: "trd-9842", message: "Pulled 1,420 hashtag impressions in 280ms", meta: { window_min: 60 } },
-  { id: "l3", ts: "12:42:19.310", level: "success", agent: "Trend Hunter", jobId: "trd-9842", message: "Found 3 trending products above threshold", meta: { count: 3 } },
-  { id: "l4", ts: "12:42:19.450", level: "info", agent: "Demand Intel", jobId: "dmd-4011", message: "Scoring product 'Pet Hair Remover Roller'" },
-  { id: "l5", ts: "12:42:19.872", level: "success", agent: "Demand Intel", jobId: "dmd-4011", message: "Demand score: 89 · saturation 24% · margin 67%" },
-  { id: "l6", ts: "12:42:20.103", level: "info", agent: "Buyer Discovery", jobId: "bdy-7724", message: "Searching 12 directories for matched buyers" },
-  { id: "l7", ts: "12:42:20.844", level: "warn", agent: "Buyer Discovery", jobId: "bdy-7724", message: "Apollo rate limit hit (429), retrying with backoff", meta: { retry_in_ms: 1500 } },
-  { id: "l8", ts: "12:42:22.401", level: "success", agent: "Buyer Discovery", jobId: "bdy-7724", message: "Enriched 68 new buyer leads", meta: { intent_avg: 84 } },
-  { id: "l9", ts: "12:42:22.612", level: "info", agent: "Outreach Agent", jobId: "out-2204", message: "Drafting personalized email for FitLife Stores", meta: { model: "claude-sonnet-4-6" } },
-  { id: "l10", ts: "12:42:23.028", level: "success", agent: "Outreach Agent", jobId: "out-2204", message: "Email queued · 286 tokens · $0.0009 cost" },
-  { id: "l11", ts: "12:42:24.412", level: "error", agent: "Negotiation", jobId: "neg-1119", message: "Failed to parse buyer reply (malformed quote)", meta: { buyer_id: "b14", retry: true } },
-  { id: "l12", ts: "12:42:25.001", level: "info", agent: "Risk Agent", jobId: "rsk-0042", message: "Re-checking supplier 'Shenzhen Unitop Tech'" },
-  { id: "l13", ts: "12:42:25.221", level: "warn", agent: "Risk Agent", jobId: "rsk-0042", message: "Domain registered 142 days ago (below 180-day threshold)" },
-  { id: "l14", ts: "12:42:25.880", level: "error", agent: "Risk Agent", jobId: "rsk-0042", message: "Risk score 71 → flagged + paused outbound", meta: { rule: "scam_domain_recent" } },
-  { id: "l15", ts: "12:42:26.011", level: "info", agent: "CRM Intel", jobId: "crm-5512", message: "Routing 4 new leads to Sarah Chen" },
-  { id: "l16", ts: "12:42:26.310", level: "success", agent: "CRM Intel", jobId: "crm-5512", message: "Pipeline updated · 12 deals advanced" },
-  { id: "l17", ts: "12:42:27.110", level: "info", agent: "Learning Agent", jobId: "lrn-9981", message: "Re-scoring 38 prior outreach drafts against last week's reply rates" },
-  { id: "l18", ts: "12:42:28.401", level: "success", agent: "Learning Agent", jobId: "lrn-9981", message: "Updated outreach prompt v2.4 · projected +2.1pp reply rate" },
-];
+type CronRun = {
+  id: string;
+  ranAt: string;
+  durationMs: number;
+  status: "success" | "error";
+  pipelineId: string;
+  totals: { products: number; buyers: number; suppliers: number; drafts: number; totalCost: number };
+  errorMessage?: string;
+};
+
+const AGENT_LABELS: Record<string, string> = {
+  "trend-hunter": "Trend Hunter",
+  "buyer-discovery": "Buyer Discovery",
+  "supplier-finder": "Supplier Finder",
+  outreach: "Outreach",
+  negotiation: "Negotiation",
+  risk: "Risk",
+  "pipeline-cron": "Pipeline Cron",
+};
 
 const LEVEL_TONE: Record<LogLevel, { bg: string; text: string; Icon: React.ComponentType<{ className?: string }> }> = {
   info: { bg: "bg-bg-hover", text: "text-ink-secondary", Icon: Info },
@@ -65,6 +74,77 @@ const LEVEL_TONE: Record<LogLevel, { bg: string; text: string; Icon: React.Compo
   error: { bg: "bg-accent-red/15", text: "text-accent-red", Icon: XCircle },
   success: { bg: "bg-accent-green/15", text: "text-accent-green", Icon: CheckCircle2 },
 };
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(d.getMilliseconds()).padStart(3, "0");
+  return `${hh}:${mm}:${ss}.${ms}`;
+}
+
+function summarizeAgentRun(r: AgentRun): string {
+  if (r.status === "error") {
+    return `${AGENT_LABELS[r.agent] ?? r.agent} failed${r.errorMessage ? ` · ${r.errorMessage}` : ""}`;
+  }
+  const parts: string[] = [];
+  if (r.agent === "trend-hunter") parts.push(`discovered ${r.productCount} products`);
+  else if (r.agent === "buyer-discovery") parts.push(`found ${r.buyerCount ?? 0} buyers`);
+  else if (r.agent === "supplier-finder") parts.push(`found ${r.supplierCount ?? 0} suppliers`);
+  else if (r.agent === "outreach") parts.push(`drafted outreach`);
+  else if (r.agent === "negotiation") parts.push(`processed reply`);
+  else if (r.agent === "risk") parts.push(`risk check complete`);
+  if (r.inputProductName) parts.push(`for "${r.inputProductName}"`);
+  else if (r.inputCategory) parts.push(`for ${r.inputCategory}`);
+  return parts.join(" ");
+}
+
+function agentRunToLog(r: AgentRun): LogEntry {
+  const fallback = r.usedFallback;
+  const level: LogLevel =
+    r.status === "error" ? "error" : fallback ? "warn" : "success";
+  const meta: Record<string, string | number | boolean> = {
+    duration_ms: r.durationMs,
+  };
+  if (r.modelUsed) meta.model = r.modelUsed;
+  if (r.estCostUsd != null) meta.cost_usd = Number(r.estCostUsd.toFixed(4));
+  if (r.inputTokens != null) meta.input_tokens = r.inputTokens;
+  if (r.outputTokens != null) meta.output_tokens = r.outputTokens;
+  if (fallback) meta.fallback = true;
+  if (r.signalsUsed != null) meta.signals = r.signalsUsed;
+  return {
+    id: r.id,
+    ts: fmtTime(r.finishedAt),
+    tsIso: r.finishedAt,
+    level,
+    agent: AGENT_LABELS[r.agent] ?? r.agent,
+    jobId: r.id,
+    message: summarizeAgentRun(r),
+    meta,
+  };
+}
+
+function cronRunToLog(r: CronRun): LogEntry {
+  const level: LogLevel = r.status === "error" ? "error" : "success";
+  const message =
+    r.status === "error"
+      ? `Pipeline cron failed${r.errorMessage ? ` · ${r.errorMessage}` : ""}`
+      : `Pipeline tick: ${r.totals.products} products · ${r.totals.buyers} buyers · ${r.totals.drafts} drafts`;
+  return {
+    id: r.id,
+    ts: fmtTime(r.ranAt),
+    tsIso: r.ranAt,
+    level,
+    agent: "Pipeline Cron",
+    jobId: r.pipelineId || r.id,
+    message,
+    meta: {
+      duration_ms: r.durationMs,
+      cost_usd: Number(r.totals.totalCost.toFixed(4)),
+    },
+  };
+}
 
 export default function SystemLogsPage() {
   const [paused, setPaused] = useState(false);
@@ -76,11 +156,80 @@ export default function SystemLogsPage() {
     success: true,
   });
   const [filterAgent, setFilterAgent] = useState<string>("All");
+  const [logs, setLogs] = useState<LogEntry[] | null>(null);
+  const [loadedAt, setLoadedAt] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+  const pausedRef = useRef(paused);
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [runsRes, cronRes] = await Promise.all([
+        fetch("/api/agent-runs", { cache: "no-store" }),
+        fetch("/api/cron/status", { cache: "no-store" }),
+      ]);
+      const runsJson = runsRes.ok ? await runsRes.json() : { runs: [] };
+      const cronJson = cronRes.ok ? await cronRes.json() : { recentRuns: [] };
+      const runs: AgentRun[] = runsJson.runs ?? [];
+      const crons: CronRun[] = cronJson.recentRuns ?? [];
+      const merged: LogEntry[] = [
+        ...runs.map(agentRunToLog),
+        ...crons.map(cronRunToLog),
+      ].sort((a, b) => new Date(b.tsIso).getTime() - new Date(a.tsIso).getTime());
+      setLogs(merged);
+      setLoadedAt(new Date().toISOString());
+    } catch {
+      setLogs((prev) => prev ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(() => {
+      if (!pausedRef.current) load();
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const agents = useMemo(() => {
+    if (!logs) return [] as string[];
+    return Array.from(new Set(logs.map((l) => l.agent))).sort();
+  }, [logs]);
+
+  const filtered = useMemo(() => {
+    if (!logs) return [];
+    return logs.filter((l) => {
+      if (!levels[l.level]) return false;
+      if (filterAgent !== "All" && l.agent !== filterAgent) return false;
+      if (query) {
+        const q = query.toLowerCase();
+        if (
+          !l.message.toLowerCase().includes(q) &&
+          !l.jobId.toLowerCase().includes(q) &&
+          !l.agent.toLowerCase().includes(q)
+        ) return false;
+      }
+      return true;
+    });
+  }, [logs, levels, filterAgent, query]);
+
+  const counts = useMemo(() => {
+    const c: Record<LogLevel, number> = { info: 0, warn: 0, error: 0, success: 0 };
+    for (const l of logs ?? []) c[l.level] += 1;
+    return c;
+  }, [logs]);
 
   function handleExport() {
-    const rows = SAMPLE_LOGS.map((l) => ({
-      timestamp: l.ts,
+    if (!logs?.length) {
+      toast("Nothing to export yet", "info");
+      return;
+    }
+    const rows = logs.map((l) => ({
+      timestamp_iso: l.tsIso,
       level: l.level,
       agent: l.agent,
       job_id: l.jobId,
@@ -92,27 +241,6 @@ export default function SystemLogsPage() {
     toast(`Exported ${rows.length} log entries`);
   }
 
-  const filtered = useMemo(() => {
-    return SAMPLE_LOGS.filter((l) => {
-      if (!levels[l.level]) return false;
-      if (filterAgent !== "All" && l.agent !== filterAgent) return false;
-      if (
-        query &&
-        !l.message.toLowerCase().includes(query.toLowerCase()) &&
-        !l.jobId.includes(query) &&
-        !l.agent.toLowerCase().includes(query.toLowerCase())
-      ) return false;
-      return true;
-    });
-  }, [levels, filterAgent, query]);
-
-  const counts = {
-    info: SAMPLE_LOGS.filter((l) => l.level === "info").length,
-    warn: SAMPLE_LOGS.filter((l) => l.level === "warn").length,
-    error: SAMPLE_LOGS.filter((l) => l.level === "error").length,
-    success: SAMPLE_LOGS.filter((l) => l.level === "success").length,
-  };
-
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -123,11 +251,18 @@ export default function SystemLogsPage() {
           <div>
             <h1 className="text-2xl font-bold">System Logs</h1>
             <p className="text-xs text-ink-secondary">
-              Real-time stream from {AGENTS.length} agents · 30-day retention on Growth, 1y on Enterprise
+              Real agent runs + pipeline cron ticks · auto-refreshes every 10s when live
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => load()}
+            disabled={loading}
+            className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover disabled:opacity-60"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </button>
           <button
             onClick={() => setPaused(!paused)}
             className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm"
@@ -189,7 +324,7 @@ export default function SystemLogsPage() {
           className="h-9 rounded-lg border border-bg-border bg-bg-card px-3 text-sm"
         >
           <option>All</option>
-          {AGENTS.map((a) => (
+          {agents.map((a) => (
             <option key={a}>{a}</option>
           ))}
         </select>
@@ -210,15 +345,25 @@ export default function SystemLogsPage() {
               />
               {paused ? "Paused" : "Live"}
             </span>
-            <span className="text-ink-tertiary">{filtered.length} of {SAMPLE_LOGS.length} entries</span>
+            <span className="text-ink-tertiary">
+              {filtered.length} of {logs?.length ?? 0} entries
+            </span>
           </div>
-          <div className="flex items-center gap-1.5 text-[10px] text-ink-tertiary">
-            <Zap className="h-3 w-3" /> 28 events/sec average
+          <div className="text-[10px] text-ink-tertiary">
+            {loadedAt ? `loaded ${fmtTime(loadedAt)}` : loading ? "loading…" : ""}
           </div>
         </div>
 
         <div className="max-h-[600px] overflow-y-auto">
-          {filtered.length === 0 ? (
+          {logs === null ? (
+            <div className="px-5 py-12 text-center text-xs text-ink-tertiary">
+              Loading…
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="px-5 py-12 text-center text-xs text-ink-tertiary">
+              No agent or cron runs yet. Trigger a run from <span className="font-mono">/agents</span> or wait for the cron tick.
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="px-5 py-12 text-center text-xs text-ink-tertiary">
               No log entries match your filters
             </div>
