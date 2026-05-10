@@ -86,6 +86,25 @@ netlify env:set POSTMARK_TOKEN "..."
 # OR
 netlify env:set RESEND_TOKEN "..."
 
+# OPTIONAL — Stripe transaction orchestration (sandbox first, then live)
+# Without these set, /transactions runs in 'simulated' mode — no real money moves.
+netlify env:set STRIPE_SECRET_KEY "sk_test_..."          # sk_live_... when live
+netlify env:set STRIPE_PUBLISHABLE_KEY "pk_test_..."     # pk_live_... when live
+netlify env:set STRIPE_WEBHOOK_SECRET "whsec_..."        # from Stripe → Webhooks
+netlify env:set STRIPE_LIVE "false"                      # set to "true" only after sandbox testing
+netlify env:set PLATFORM_FEE_BPS "800"                   # 8% platform fee
+netlify env:set ESCROW_FEE_BPS "100"                     # 1% escrow fee
+
+# OPTIONAL — DocuSign instead of in-app clickwrap signature
+# netlify env:set CONTRACT_MODE "docusign"               # default: in-app
+# netlify env:set DOCUSIGN_INTEGRATION_KEY "..."
+# netlify env:set DOCUSIGN_USER_ID "..."
+# netlify env:set DOCUSIGN_ACCOUNT_ID "..."
+
+# OPTIONAL — Shippo for label + automated tracking
+# netlify env:set SHIPPING_MODE "shippo"                 # default: manual
+# netlify env:set SHIPPO_TOKEN "shippo_test_..."
+
 # OPTIONAL — first-view webhook for Slack pings
 netlify env:set SHARE_FIRSTVIEW_WEBHOOK_URL "https://hooks.slack.com/services/..."
 netlify env:set SHARE_FIRSTVIEW_WEBHOOK_SECRET "$(openssl rand -hex 32)"

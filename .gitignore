@@ -12,6 +12,10 @@ data/
 # Vercel CLI
 .vercel/
 
+# Netlify CLI / Claude Code agent worktrees
+.netlify/
+.claude/
+
 # IDE / editor
 .vscode/
 .idea/

@@ -21,6 +21,8 @@ const RISK_FLAGS_FILE = "risk-flags.json";
 const PIPELINE_RUNS_FILE = "pipeline-runs.json";
 const QUOTES_FILE = "quotes.json";
 const SPEND_LEDGER_FILE = "spend-ledger.json";
+const TRANSACTIONS_FILE = "transactions.json";
+const REVENUE_LEDGER_FILE = "revenue-ledger.json";
 
 // ─── Backend selection ─────────────────────────────────────────────────────
 // STORE_BACKEND=kv  →  Vercel KV / Upstash (production)
@@ -51,7 +53,7 @@ export function __setBackendForTesting(b: StoreBackend | null) {
 const all_keys = [
   PRODUCTS_FILE, RUNS_FILE, SIGNALS_FILE, BUYERS_FILE, DRAFTS_FILE,
   SUPPLIERS_FILE, CRON_RUNS_FILE, RISK_FLAGS_FILE, PIPELINE_RUNS_FILE,
-  QUOTES_FILE, SPEND_LEDGER_FILE,
+  QUOTES_FILE, SPEND_LEDGER_FILE, TRANSACTIONS_FILE, REVENUE_LEDGER_FILE,
 ];
 
 /**
@@ -152,6 +154,149 @@ export type Quote = {
   estCostUsd?: number;
   usedFallback: boolean;
   generatedRationale?: string;  // AI's reasoning for the price/terms
+};
+
+// ─── Transactions: full deal-to-cash orchestration (slice 39) ───────────────
+//
+// A Transaction is the full lifecycle of a closed deal:
+//
+//   draft (operator created) →
+//   proposed (sent to buyer) →
+//   signed (buyer accepted contract) →
+//   payment_pending (waiting for buyer's funds) →
+//   escrow_held (platform holding payment) →
+//   shipped (supplier dispatched) →
+//   delivered (carrier confirmed delivery) →
+//   released (escrow → supplier payout, platform takes fees) →
+//   completed
+//
+// Side branches:
+//   disputed (buyer raised an issue — funds frozen until resolution)
+//   refunded (buyer got money back, supplier got nothing)
+//   cancelled (operator killed it before payment)
+//
+// Money flow (Stripe Connect model):
+//   buyer pays → platform Stripe account (escrow held)
+//   on release: supplier gets payout, platform keeps fees
+//   refund: buyer's card is credited back, no supplier payout
+export type TransactionState =
+  | "draft"
+  | "proposed"
+  | "signed"
+  | "payment_pending"
+  | "escrow_held"
+  | "shipped"
+  | "delivered"
+  | "released"
+  | "completed"
+  | "disputed"
+  | "refunded"
+  | "cancelled";
+
+export type TransactionEvent = {
+  ts: string;
+  state: TransactionState;
+  actor: "operator" | "buyer" | "supplier" | "system" | "agent";
+  detail: string;
+  meta?: Record<string, unknown>;
+};
+
+export type Transaction = {
+  id: string;
+  quoteId: string;          // the parent quote that became this txn
+  draftId: string;          // the outreach draft that generated the quote
+  pipelineId?: string;      // upstream pipeline run (for analytics)
+  buyerCompany: string;
+  buyerName: string;
+  buyerEmail?: string;      // resolved at proposal-send time
+  productName: string;
+
+  // Money — all USD cents to avoid float drift, displayed as dollars in UI
+  unitPriceCents: number;
+  quantity: number;
+  subtotalCents: number;
+  discountPctBps: number;   // basis points (1% = 100 bps) for precision
+  discountCents: number;
+  shippingCents: number;
+  productTotalCents: number;  // subtotal − discount + shipping (what buyer pays)
+
+  // Platform economics
+  platformFeePctBps: number;  // default 800 bps = 8%
+  platformFeeCents: number;   // computed at proposal time
+  escrowFeePctBps: number;    // default 100 bps = 1% (Stripe Connect ~2.9% + 30¢ on top)
+  escrowFeeCents: number;
+  supplierPayoutCents: number; // productTotalCents − platformFee − escrowFee
+
+  // Terms
+  paymentTerms: string;      // "Net 30", "50% upfront", etc. (from quote)
+  shippingTerms: string;     // "FOB Origin", "DDP"
+  leadTimeDays: number;
+  refundPolicy?: string;     // free-text: "30 days from delivery, unopened"
+
+  // State + lifecycle
+  state: TransactionState;
+  stateHistory: TransactionEvent[];
+  createdAt: string;
+  updatedAt: string;
+
+  // Contract
+  contractToken?: string;    // public link for buyer to sign
+  contractSignedAt?: string;
+  contractSignerName?: string;
+  contractSignerIp?: string;
+  contractDocUrl?: string;   // DocuSign envelope URL when configured
+
+  // Payment
+  paymentProvider?: "stripe" | "simulated";
+  stripePaymentIntentId?: string;
+  stripeCheckoutSessionId?: string;
+  stripeChargeId?: string;
+  paymentReceivedAt?: string;
+  paymentMethodLast4?: string;
+
+  // Escrow
+  escrowStartedAt?: string;
+  escrowReleasedAt?: string;
+  escrowReleaseAuthorizedBy?: "auto" | "operator" | "delivery_confirmed";
+
+  // Shipping
+  shippingProvider?: "shippo" | "manual" | "fedex" | "ups" | "dhl";
+  trackingNumber?: string;
+  carrierName?: string;
+  shippedAt?: string;
+  deliveredAt?: string;
+  deliveryConfirmedBy?: "carrier" | "buyer_confirmed" | "operator";
+
+  // Supplier payout
+  supplierName?: string;
+  supplierStripeAccountId?: string;  // Connect account
+  supplierPayoutId?: string;
+  supplierPayoutAt?: string;
+
+  // Dispute / refund
+  disputedAt?: string;
+  disputeReason?: string;
+  disputeResolution?: "refund_buyer" | "release_supplier" | "split" | "pending";
+  refundedAt?: string;
+  refundCents?: number;
+
+  // AI confidence + risk
+  aiConfidenceScore?: number;  // 0-100, computed at proposal time
+  riskFlags?: string[];        // ids of any risk flags triggered
+
+  // Public share token (buyer accesses /transaction/[id]?t=<token>)
+  shareToken: string;
+  shareExpiresAt: string;
+};
+
+// Revenue ledger entry — one per state transition that moves money
+export type RevenueEntry = {
+  id: string;
+  transactionId: string;
+  ts: string;
+  kind: "platform_fee" | "escrow_fee" | "supplier_payout" | "refund" | "dispute_hold";
+  cents: number;            // positive = inflow to platform, negative = outflow
+  detail: string;
 };
 
 export type RiskFlag = {
@@ -695,6 +840,55 @@ export const store = {
     const entry = ledger.find((e) => e.date === date);
     if (!entry) return { cost: 0, calls: 0 };
     return { cost: entry.totalCostUsd, calls: entry.callCount };
+  },
+
+  // ─── Transactions (slice 39) ───────────────────────────────────────────
+  async getTransactions(): Promise<Transaction[]> {
+    return getBackend().read<Transaction[]>(TRANSACTIONS_FILE, []);
+  },
+  async getTransaction(id: string): Promise<Transaction | null> {
+    const txns = await store.getTransactions();
+    return txns.find((t) => t.id === id) ?? null;
+  },
+  async getTransactionByQuote(quoteId: string): Promise<Transaction | null> {
+    const txns = await store.getTransactions();
+    return txns.find((t) => t.quoteId === quoteId) ?? null;
+  },
+  async saveTransaction(t: Transaction): Promise<void> {
+    const existing = await store.getTransactions();
+    const all = [t, ...existing.filter((x) => x.id !== t.id)].slice(0, 500);
+    await getBackend().write(TRANSACTIONS_FILE, all);
+  },
+  async patchTransaction(id: string, patch: Partial<Transaction>): Promise<Transaction | null> {
+    const txns = await store.getTransactions();
+    const idx = txns.findIndex((t) => t.id === id);
+    if (idx === -1) return null;
+    txns[idx] = { ...txns[idx], ...patch, updatedAt: new Date().toISOString() };
+    await getBackend().write(TRANSACTIONS_FILE, txns);
+    return txns[idx];
+  },
+  async appendTransactionEvent(
+    id: string,
+    event: TransactionEvent,
+  ): Promise<Transaction | null> {
+    const txns = await store.getTransactions();
+    const idx = txns.findIndex((t) => t.id === id);
+    if (idx === -1) return null;
+    txns[idx].stateHistory = [...(txns[idx].stateHistory ?? []), event];
+    txns[idx].state = event.state;
+    txns[idx].updatedAt = event.ts;
+    await getBackend().write(TRANSACTIONS_FILE, txns);
+    return txns[idx];
+  },
+
+  // ─── Revenue ledger (slice 39) ─────────────────────────────────────────
+  async getRevenueLedger(): Promise<RevenueEntry[]> {
+    return getBackend().read<RevenueEntry[]>(REVENUE_LEDGER_FILE, []);
+  },
+  async addRevenueEntry(entry: RevenueEntry): Promise<void> {
+    const existing = await store.getRevenueLedger();
+    const all = [entry, ...existing].slice(0, 5000);
+    await getBackend().write(REVENUE_LEDGER_FILE, all);
   },
 
   // ─── GDPR / forget-buyer ───────────────────────────────────────────────

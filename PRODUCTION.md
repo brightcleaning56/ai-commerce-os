@@ -230,6 +230,83 @@ For inbound SMS replies, set the Twilio number's webhook to `/api/webhooks/twili
 
 ---
 
+## Step 6.5 — Transaction orchestration (Stripe + contracts + shipping)
+
+The platform handles full deal lifecycle: proposal → signature → escrow → ship → release → supplier payout. Three modes mirror the email/SMS pattern:
+
+| Mode | When | Behavior |
+|---|---|---|
+| `simulated` | No `STRIPE_SECRET_KEY` set | Pay/escrow/release happen locally — no real money moves |
+| `sandbox` | `STRIPE_SECRET_KEY=sk_test_...` | Real Stripe Checkout with test cards |
+| `live` | `STRIPE_SECRET_KEY=sk_live_...` AND `STRIPE_LIVE=true` | Real money. Both required. |
+
+### Stripe (payment + escrow + refunds)
+
+```bash
+# 1. Create a Stripe account, complete activation
+#    https://dashboard.stripe.com → toggle Test/Live in top nav
+
+# 2. Standard Connect (or Destination Charges) for supplier payouts
+#    https://stripe.com/connect — onboard each supplier separately
+
+# 3. Set keys (use sk_test_ first; promote to sk_live_ when ready)
+vercel env add STRIPE_SECRET_KEY production         # sk_test_... or sk_live_...
+vercel env add STRIPE_PUBLISHABLE_KEY production    # pk_test_... or pk_live_...
+vercel env add STRIPE_LIVE production               # value: true (ONLY after sandbox testing)
+
+# 4. Webhook endpoint — Stripe → Developers → Webhooks → Add endpoint
+#    URL: https://<your-domain>/api/webhooks/stripe
+#    Events: checkout.session.completed, payment_intent.payment_failed, charge.refunded
+#    Copy the signing secret:
+vercel env add STRIPE_WEBHOOK_SECRET production     # whsec_...
+
+# 5. Platform economics (basis points — 800 = 8%)
+vercel env add PLATFORM_FEE_BPS production          # default 800 (8%)
+vercel env add ESCROW_FEE_BPS production            # default 100 (1%)
+```
+
+The webhook verifier is `lib/payments.ts` + `app/api/webhooks/stripe/route.ts`. It checks HMAC-SHA256 with 5-minute replay protection. Without `STRIPE_WEBHOOK_SECRET`, the endpoint returns 503 (refuses unsigned bodies).
+
+### Contracts
+
+```bash
+# Default: in-app clickwrap signature (signer name + IP + UA stored)
+vercel env add CONTRACT_MODE production             # in-app  (default)
+
+# To enable DocuSign envelopes instead:
+vercel env add CONTRACT_MODE production             # docusign
+vercel env add DOCUSIGN_INTEGRATION_KEY production
+vercel env add DOCUSIGN_USER_ID production
+vercel env add DOCUSIGN_ACCOUNT_ID production
+vercel env add DOCUSIGN_PRIVATE_KEY production      # RSA private key (escape newlines)
+```
+
+### Shipping & tracking
+
+```bash
+# Default: manual entry (operator types carrier + tracking number)
+vercel env add SHIPPING_MODE production             # manual  (default)
+
+# To enable Shippo for automated label + live tracking:
+vercel env add SHIPPING_MODE production             # shippo
+vercel env add SHIPPO_TOKEN production              # shippo_test_... or shippo_live_...
+```
+
+### Verifying the full flow before going live
+
+```bash
+# 1. Create a quote, accept it → /api/transactions  (POST quoteId)
+# 2. Operator dashboard /transactions → Send Proposal (draft → proposed)
+# 3. Open the buyer link in a private tab → sign + pay (Stripe test card 4242…)
+# 4. Watch /api/webhooks/stripe receive checkout.session.completed
+# 5. Operator dashboard → Mark Shipped → Confirm Delivered → Release to Supplier
+# 6. /earnings should show the platform fee + escrow fee in "Live Platform Revenue"
+```
+
+`STRIPE_LIVE=true` is the dead-man switch. Even with `sk_live_` set, charges run in sandbox mode unless `STRIPE_LIVE=true`. This prevents accidentally charging real cards during a misconfigured deploy.
+
+---
+
 ## Step 7 — First-view webhook (optional)
 
 Get a Slack ping (or any HTTP POST) when a recipient opens a tracked share link for the first time.

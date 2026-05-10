@@ -22,6 +22,10 @@ import {
   Telescope,
   Store,
   Palette,
+  Scale,
+  Landmark,
+  ScrollText,
+  ArrowLeftRight,
 } from "lucide-react";
 
 export type NavItem = {
@@ -31,34 +35,80 @@ export type NavItem = {
   badge?: string;
 };
 
-export const PRIMARY_NAV: NavItem[] = [
-  { label: "Command Center", href: "/", icon: LayoutDashboard },
-  { label: "Product Discovery", href: "/products", icon: Package },
-  { label: "Demand Intelligence", href: "/demand", icon: TrendingUp },
-  { label: "Insights & Forecasts", href: "/insights", icon: Telescope, badge: "PRO" },
-  { label: "Supplier Finder", href: "/suppliers", icon: Factory },
-  { label: "Buyer Discovery", href: "/buyers", icon: Users },
-  { label: "Outreach Automation", href: "/outreach", icon: Send },
-  { label: "CRM Pipeline", href: "/crm", icon: Workflow },
-  { label: "Tasks", href: "/tasks", icon: FileText },
-  { label: "Approvals", href: "/approvals", icon: ShieldCheck, badge: "REVIEW" },
-  { label: "Suggestions", href: "/suggestions", icon: Lightbulb, badge: "AI" },
-  { label: "Deals & Quotes", href: "/deals", icon: FileText },
-  { label: "Marketplace", href: "/marketplace", icon: Store, badge: "FEE" },
-  { label: "Earnings", href: "/earnings", icon: DollarSign, badge: "$" },
-  { label: "AI Agents", href: "/agents", icon: Bot, badge: "AI" },
-  { label: "Pipeline", href: "/pipeline", icon: Zap, badge: "AUTO" },
-  { label: "Share Activity", href: "/share-activity", icon: Activity, badge: "LIVE" },
-  { label: "Agent Runs", href: "/agent-runs", icon: Bot, badge: "LIVE" },
-  { label: "Live Signals", href: "/signals", icon: Database, badge: "LIVE" },
-  { label: "Agent Store", href: "/agent-store", icon: Plug },
-  { label: "Risk Center", href: "/risk", icon: ShieldAlert },
-  { label: "Reports & Analytics", href: "/reports", icon: BarChart3 },
-  { label: "Automations", href: "/automations", icon: Zap },
-  { label: "Data Sources", href: "/data-sources", icon: Database },
-  { label: "Learning Engine", href: "/learning", icon: Brain },
-  { label: "Integrations", href: "/integrations", icon: Plug },
+export type NavSection = {
+  title: string;
+  items: NavItem[];
+};
+
+export const NAV_SECTIONS: NavSection[] = [
+  {
+    title: "Overview",
+    items: [
+      { label: "Command Center", href: "/", icon: LayoutDashboard },
+    ],
+  },
+  {
+    title: "Discover",
+    items: [
+      { label: "Product Discovery", href: "/products", icon: Package },
+      { label: "Demand Intelligence", href: "/demand", icon: TrendingUp },
+      { label: "Live Signals", href: "/signals", icon: Database, badge: "LIVE" },
+      { label: "Insights & Forecasts", href: "/insights", icon: Telescope, badge: "PRO" },
+      { label: "Buyer Discovery", href: "/buyers", icon: Users },
+      { label: "Supplier Finder", href: "/suppliers", icon: Factory },
+    ],
+  },
+  {
+    title: "Outreach",
+    items: [
+      { label: "Outreach Automation", href: "/outreach", icon: Send },
+      { label: "AI Agents", href: "/agents", icon: Bot, badge: "AI" },
+      { label: "Auto Pipeline", href: "/pipeline", icon: Zap, badge: "AUTO" },
+      { label: "Approvals", href: "/approvals", icon: ShieldCheck, badge: "REVIEW" },
+      { label: "Suggestions", href: "/suggestions", icon: Lightbulb, badge: "AI" },
+      { label: "Tasks", href: "/tasks", icon: FileText },
+      { label: "CRM Pipeline", href: "/crm", icon: Workflow },
+    ],
+  },
+  {
+    title: "Transact",
+    items: [
+      { label: "Transactions", href: "/transactions", icon: ArrowLeftRight, badge: "NEW" },
+      { label: "Escrow Center", href: "/escrow", icon: Landmark, badge: "NEW" },
+      { label: "Contracts", href: "/contracts", icon: ScrollText, badge: "NEW" },
+      { label: "Deals & Quotes", href: "/deals", icon: Scale },
+      { label: "Marketplace", href: "/marketplace", icon: Store, badge: "FEE" },
+    ],
+  },
+  {
+    title: "Finance",
+    items: [
+      { label: "Earnings", href: "/earnings", icon: DollarSign, badge: "$" },
+      { label: "Reports & Analytics", href: "/reports", icon: BarChart3 },
+    ],
+  },
+  {
+    title: "Intelligence",
+    items: [
+      { label: "Risk Center", href: "/risk", icon: ShieldAlert },
+      { label: "Learning Engine", href: "/learning", icon: Brain },
+      { label: "Agent Runs", href: "/agent-runs", icon: Bot, badge: "LIVE" },
+      { label: "Share Activity", href: "/share-activity", icon: Activity, badge: "LIVE" },
+    ],
+  },
+  {
+    title: "Platform",
+    items: [
+      { label: "Agent Store", href: "/agent-store", icon: Plug },
+      { label: "Automations", href: "/automations", icon: Zap },
+      { label: "Data Sources", href: "/data-sources", icon: Database },
+      { label: "Integrations", href: "/integrations", icon: Plug },
+    ],
+  },
 ];
+
+// Flat list for backwards compat (command palette, etc.)
+export const PRIMARY_NAV: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items);
 
 export const ADMIN_NAV: NavItem[] = [
   { label: "Super Admin", href: "/admin", icon: ShieldCheck },

@@ -12,7 +12,8 @@ import {
   TrendingUp,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import {
   Bar,
@@ -55,12 +56,59 @@ function fmt(n: number) {
   return `$${Math.round(n).toLocaleString()}`;
 }
 
+type LiveRevenueStats = {
+  totalPlatformFeesCents: number;
+  totalEscrowFeesCents: number;
+  totalSupplierPayoutsCents: number;
+  totalRefundsCents: number;
+  netPlatformRevenueCents: number;
+  inFlightEscrowCents: number;
+  byMonth: { month: string; platformFeesCents: number; escrowFeesCents: number }[];
+  txnsByState: Record<string, number>;
+};
+
+function fmtCents(cents: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(cents / 100);
+}
+
 export default function EarningsPage() {
   const t = totals();
   const lifetime = MONTHLY_EARNINGS.reduce((s, m) => s + m.earned, 0) + t.earned;
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [requested, setRequested] = useState(false);
+  const [live, setLive] = useState<LiveRevenueStats | null>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchLive() {
+      try {
+        const r = await fetch("/api/transactions/stats", { cache: "no-store" });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!cancelled) setLive(d.stats);
+      } catch {
+        // Silent fail — live panel just won't render. Demo cards still work.
+      }
+    }
+    fetchLive();
+    const id = setInterval(fetchLive, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  const hasLive = !!live && (
+    live.totalPlatformFeesCents > 0
+    || live.totalEscrowFeesCents > 0
+    || live.inFlightEscrowCents > 0
+    || Object.values(live.txnsByState ?? {}).some((n) => n > 0)
+  );
 
   function handleConfirmPayout() {
     setRequested(true);
@@ -170,6 +218,57 @@ export default function EarningsPage() {
         </div>
       )}
 
+      {/* Live platform revenue from transaction ledger */}
+      {hasLive && live && (
+        <div className="rounded-xl border border-accent-green/30 bg-gradient-to-br from-accent-green/5 to-transparent p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-accent-green">
+              <Sparkles className="h-3.5 w-3.5" /> Live Platform Revenue · Transaction Ledger
+            </div>
+            <Link
+              href="/transactions"
+              className="text-[11px] text-brand-300 hover:underline"
+            >
+              View transactions →
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border border-bg-border bg-bg-card p-3">
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Net Platform Revenue</div>
+              <div className="mt-1 text-2xl font-bold text-accent-green">
+                {fmtCents(live.netPlatformRevenueCents)}
+              </div>
+              <div className="mt-0.5 text-[11px] text-ink-tertiary">
+                Platform + escrow fees, less refunds
+              </div>
+            </div>
+            <div className="rounded-lg border border-bg-border bg-bg-card p-3">
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">In-flight Escrow</div>
+              <div className="mt-1 text-2xl font-bold text-accent-amber">
+                {fmtCents(live.inFlightEscrowCents)}
+              </div>
+              <div className="mt-0.5 text-[11px] text-ink-tertiary">
+                Held until delivery confirmed
+              </div>
+            </div>
+            <div className="rounded-lg border border-bg-border bg-bg-card p-3">
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Platform Fees</div>
+              <div className="mt-1 text-2xl font-bold">{fmtCents(live.totalPlatformFeesCents)}</div>
+              <div className="mt-0.5 text-[11px] text-ink-tertiary">
+                Escrow fees: {fmtCents(live.totalEscrowFeesCents)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-bg-border bg-bg-card p-3">
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Supplier Payouts</div>
+              <div className="mt-1 text-2xl font-bold">{fmtCents(live.totalSupplierPayoutsCents)}</div>
+              <div className="mt-0.5 text-[11px] text-ink-tertiary">
+                Refunds: {fmtCents(live.totalRefundsCents)}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiCard
           label="Lifetime Earned"
@@ -216,7 +315,7 @@ export default function EarningsPage() {
           </div>
           <div className="h-72 px-3 py-3">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={MONTHLY_EARNINGS}>
+              <BarChart data={MONTHLY_EARNINGS} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="#252538" strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="m" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
@@ -269,10 +368,11 @@ export default function EarningsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+        <div className="lg:col-span-2 rounded-xl border border-bg-border bg-bg-card">
           <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
             Commission Ledger
           </div>
+          <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
               <tr>
@@ -325,6 +425,7 @@ export default function EarningsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         <div className="space-y-4">
