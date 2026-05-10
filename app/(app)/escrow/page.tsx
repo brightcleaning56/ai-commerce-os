@@ -245,7 +245,7 @@ export default function EscrowPage() {
           {[
             { label: "Buyer", sub: "pays platform", Icon: Users, color: "bg-accent-blue/15 text-accent-blue" },
             { arrow: true },
-            { label: "AI Commerce Escrow", sub: "holds funds securely", Icon: Landmark, color: "bg-brand-500/15 text-brand-200", highlight: true },
+            { label: "AVYN Escrow", sub: "holds funds securely", Icon: Landmark, color: "bg-brand-500/15 text-brand-200", highlight: true },
             { arrow: true },
             { label: "Milestone Check", sub: "AI verifies delivery", Icon: ShieldCheck, color: "bg-accent-amber/15 text-accent-amber" },
             { arrow: true },

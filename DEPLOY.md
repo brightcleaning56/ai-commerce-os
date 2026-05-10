@@ -1,4 +1,4 @@
-# Deploying AI Commerce OS to Vercel
+# Deploying AVYN Commerce to Vercel
 
 Production-ready. Follow the steps below to get a public URL.
 

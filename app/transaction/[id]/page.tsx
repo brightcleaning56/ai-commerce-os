@@ -13,6 +13,7 @@ import {
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { AvynMark } from "@/components/AvynLogo";
 
 type Txn = {
   id: string;
@@ -227,7 +228,10 @@ function TransactionView() {
     <div className="min-h-screen bg-bg-base">
       <header className="border-b border-bg-border bg-bg-panel/80 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-4">
-          <Link href="/welcome" className="text-sm font-bold">AI Commerce OS</Link>
+          <Link href="/welcome" className="flex items-center gap-2 text-sm font-bold">
+            <AvynMark size={22} />
+            <span>AVYN Commerce</span>
+          </Link>
           <span className={`rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wider ${
             txn.state === "completed" ? "bg-accent-green/15 text-accent-green"
             : txn.state === "disputed" ? "bg-accent-amber/15 text-accent-amber"
@@ -483,7 +487,7 @@ function TransactionView() {
         </div>
 
         <div className="text-center text-[10px] text-ink-tertiary">
-          Secure transaction · escrow-protected · {fmt(txn.productTotalCents)} held by AI Commerce OS until delivery confirmed.
+          Secure transaction · escrow-protected · {fmt(txn.productTotalCents)} held by AVYN Commerce until delivery confirmed.
         </div>
       </main>
     </div>

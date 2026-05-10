@@ -50,7 +50,7 @@ Set these via Netlify CLI or the dashboard:
 # REQUIRED — operator identity
 netlify env:set OPERATOR_NAME "Eric Moore"
 netlify env:set OPERATOR_EMAIL "Ericduolo4@gmail.com"
-netlify env:set OPERATOR_COMPANY "AI Commerce OS"
+netlify env:set OPERATOR_COMPANY "AVYN Commerce"
 netlify env:set OPERATOR_TITLE "Founder"
 
 # REQUIRED — admin auth (use the token from your local .env.local, or generate fresh)
@@ -75,7 +75,7 @@ netlify env:set NEXT_PUBLIC_APP_ORIGIN "https://your-site.netlify.app"
 
 # OPTIONAL — staged email rollout
 netlify env:set EMAIL_FROM "Ericduolo4@gmail.com"
-netlify env:set EMAIL_FROM_NAME "Eric Moore — AI Commerce OS"
+netlify env:set EMAIL_FROM_NAME "Eric Moore — AVYN Commerce"
 netlify env:set EMAIL_TEST_RECIPIENT "Ericduolo4@gmail.com"
 netlify env:set EMAIL_LIVE "false"
 # Then later, when ready:

@@ -1,6 +1,8 @@
-# AI Commerce OS
+# AVYN Commerce
 
-Autonomous AI commerce agent network — finds trending products, matches buyers, and drafts personalized outreach end-to-end. Built with Next.js 14, Tailwind, and Anthropic Claude.
+**AI · Automation · Growth.** Autonomous commerce orchestration — discovers trending products, matches buyers, drafts personalized outreach, signs contracts, holds escrow, releases supplier payouts. Built with Next.js 14, Tailwind, and Anthropic Claude.
+
+> Repo dir is still `ai-commerce-os/` for git stability. The product is **AVYN Commerce** everywhere users see it.
 
 ## What's in the box
 
