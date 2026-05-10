@@ -187,6 +187,21 @@ export async function transitionTransaction(args: {
 
   const updated = await store.getTransaction(args.id);
   if (!updated) throw new Error("Transaction disappeared mid-transition");
+
+  // Fire-and-forget transition email. Best-effort — must NEVER block or throw
+  // out of this function, otherwise a Postmark / Resend hiccup could brick the
+  // entire state machine. Errors are logged in lib/transactionEmails.ts.
+  // Use dynamic import to avoid pulling email dependencies into modules that
+  // don't need them (e.g., the cron auto-release ships without email config).
+  import("@/lib/transactionEmails")
+    .then((m) => m.sendTransitionEmail(updated, args.to))
+    .catch((e) => {
+      console.warn(
+        `[transitionTransaction] email side-effect failed for ${args.id} → ${args.to}:`,
+        e instanceof Error ? e.message : e,
+      );
+    });
+
   return updated;
 }
 

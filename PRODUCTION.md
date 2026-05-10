@@ -312,6 +312,34 @@ end-to-end so the operator UI can be demoed: a synthetic `sim_acct_*`
 gets persisted, and the panel always reads "Charges + payouts enabled."
 This lets you build the workflow without needing real Stripe creds.
 
+### Lifecycle emails (buyer + operator notifications)
+
+Every state transition that affects the buyer fires an automatic email
+through the existing `lib/email.ts` adapter (Postmark / Resend / fallback).
+No hooks to wire — `transitionTransaction()` calls
+`sendTransitionEmail()` best-effort after the state + ledger writes
+complete. Email failures never block transitions.
+
+| Transition | Recipient | Subject |
+|---|---|---|
+| `signed` | buyer | "Contract signed — pay to start escrow" |
+| `escrow_held` | buyer | "Payment received — funds held in escrow" |
+| `shipped` | buyer | "Your order has shipped" (carrier + tracking #) |
+| `delivered` | buyer | "Delivery confirmed — please inspect" |
+| `released` | buyer | "Transaction complete — funds released" |
+| `disputed` | operator | "Dispute opened — review now" |
+| `refunded` | buyer | "Refund processed" |
+| `cancelled` | buyer | "Transaction cancelled" |
+
+In **simulated mode** (no `EMAIL_LIVE=true` or no provider token), emails
+log to console but don't actually send. Same path Postmark/Resend would
+take — useful for local dev. See Step 5 above for live email setup.
+
+The `escrow_held` and `delivered` emails surface the platform's
+auto-release window (`AUTO_RELEASE_HOURS` env var) so the buyer always
+knows their dispute deadline. Email copy and the `/transaction/[id]`
+buyer-page countdown stay in sync.
+
 ### Auto-release escrow (no orphan funds)
 
 The platform shouldn't hold buyer funds indefinitely if the operator
