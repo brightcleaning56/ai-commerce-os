@@ -28,6 +28,15 @@
 [functions]
   node_bundler = "esbuild"
 
+# ─── Function-level overrides ─────────────────────────────────────────────
+# IMPORTANT: Heavy AI routes (pipeline, agents/*) easily exceed the default
+# 10-second timeout when ANTHROPIC_API_KEY is set and real Claude calls fire.
+# Netlify timeout MUST be configured per-function in the dashboard:
+#   Site → Functions → <function-name> → Settings → Function timeout
+# Free tier max = 10s, Pro = 26s, Enterprise = configurable.
+# When the timeout fires, Netlify returns an HTML error page that breaks
+# JSON.parse on the client — see lib/agents/pipeline.ts client handler.
+
 # ─── Scheduled functions ───────────────────────────────────────────────────
 # Every 6 hours: trigger the autonomous pipeline run
 [functions."cron-pipeline"]

@@ -249,6 +249,39 @@ For Sentry: install `@sentry/nextjs`, set `SENTRY_DSN`, set `LOG_TO_SENTRY=true`
 
 ---
 
+## Function timeouts — important for AI pipeline routes
+
+When the live pipeline page shows `Unexpected token '<', "<HTML> <HE"... is not valid JSON`, Netlify timed out the function and returned its branded HTML error page. The client's `JSON.parse` then chokes on `<HTML>`.
+
+**Default Netlify Function timeouts:**
+
+| Tier | Synchronous timeout | Background timeout |
+|---|---|---|
+| Free / Starter | **10 seconds** | n/a |
+| Pro | 26 seconds | 15 minutes |
+| Enterprise | configurable | configurable |
+
+A real Anthropic-backed pipeline run (Trend Hunter → Buyer Discovery → Supplier Finder → Outreach) routinely takes 20–45s. On the free tier it WILL time out.
+
+**Three ways to fix:**
+
+1. **Bump the timeout in the Netlify dashboard** (Pro tier only):
+   `Site Settings → Functions → api/agents/pipeline → Function timeout → 26 seconds`
+   Repeat for `api/cron/pipeline`, `api/agents/trend-hunter`, etc.
+
+2. **Run without ANTHROPIC_API_KEY** (works on free tier):
+   Without the key, agents fall back to deterministic stubs that finish in ~2–3s — useful for demos but the data is fake.
+   ```bash
+   netlify env:unset ANTHROPIC_API_KEY
+   ```
+
+3. **Reduce per-run work** (works on free tier with a real key):
+   The pipeline UI lets you set `Max Products = 1` and `Buyers per product = 1`. With those, a single Anthropic call per stage usually fits inside 10s. Use that for ad-hoc demos; rely on cron (`every 6h`) for full runs since cron has its own larger window.
+
+The client-side handler in `app/(app)/pipeline/page.tsx` now detects HTML responses and prints a clear "function timeout" message instead of `Unexpected token '<'`.
+
+---
+
 ## Pre-launch checklist (Netlify-specific)
 
 | Check | How |

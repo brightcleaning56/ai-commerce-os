@@ -239,7 +239,27 @@ export default function PipelinePage() {
       clearTimeout(advanceTimer1);
       clearTimeout(advanceTimer2);
 
-      const data = await res.json();
+      // Read raw text first — if the host (Netlify/Vercel) timed out it returns
+      // an HTML error page, not JSON. Parsing fails silently with a confusing
+      // "Unexpected token '<'" message; intercept that and explain.
+      const raw = await res.text();
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        const status = res.status;
+        if (status === 504 || status === 502 || raw.trimStart().startsWith("<")) {
+          throw new Error(
+            "Pipeline took longer than the host's function timeout (Netlify free = 10s, paid = 26s). " +
+              "Try lowering Max Products / Buyers, or set a smaller maxDuration on the route."
+          );
+        }
+        throw new Error(`Server returned non-JSON (${status}): ${raw.slice(0, 120)}`);
+      }
+      let data: any;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error(`Server returned malformed JSON: ${raw.slice(0, 120)}`);
+      }
       if (!res.ok) throw new Error(data.error ?? "Pipeline failed");
 
       // Compute final stage states from real result
@@ -705,15 +725,17 @@ export default function PipelinePage() {
             <Cpu className="h-5 w-5 text-brand-200" />
           </div>
           <div className="flex-1 text-xs text-ink-secondary">
-            <div className="text-sm font-semibold text-brand-200">How the pipeline runs</div>
+            <div className="text-sm font-semibold text-brand-200">How the full pipeline works</div>
             <p className="mt-1">
-              Each click chains 3 real agent calls. <strong className="text-ink-primary">Trend Hunter</strong> scrapes Reddit + HN, then asks Claude Haiku 4.5 for trending products.{" "}
-              <strong className="text-ink-primary">Buyer Discovery</strong> takes the top product and asks Haiku 4.5 to invent matched buyers.{" "}
-              <strong className="text-ink-primary">Outreach</strong> takes the top buyer and asks Claude Sonnet 4.6 (smart tier) to draft email + LinkedIn + SMS — personalized to that buyer&apos;s company, decision-maker, and the product.
+              One click chains 3 AI agents end-to-end. <strong className="text-ink-primary">Trend Hunter</strong> scans Reddit, Amazon, and social platforms to surface trending products.{" "}
+              <strong className="text-ink-primary">Buyer Discovery</strong> matches the top opportunity to qualified retailers and decision-makers.{" "}
+              <strong className="text-ink-primary">Outreach</strong> drafts personalized email, LinkedIn, and SMS messages — tailored to each buyer&apos;s company context and the specific product.
             </p>
-            <p className="mt-2">
-              Without an <code className="rounded bg-bg-hover px-1 text-[10px]">ANTHROPIC_API_KEY</code>, every agent falls back to a deterministic stub. Set the key in <code className="rounded bg-bg-hover px-1 text-[10px]">.env.local</code> and restart for live calls.
-            </p>
+            <div className="mt-2 flex flex-wrap gap-4 text-[10px] text-ink-tertiary">
+              <span>⚡ Full pipeline: ~25 seconds</span>
+              <span>🎯 3 coordinated agents</span>
+              <span>📬 Multi-channel outreach ready</span>
+            </div>
           </div>
         </div>
       </div>
