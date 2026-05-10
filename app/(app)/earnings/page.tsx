@@ -221,6 +221,22 @@ export default function EarningsPage() {
         </div>
       )}
 
+      {!hasLive && (
+        <div className="flex items-start gap-2 rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-3 text-xs">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <DollarSign className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1 text-ink-secondary">
+            <span className="font-semibold text-accent-amber">Commission ledger preview</span>
+            {" "}— Live commission tracking activates once Stripe Connect destination charges
+            settle. The numbers below show the working shape of the ledger (sample data).
+            Once transactions accumulate, the &ldquo;Live Platform Revenue&rdquo; panel
+            replaces these figures and the chart/ledger pull from your real{" "}
+            <code className="rounded bg-bg-hover px-1 text-[10px]">revenue_ledger</code>.
+          </div>
+        </div>
+      )}
+
       {/* Live platform revenue from transaction ledger */}
       {hasLive && live && (
         <div className="rounded-xl border border-accent-green/30 bg-gradient-to-br from-accent-green/5 to-transparent p-5">
@@ -279,28 +295,28 @@ export default function EarningsPage() {
         <KpiCard
           label="Lifetime Earned"
           value={fmt(lifetime)}
-          delta="+31% YoY"
+          delta={hasLive ? "Demo + sample ledger" : "Sample data"}
           tone="brand"
           Icon={CircleDollarSign}
         />
         <KpiCard
           label="Pending Payout"
           value={fmt(t.pending)}
-          delta="Next: Jun 2"
+          delta={`${EARNINGS.filter((e) => e.status === "Pending Payout").length} sample deals`}
           tone="amber"
           Icon={Clock}
         />
         <KpiCard
           label="In-Flight (Open Deals)"
           value={fmt(t.inFlight)}
-          delta={`${EARNINGS.filter((e) => e.status === "Earned").length} deals`}
+          delta={`${EARNINGS.filter((e) => e.status === "Earned").length} sample deals`}
           tone="blue"
           Icon={TrendingUp}
         />
         <KpiCard
           label="30-Day Forecast"
           value={fmt(t.forecast)}
-          delta="Probability-weighted"
+          delta="Static projection · not modelled"
           tone="green"
           Icon={Sparkles}
         />
@@ -309,7 +325,10 @@ export default function EarningsPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 rounded-xl border border-bg-border bg-bg-card">
           <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
-            <div className="text-sm font-semibold">Monthly Commissions</div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold">Monthly Commissions</span>
+              <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
+            </div>
             <div className="flex items-center gap-3 text-[11px]">
               <span className="flex items-center gap-1.5">
                 <span className="h-2 w-2 rounded-full bg-brand-400" /> Earned
@@ -375,8 +394,11 @@ export default function EarningsPage() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 rounded-xl border border-bg-border bg-bg-card">
-          <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
-            Commission Ledger
+          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+            <div className="text-sm font-semibold">Commission Ledger</div>
+            <Link href="/transactions" className="text-[11px] text-brand-300 hover:underline">
+              Real ledger: /transactions →
+            </Link>
           </div>
           <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -436,8 +458,9 @@ export default function EarningsPage() {
 
         <div className="space-y-4">
           <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
-            <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
-              Payout History
+            <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+              <div className="text-sm font-semibold">Payout History</div>
+              <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
             </div>
             <div className="divide-y divide-bg-border">
               {PAYOUTS.map((p) => (
