@@ -28,10 +28,34 @@ const ADMIN_LINKS = [
   { href: "/admin/audit", title: "Audit Logs", desc: "Tamper-evident hash chain · 7y retention", Icon: ShieldAlert },
 ];
 
+type Health = {
+  ok: boolean;
+  storage: { name: string; ok: boolean; detail?: string };
+  spend: { today: { cost: number; calls: number }; budget: number | null };
+  config: {
+    anthropic: boolean;
+    cronEnabled: boolean;
+    emailLive: boolean;
+    emailProvider: string;
+    smsLive: boolean;
+    sentryConfigured: boolean;
+    storeBackend: string;
+  };
+  counts: {
+    drafts: number;
+    agentRuns: number;
+    quotes: number;
+    pipelineRuns: number;
+    riskFlags: number;
+    cronRuns: number;
+  };
+};
+
 export default function AdminPage() {
   const [killActive, setKillActive] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [operator, setOperator] = useState<{ name: string; company: string; email: string } | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -42,6 +66,15 @@ export default function AdminPage() {
       .then((r) => r.json())
       .then((d) => { if (d?.name) setOperator(d); })
       .catch(() => {});
+    function loadHealth() {
+      fetch("/api/admin/health", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d) setHealth(d); })
+        .catch(() => {});
+    }
+    loadHealth();
+    const id = setInterval(loadHealth, 30000);
+    return () => clearInterval(id);
   }, []);
 
   function handleConfirmKill() {
@@ -84,26 +117,86 @@ export default function AdminPage() {
               </span>
             </div>
             <div className="mt-0.5 text-[11px] text-ink-tertiary">
-              Owner: <span className="font-medium text-ink-secondary">{operator?.name ?? "—"}</span> · <span className="font-mono">{operator?.email ?? "—"}</span> · Created Jan 18, 2024
+              Owner: <span className="font-medium text-ink-secondary">{operator?.name ?? "—"}</span> · <span className="font-mono">{operator?.email ?? "—"}</span>
+              {health && (
+                <> · Storage: <span className="font-mono">{health.config.storeBackend}</span></>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs">
-            <span className="flex items-center gap-1.5 rounded-md bg-accent-green/15 px-2 py-1 text-accent-green">
-              <CheckCircle2 className="h-3 w-3" /> SOC 2 Type II
+            <span
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 ${
+                health?.ok
+                  ? "bg-accent-green/15 text-accent-green"
+                  : health
+                  ? "bg-accent-red/15 text-accent-red"
+                  : "bg-bg-hover text-ink-tertiary"
+              }`}
+            >
+              <CheckCircle2 className="h-3 w-3" />
+              {health ? (health.ok ? "Storage healthy" : "Storage degraded") : "Checking…"}
             </span>
             <span className="flex items-center gap-1.5 rounded-md bg-accent-green/15 px-2 py-1 text-accent-green">
-              <CheckCircle2 className="h-3 w-3" /> GDPR · CCPA
+              <CheckCircle2 className="h-3 w-3" /> Hash chain verified
             </span>
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Members" v="9" hint="2 pending invites" />
-        <Stat label="Active agents" v="9" hint="of 9 enabled" />
-        <Stat label="Tokens 30d" v="4.1M" hint="of 10M cap" />
-        <Stat label="Spend 30d" v="$1,847" hint="across all agents" />
+        <Stat
+          label="Pipeline runs"
+          v={health ? String(health.counts.pipelineRuns) : "—"}
+          hint={health ? `${health.counts.agentRuns} agent runs total` : "Loading…"}
+        />
+        <Stat
+          label="Drafts in store"
+          v={health ? String(health.counts.drafts) : "—"}
+          hint={health ? `${health.counts.quotes} quotes generated` : "Loading…"}
+        />
+        <Stat
+          label="Spend today"
+          v={health ? `$${health.spend.today.cost.toFixed(2)}` : "—"}
+          hint={health
+            ? health.spend.budget != null
+              ? `of $${health.spend.budget.toFixed(0)} cap · ${health.spend.today.calls} calls`
+              : "no cap set"
+            : "Loading…"}
+        />
+        <Stat
+          label="Risk flags"
+          v={health ? String(health.counts.riskFlags) : "—"}
+          hint={health ? `${health.counts.cronRuns} cron runs total` : "Loading…"}
+        />
       </div>
+
+      {/* Live config status */}
+      {health && (
+        <div className="rounded-xl border border-bg-border bg-bg-card">
+          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <ShieldCheck className="h-4 w-4 text-brand-300" /> Platform configuration
+            </div>
+            <span className="text-[11px] text-ink-tertiary">refreshes every 30s</span>
+          </div>
+          <div className="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2 lg:grid-cols-3">
+            <ConfigRow label="Anthropic API" enabled={health.config.anthropic} hint={health.config.anthropic ? "Live agents firing" : "Falls back to deterministic stubs"} />
+            <ConfigRow
+              label="Email"
+              enabled={health.config.emailLive}
+              hint={
+                health.config.emailLive
+                  ? `Live · via ${health.config.emailProvider}`
+                  : `Simulated · ${health.config.emailProvider} configured`
+              }
+            />
+            <ConfigRow label="SMS (Twilio)" enabled={health.config.smsLive} hint={health.config.smsLive ? "Live" : "Simulated / not configured"} />
+            <ConfigRow label="Cron" enabled={health.config.cronEnabled} hint={health.config.cronEnabled ? "Pipeline + auto-release running" : "Disabled via CRON_ENABLED=false"} />
+            <ConfigRow label="Sentry" enabled={health.config.sentryConfigured} hint={health.config.sentryConfigured ? "Errors auto-captured" : "Not configured"} />
+            <ConfigRow label="Storage" enabled={health.storage.ok} hint={`${health.storage.name}${health.storage.detail ? ` · ${health.storage.detail}` : ""}`} />
+          </div>
+        </div>
+      )}
 
       <div>
         <h2 className="mb-3 text-base font-semibold">Admin areas</h2>
@@ -315,6 +408,22 @@ function PolicyCard({
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function ConfigRow({ label, enabled, hint }: { label: string; enabled: boolean; hint: string }) {
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-bg-border bg-bg-hover/30 px-3 py-2">
+      <div
+        className={`mt-0.5 h-2 w-2 shrink-0 rounded-full ${
+          enabled ? "bg-accent-green shadow-[0_0_8px_#22c55e]" : "bg-ink-tertiary"
+        }`}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-semibold">{label}</div>
+        <div className="truncate text-[11px] text-ink-tertiary">{hint}</div>
+      </div>
     </div>
   );
 }
