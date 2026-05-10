@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useChartColors } from "@/components/dashboard/useChartColors";
 import { useToast } from "@/components/Toast";
 import { downloadCSV } from "@/lib/csv";
 import {
@@ -47,6 +48,7 @@ function fmtUSD(n: number) {
 
 export default function ReportsPage() {
   const [data, setData] = useState<ReportsData | null>(null);
+  const c = useChartColors();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -213,13 +215,13 @@ export default function ReportsPage() {
                       <stop offset="100%" stopColor="#7c3aed" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid stroke="#252538" strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="m" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis yAxisId="rev" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
-                  <YAxis yAxisId="deals" orientation="right" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="m" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="rev" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
+                  <YAxis yAxisId="deals" orientation="right" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
                   <Tooltip
-                    contentStyle={{ background: "#161624", border: "1px solid #252538", borderRadius: 8 }}
-                    labelStyle={{ color: "#9b9bb5" }}
+                    contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8 }}
+                    labelStyle={{ color: c.tooltipLabel }}
                     formatter={(v: number, n: string) => (n === "revenue" ? fmtUSD(v) : v)}
                   />
                   <Area yAxisId="rev" type="monotone" dataKey="revenue" stroke="#a87dff" strokeWidth={2} fill="url(#rev2)" />
@@ -333,11 +335,11 @@ export default function ReportsPage() {
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={data!.categoryRevenue} layout="vertical" margin={{ left: 8, right: 16 }}>
-                  <CartesianGrid stroke="#252538" strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
-                  <YAxis dataKey="name" type="category" tick={{ fill: "#9b9bb5", fontSize: 11 }} axisLine={false} tickLine={false} width={130} />
+                  <CartesianGrid stroke={c.grid} strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
+                  <YAxis dataKey="name" type="category" tick={{ fill: c.tooltipLabel, fontSize: 11 }} axisLine={false} tickLine={false} width={130} />
                   <Tooltip
-                    contentStyle={{ background: "#161624", border: "1px solid #252538", borderRadius: 8 }}
+                    contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8 }}
                     formatter={(v: number) => fmtUSD(v)}
                   />
                   <Bar dataKey="value" radius={[0, 4, 4, 0]}>

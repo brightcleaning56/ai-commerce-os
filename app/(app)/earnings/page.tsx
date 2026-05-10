@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import RefundsPanel from "@/components/earnings/RefundsPanel";
+import { useChartColors } from "@/components/dashboard/useChartColors";
 import { useToast } from "@/components/Toast";
 import {
   Bar,
@@ -82,6 +83,7 @@ export default function EarningsPage() {
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [requested, setRequested] = useState(false);
   const [live, setLive] = useState<LiveRevenueStats | null>(null);
+  const c = useChartColors();
   const { toast } = useToast();
 
   useEffect(() => {
@@ -320,16 +322,16 @@ export default function EarningsPage() {
           <div className="h-72 px-3 py-3">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={MONTHLY_EARNINGS} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="#252538" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="m" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
+                <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="m" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
                 <Tooltip
                   contentStyle={{
-                    background: "#161624",
+                    background: c.tooltipBg,
                     border: "1px solid #252538",
                     borderRadius: 8,
                   }}
-                  labelStyle={{ color: "#9b9bb5" }}
+                  labelStyle={{ color: c.tooltipLabel }}
                 />
                 <Bar dataKey="earned" fill="#7c3aed" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="paid" fill="#6e6e85" radius={[4, 4, 0, 0]} />
@@ -358,12 +360,12 @@ export default function EarningsPage() {
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: "#161624", border: "1px solid #252538", borderRadius: 8 }}
+                  contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8 }}
                   formatter={(v: number) => fmt(v)}
                 />
                 <Legend
                   iconType="circle"
-                  wrapperStyle={{ fontSize: 11, color: "#9b9bb5" }}
+                  wrapperStyle={{ fontSize: 11, color: c.tooltipLabel }}
                 />
               </PieChart>
             </ResponsiveContainer>

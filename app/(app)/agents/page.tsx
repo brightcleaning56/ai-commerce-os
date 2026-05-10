@@ -186,7 +186,7 @@ export default function AgentsPage() {
         {[
           { label: "Running", v: running, tone: "text-accent-green" },
           { label: "Tasks (24h)", v: totalTasks.toLocaleString(), tone: "text-brand-200" },
-          { label: "Tokens used", v: fmtTokens(totalTokens), tone: "text-white" },
+          { label: "Tokens used", v: fmtTokens(totalTokens), tone: "text-ink-primary" },
           {
             label: "Avg success rate",
             v: totalRuns === 0 ? "—" : `${weightedSuccessRate.toFixed(1)}%`,

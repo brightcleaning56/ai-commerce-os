@@ -18,6 +18,7 @@ import {
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Card, CardHeader } from "@/components/ui/Card";
+import { useChartColors } from "@/components/dashboard/useChartColors";
 import { Activity, BarChart3, PieChart as PieIcon, Sparkles } from "lucide-react";
 
 type ChartData = {
@@ -78,6 +79,7 @@ function EmptyChart({ title, line }: { title: string; line?: string }) {
 
 export function DemandRadar() {
   const data = useChartData();
+  const c = useChartColors();
   const series = data?.charts.radarSeries ?? [];
   const hasNone = data && series.every((s) => s.you === 0);
 
@@ -93,8 +95,8 @@ export function DemandRadar() {
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <RadarChart data={series} outerRadius="70%">
-              <PolarGrid stroke="#252538" />
-              <PolarAngleAxis dataKey="axis" tick={{ fill: "#9b9bb5", fontSize: 11 }} />
+              <PolarGrid stroke={c.grid} />
+              <PolarAngleAxis dataKey="axis" tick={{ fill: c.tooltipLabel, fontSize: 11 }} />
               <Radar name="Your Catalog" dataKey="you" stroke="#a87dff" fill="#7c3aed" fillOpacity={0.35} />
               <Radar name="Market Avg" dataKey="market" stroke="#6e6e85" fill="#6e6e85" fillOpacity={0.1} />
             </RadarChart>
@@ -117,6 +119,7 @@ export function DemandRadar() {
 
 export function RevenueArea() {
   const data = useChartData();
+  const c = useChartColors();
   const series = data?.charts.revenueSeries ?? [];
   const hasNone = data && series.length === 0;
 
@@ -142,12 +145,12 @@ export function RevenueArea() {
                   <stop offset="100%" stopColor="#7c3aed" stopOpacity={0.05} />
                 </linearGradient>
               </defs>
-              <CartesianGrid stroke="#252538" strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="d" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
+              <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="d" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
               <Tooltip
-                contentStyle={{ background: "#161624", border: "1px solid #252538", borderRadius: 8 }}
-                labelStyle={{ color: "#9b9bb5" }}
+                contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8 }}
+                labelStyle={{ color: c.tooltipLabel }}
                 formatter={(v: any) => [`$${Number(v).toLocaleString()}`, "Platform fees"]}
               />
               <Area type="monotone" dataKey="v" stroke="#a87dff" strokeWidth={2} fill="url(#rev)" />
@@ -163,9 +166,10 @@ export function RevenueArea() {
 
 export function CategoryDonut() {
   const data = useChartData();
+  const c = useChartColors();
   const series = data?.charts.categorySeries ?? [];
   const hasNone = data && series.length === 0;
-  const total = series.reduce((s, c) => s + c.value, 0);
+  const total = series.reduce((s, x) => s + x.value, 0);
 
   return (
     <Card className="h-full">
@@ -180,8 +184,8 @@ export function CategoryDonut() {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie data={series} dataKey="value" innerRadius={48} outerRadius={78} paddingAngle={2} stroke="none">
-                  {series.map((c) => (
-                    <Cell key={c.name} fill={c.fill} />
+                  {series.map((cat) => (
+                    <Cell key={cat.name} fill={cat.fill} />
                   ))}
                 </Pie>
               </PieChart>
@@ -192,16 +196,16 @@ export function CategoryDonut() {
             </div>
           </div>
           <div className="flex flex-col justify-center gap-2 text-xs">
-            {series.map((c) => {
-              const pct = total === 0 ? 0 : ((c.value / total) * 100).toFixed(0);
+            {series.map((cat) => {
+              const pct = total === 0 ? 0 : ((cat.value / total) * 100).toFixed(0);
               return (
-                <div key={c.name} className="flex items-center justify-between gap-2">
+                <div key={cat.name} className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full" style={{ background: c.fill }} />
-                    <span className="text-ink-secondary truncate">{c.name}</span>
+                    <span className="h-2 w-2 rounded-full" style={{ background: cat.fill }} />
+                    <span className="text-ink-secondary truncate">{cat.name}</span>
                   </span>
                   <span className="text-ink-tertiary">
-                    {pct}% ({c.value})
+                    {pct}% ({cat.value})
                   </span>
                 </div>
               );

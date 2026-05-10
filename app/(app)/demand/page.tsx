@@ -13,6 +13,7 @@ import {
   Tooltip,
 } from "recharts";
 import type { Product } from "@/lib/products";
+import { useChartColors } from "@/components/dashboard/useChartColors";
 
 function makeSeries(p: Product) {
   const trend = p.trend14d ?? [];
@@ -51,6 +52,7 @@ export default function DemandPage() {
   const [products, setProducts] = useState<Product[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const c = useChartColors();
 
   useEffect(() => {
     let cancelled = false;
@@ -239,7 +241,7 @@ export default function DemandPage() {
                         <stop offset="100%" stopColor="#a87dff" stopOpacity={0} />
                       </linearGradient>
                     </defs>
-                    <Tooltip contentStyle={{ background: "#161624", border: "1px solid #252538", borderRadius: 8 }} />
+                    <Tooltip contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8 }} />
                     <Area type="monotone" dataKey="v" stroke="#a87dff" strokeWidth={2} fill="url(#dmg)" />
                   </AreaChart>
                 </ResponsiveContainer>
@@ -251,8 +253,8 @@ export default function DemandPage() {
               <div className="h-56 px-3 py-3">
                 <ResponsiveContainer width="100%" height="100%">
                   <RadarChart data={radar}>
-                    <PolarGrid stroke="#252538" />
-                    <PolarAngleAxis dataKey="axis" tick={{ fill: "#9b9bb5", fontSize: 10 }} />
+                    <PolarGrid stroke={c.grid} />
+                    <PolarAngleAxis dataKey="axis" tick={{ fill: c.tooltipLabel, fontSize: 10 }} />
                     <Radar dataKey="v" stroke="#a87dff" fill="#7c3aed" fillOpacity={0.35} />
                   </RadarChart>
                 </ResponsiveContainer>
