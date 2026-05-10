@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Operator / owner profile — single source of truth for the human signing
  * outreach emails, generating quotes, and shown as the workspace owner.
  *
@@ -32,7 +32,7 @@ export type OperatorProfile = {
 
 const DEFAULT_NAME = "Eric Moore";
 const DEFAULT_EMAIL = "Ericduolo4@gmail.com";
-const DEFAULT_COMPANY = "AI Commerce OS";
+const DEFAULT_COMPANY = "AVYN Commerce";
 const DEFAULT_TITLE = "Founder";
 
 function initialsOf(name: string): string {

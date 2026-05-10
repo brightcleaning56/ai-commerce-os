@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import {
   Bell,
   Check,
@@ -32,11 +32,11 @@ const DEFAULTS: BrandingState = {
   presetId: "purple",
   primary: "#7c3aed",
   accent: "#a87dff",
-  productName: "AI Commerce OS",
-  tagline: "Autonomous Agent Network",
+  productName: "AVYN Commerce",
+  tagline: "AI · Automation · Growth",
   logoEmoji: "✨",
-  domain: "commerce.acmebrand.com",
-  emailSender: "hello@acmebrand.com",
+  domain: "commerce.avyncommerce.com",
+  emailSender: "hello@avyncommerce.com",
   hideFooter: true,
   hideClaude: false,
 };
@@ -302,7 +302,7 @@ export default function BrandingPage() {
 
           <Section title="Footer & Attribution" Icon={Bell}>
             <Toggle
-              label='Hide "Powered by AI Commerce OS" footer'
+              label='Hide "Powered by AVYN Commerce" footer'
               hint="Removes the platform attribution from every page (Agency tier and above)"
               value={hideFooter}
               onChange={setHideFooter}
@@ -533,7 +533,7 @@ function PreviewWindow({
         <span className="h-2.5 w-2.5 rounded-full bg-accent-amber/70" />
         <span className="h-2.5 w-2.5 rounded-full bg-accent-green/70" />
         <span className="ml-3 text-[10px] text-ink-tertiary">
-          commerce.acmebrand.com
+          commerce.avyncommerce.com
         </span>
       </div>
       <div className="flex">
@@ -614,7 +614,7 @@ function PreviewWindow({
       </div>
       {!hideFooter && (
         <div className="border-t border-bg-border bg-bg-panel py-1.5 text-center text-[8px] text-ink-tertiary">
-          Powered by AI Commerce OS
+          Powered by AVYN Commerce
         </div>
       )}
     </div>

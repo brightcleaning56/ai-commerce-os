@@ -30,7 +30,7 @@ type Member = {
 };
 
 const MEMBERS: Member[] = [
-  { id: "u1", name: "John Smith", email: "john@acmebrand.com", role: "Owner", status: "Active", lastActive: "Just now", joinedAt: "Jan 18, 2024", initials: "JS", twoFactor: true },
+  { id: "u1", name: "Eric Moore", email: "Ericduolo4@gmail.com", role: "Owner", status: "Active", lastActive: "Just now", joinedAt: "Jan 18, 2024", initials: "EM", twoFactor: true },
   { id: "u2", name: "Sarah Chen", email: "sarah@acmebrand.com", role: "Admin", status: "Active", lastActive: "12 min ago", joinedAt: "Jan 18, 2024", initials: "SC", twoFactor: true },
   { id: "u3", name: "Marcus Brooks", email: "marcus@acmebrand.com", role: "Operator", status: "Active", lastActive: "2h ago", joinedAt: "Feb 04, 2024", initials: "MB", twoFactor: true, agents: ["Outreach", "CRM"] },
   { id: "u4", name: "Priya Patel", email: "priya@acmebrand.com", role: "Operator", status: "Active", lastActive: "Yesterday", joinedAt: "Feb 22, 2024", initials: "PP", twoFactor: false, agents: ["Buyer Discovery"] },
@@ -244,6 +244,7 @@ export default function UsersPage() {
           </div>
 
           <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+            <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
                 <tr className="border-b border-bg-border">
@@ -312,6 +313,7 @@ export default function UsersPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
 

@@ -34,7 +34,7 @@ const EVENTS: AuditEvent[] = [
   {
     id: "e1",
     ts: "2024-05-19 14:42:18 UTC",
-    actor: { type: "human", name: "John Smith", initials: "JS" },
+    actor: { type: "human", name: "Eric Moore", initials: "EM" },
     action: "Updated commission rate for plan 'Growth'",
     resource: "Plan",
     resourceId: "plan_growth",
@@ -82,7 +82,7 @@ const EVENTS: AuditEvent[] = [
   {
     id: "e5",
     ts: "2024-05-19 13:54:08 UTC",
-    actor: { type: "human", name: "John Smith", initials: "JS" },
+    actor: { type: "human", name: "Eric Moore", initials: "EM" },
     action: "Rotated production API key 'sk_live_4f29'",
     resource: "API Key",
     resourceId: "k1",
@@ -115,7 +115,7 @@ const EVENTS: AuditEvent[] = [
   {
     id: "e8",
     ts: "2024-05-19 12:01:03 UTC",
-    actor: { type: "human", name: "John Smith", initials: "JS" },
+    actor: { type: "human", name: "Eric Moore", initials: "EM" },
     action: "Enabled SCIM provisioning",
     resource: "Workspace",
     resourceId: "ws_acmebrand",
@@ -273,6 +273,7 @@ export default function AuditLogsPage() {
       </div>
 
       <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+        <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
             <tr className="border-b border-bg-border">
@@ -328,6 +329,7 @@ export default function AuditLogsPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {open && (

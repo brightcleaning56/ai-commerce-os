@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import {
   AlertOctagon,
   Building2,
@@ -31,13 +31,17 @@ const ADMIN_LINKS = [
 export default function AdminPage() {
   const [killActive, setKillActive] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [operator, setOperator] = useState<{ name: string; company: string; email: string } | null>(null);
   const { toast } = useToast();
 
-  // Hydrate kill-switch state from localStorage
   useEffect(() => {
     try {
       setKillActive(localStorage.getItem("aicos:kill-switch") === "1");
     } catch {}
+    fetch("/api/operator")
+      .then((r) => r.json())
+      .then((d) => { if (d?.name) setOperator(d); })
+      .catch(() => {});
   }, []);
 
   function handleConfirmKill() {
@@ -64,7 +68,7 @@ export default function AdminPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold">Super Admin</h1>
-            <p className="text-xs text-ink-secondary">Org-wide controls for AI Commerce OS</p>
+            <p className="text-xs text-ink-secondary">Org-wide controls for AVYN Commerce</p>
           </div>
         </div>
       </div>
@@ -74,13 +78,13 @@ export default function AdminPage() {
           <div>
             <div className="flex items-center gap-2">
               <Building2 className="h-4 w-4 text-brand-300" />
-              <span className="font-semibold">Acme Brand Co.</span>
+              <span className="font-semibold">{operator?.company ?? "AVYN Commerce"}</span>
               <span className="rounded-md bg-brand-500/15 px-2 py-0.5 text-[10px] font-semibold text-brand-200">
                 Workspace
               </span>
             </div>
             <div className="mt-0.5 text-[11px] text-ink-tertiary">
-              Workspace ID: <span className="font-mono">ws_acmebrand</span> · Created Jan 18, 2024
+              Owner: <span className="font-medium text-ink-secondary">{operator?.name ?? "—"}</span> · <span className="font-mono">{operator?.email ?? "—"}</span> · Created Jan 18, 2024
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs">

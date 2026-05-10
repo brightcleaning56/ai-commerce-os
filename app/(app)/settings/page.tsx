@@ -22,8 +22,8 @@ type SettingsState = {
 };
 
 const DEFAULTS: SettingsState = {
-  name: "John Smith",
-  email: "john@acmebrand.com",
+  name: "",
+  email: "",
   tz: "America/New_York",
   locale: "en-US",
   defaultModel: "Claude Sonnet 4.6 (balanced)",
@@ -33,7 +33,9 @@ const DEFAULTS: SettingsState = {
 
 export default function SettingsPage() {
   const [name, setName] = useState(DEFAULTS.name);
-  const [email] = useState(DEFAULTS.email);
+  const [email, setEmail] = useState(DEFAULTS.email);
+  const [title, setTitle] = useState("Founder");
+  const [initials, setInitials] = useState("?");
   const [tz, setTz] = useState(DEFAULTS.tz);
   const [locale, setLocale] = useState(DEFAULTS.locale);
   const [defaultModel, setDefaultModel] = useState(DEFAULTS.defaultModel);
@@ -44,13 +46,26 @@ export default function SettingsPage() {
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // Hydrate from localStorage
+  // Hydrate from operator API + localStorage
   useEffect(() => {
+    fetch("/api/operator")
+      .then((r) => r.json())
+      .then((op) => {
+        if (op?.name) {
+          setName((prev) => prev || op.name);
+          setEmail((prev) => prev || op.email);
+          setTitle(op.title || "Owner");
+          setInitials(op.initials || op.name.slice(0, 2).toUpperCase());
+        }
+      })
+      .catch(() => {});
+
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const s = JSON.parse(raw) as SettingsState;
-        setName(s.name ?? DEFAULTS.name);
+        if (s.name) setName(s.name);
+        if (s.email) setEmail(s.email);
         setTz(s.tz ?? DEFAULTS.tz);
         setLocale(s.locale ?? DEFAULTS.locale);
         setDefaultModel(s.defaultModel ?? DEFAULTS.defaultModel);
@@ -71,6 +86,7 @@ export default function SettingsPage() {
 
   function handleSave() {
     const data: SettingsState = { name, email, tz, locale, defaultModel, defaultMode, notif };
+    setInitials(name.split(/\s+/).filter(Boolean).slice(0, 2).map((w: string) => w[0]?.toUpperCase() ?? "").join("") || "?");
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
       setDirty(false);
@@ -117,7 +133,7 @@ export default function SettingsPage() {
           <div className="space-y-3">
             <div className="flex items-center gap-3">
               <div className="grid h-12 w-12 place-items-center rounded-full bg-gradient-brand text-sm font-bold">
-                JS
+                {initials}
               </div>
               <button className="rounded-md border border-bg-border bg-bg-hover/40 px-3 py-1.5 text-xs hover:bg-bg-hover">
                 Upload photo
@@ -125,7 +141,7 @@ export default function SettingsPage() {
             </div>
             <Field label="Full name" value={name} onChange={setName} />
             <Field label="Email" value={email} onChange={() => {}} disabled />
-            <Field label="Title" value="Super Admin" onChange={() => {}} disabled />
+            <Field label="Title" value={title} onChange={() => {}} disabled />
           </div>
         </Section>
 

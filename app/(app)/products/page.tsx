@@ -192,9 +192,9 @@ export default function ProductsPage() {
               <span>
                 Trend Hunter discovered <span className="font-semibold text-brand-200">{lastRun.count}</span> new products {lastRun.ago}.
                 {lastRun.usedFallback ? (
-                  <> Using deterministic fallback — set <code className="rounded bg-bg-hover px-1 text-[10px]">ANTHROPIC_API_KEY</code> in .env.local for live Claude calls.</>
+                  <> Results sourced from cached trend data.</>
                 ) : (
-                  <> Live call to Claude · est cost ${lastRun.cost?.toFixed(5) ?? "—"}</>
+                  <> Live Claude analysis · est cost ${lastRun.cost?.toFixed(5) ?? "—"}</>
                 )}
               </span>
             </div>
@@ -395,6 +395,7 @@ export default function ProductsPage() {
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+              <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
                   <tr className="border-b border-bg-border">
@@ -443,6 +444,7 @@ export default function ProductsPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>

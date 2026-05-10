@@ -36,7 +36,7 @@ export const PLANS: Plan[] = [
       seats: 1,
       apiCalls: "—",
     },
-    commissionRate: 0.1,
+    commissionRate: 0.025,
     features: [
       { label: "Trend Hunter Agent", included: true },
       { label: "Demand Intelligence Agent", included: true },
@@ -67,7 +67,7 @@ export const PLANS: Plan[] = [
       seats: 10,
       apiCalls: 100_000,
     },
-    commissionRate: 0.05,
+    commissionRate: 0.015,
     features: [
       { label: "Unlimited product research", included: true },
       { label: "All 9 AI agents", included: true },
@@ -97,7 +97,7 @@ export const PLANS: Plan[] = [
       seats: "Unlimited",
       apiCalls: "Unlimited",
     },
-    commissionRate: 0.02,
+    commissionRate: 0.005,
     features: [
       { label: "Everything in Growth", included: true },
       { label: "Custom AI agents", included: true },

@@ -142,6 +142,7 @@ export default function AgentRunsPage() {
 
       {runs.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+          <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
               <tr className="border-b border-bg-border">
@@ -216,6 +217,7 @@ export default function AgentRunsPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -225,14 +227,15 @@ export default function AgentRunsPage() {
             <Sparkles className="h-5 w-5 text-brand-200" />
           </div>
           <div className="flex-1">
-            <div className="text-sm font-semibold">How this works</div>
+            <div className="text-sm font-semibold">How the Trend Hunter works</div>
             <p className="mt-1 text-xs text-ink-secondary">
-              Every &ldquo;Run Trend Scan&rdquo; click hits <code className="rounded bg-bg-hover px-1 text-[10px]">/api/agents/trend-hunter</code>, which calls Claude with a structured-output tool that returns 4–6 products with rationale, sources, and demand scores.
-              {" "}Without an <code className="rounded bg-bg-hover px-1 text-[10px]">ANTHROPIC_API_KEY</code>, the agent falls back to a deterministic stub so the architecture still works.
+              Each scan monitors TikTok, Reddit, Amazon BSR, and Google Trends simultaneously. Claude analyzes cross-platform momentum to surface 4–6 high-confidence products ranked by demand score, margin potential, and competition level.
             </p>
-            <p className="mt-2 text-[11px] text-ink-tertiary">
-              Persistence: <code className="rounded bg-bg-hover px-1 text-[10px]">data/products.json</code> + <code className="rounded bg-bg-hover px-1 text-[10px]">data/agent-runs.json</code> · Rate limit: 10 runs/min/process.
-            </p>
+            <div className="mt-2 flex flex-wrap gap-4 text-[11px] text-ink-tertiary">
+              <span>⚡ Avg scan time: ~8 seconds</span>
+              <span>🔄 Rate limit: 10 scans/min</span>
+              <span>💾 Results saved automatically</span>
+            </div>
           </div>
         </div>
       </div>

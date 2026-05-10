@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Email send abstraction.
  *
  * Supports Postmark + Resend out of the box. Without a token, falls back to
@@ -54,7 +54,7 @@ export type EmailProviderInfo = {
 // a domain you own and have verified DNS for. In dev / no-config, we use the
 // operator's own email so the simulated send shows it correctly.
 const FALLBACK_FROM = process.env.OPERATOR_EMAIL || "outreach@aicommerce.local";
-const FALLBACK_NAME = process.env.OPERATOR_COMPANY || "AI Commerce OS";
+const FALLBACK_NAME = process.env.OPERATOR_COMPANY || "AVYN Commerce";
 
 export function getEmailProviderInfo(): EmailProviderInfo {
   if (process.env.POSTMARK_TOKEN) {

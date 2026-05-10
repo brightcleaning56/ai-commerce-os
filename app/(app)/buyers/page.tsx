@@ -243,6 +243,7 @@ export default function BuyersPage() {
           </div>
 
           <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+            <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
                 <tr className="border-b border-bg-border">
@@ -321,6 +322,7 @@ export default function BuyersPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       </div>

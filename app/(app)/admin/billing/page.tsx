@@ -335,6 +335,7 @@ export default function BillingPage() {
               View all →
             </button>
           </div>
+          <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
               <tr>
@@ -365,6 +366,7 @@ export default function BillingPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         <div className="rounded-xl border border-bg-border bg-bg-card p-5">

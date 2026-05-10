@@ -3,8 +3,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
-import { PRIMARY_NAV, ADMIN_NAV } from "@/lib/nav";
-import { Sparkles, X } from "lucide-react";
+import { NAV_SECTIONS, ADMIN_NAV } from "@/lib/nav";
+import { X } from "lucide-react";
+import { AvynMark } from "@/components/AvynLogo";
 
 function NavLink({
   href,
@@ -46,11 +47,12 @@ function NavLink({
         <span
           className={clsx(
             "rounded-md px-1.5 py-0.5 text-[10px] font-semibold",
-            // Numeric badges that are >0 → red urgency style
             /^[1-9]\d*$/.test(badge)
               ? "bg-accent-red/20 text-accent-red"
               : badge === "0"
               ? "bg-bg-hover text-ink-tertiary"
+              : badge === "NEW"
+              ? "bg-accent-green/20 text-accent-green"
               : "bg-brand-500/20 text-brand-200"
           )}
         >
@@ -72,15 +74,15 @@ export default function Sidebar({
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
 
-  // Live pending-approvals count for the sidebar badge
   const [pendingApprovals, setPendingApprovals] = useState<number | null>(null);
-  // Workspace owner profile (from /api/operator)
   const [owner, setOwner] = useState<{ name: string; email: string; company: string; title: string; initials: string } | null>(null);
+
   useEffect(() => {
     fetch("/api/operator").then((r) => r.json()).then((d) => {
       if (d?.name) setOwner(d);
     }).catch(() => {});
   }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -91,7 +93,6 @@ export default function Sidebar({
         ]);
         if (cancelled) return;
         const drafts = (d.drafts ?? []).filter((x: any) => x.status === "draft").length;
-        // Read snoozed/etc. local state too
         let actions: Record<string, string> = {};
         try {
           const raw = localStorage.getItem("aicos:risk-actions:v1");
@@ -122,7 +123,6 @@ export default function Sidebar({
 
   return (
     <>
-      {/* Mobile overlay */}
       {mobileOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
@@ -139,12 +139,12 @@ export default function Sidebar({
       >
         <div className="flex items-center justify-between gap-2.5 px-5 py-5">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-brand shadow-glow">
-              <Sparkles className="h-5 w-5 text-white" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#0a0014] shadow-glow" style={{ boxShadow: "0 0 12px rgba(147,51,234,0.4)" }}>
+              <AvynMark size={28} />
             </div>
             <div>
-              <div className="text-sm font-semibold leading-tight">AI Commerce OS</div>
-              <div className="text-[11px] text-ink-tertiary">Autonomous Agent Network</div>
+              <div className="text-sm font-semibold leading-tight">AVYN Commerce</div>
+              <div className="text-[11px] text-ink-tertiary">AI · Automation · Growth</div>
             </div>
           </div>
           <button
@@ -156,38 +156,48 @@ export default function Sidebar({
           </button>
         </div>
 
-        <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
-          {PRIMARY_NAV.map((item) => (
-            <NavLink
-              key={item.href}
-              href={item.href}
-              label={item.label}
-              Icon={item.icon}
-              badge={badgeFor(item.href, item.badge)}
-              active={isActive(item.href)}
-              onClick={onClose}
-            />
+        <nav className="flex-1 overflow-y-auto px-3 pb-4">
+          {NAV_SECTIONS.map((section) => (
+            <div key={section.title} className="mb-1">
+              <div className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                {section.title}
+              </div>
+              <div className="space-y-0.5">
+                {section.items.map((item) => (
+                  <NavLink
+                    key={item.href}
+                    href={item.href}
+                    label={item.label}
+                    Icon={item.icon}
+                    badge={badgeFor(item.href, item.badge)}
+                    active={isActive(item.href)}
+                    onClick={onClose}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
 
-          <div className="pt-4">
-            <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+          <div className="mb-1">
+            <div className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
               Admin
             </div>
-            {ADMIN_NAV.map((item) => (
-              <NavLink
-                key={item.href}
-                href={item.href}
-                label={item.label}
-                Icon={item.icon}
-                active={isActive(item.href)}
-                onClick={onClose}
-              />
-            ))}
+            <div className="space-y-0.5">
+              {ADMIN_NAV.map((item) => (
+                <NavLink
+                  key={item.href}
+                  href={item.href}
+                  label={item.label}
+                  Icon={item.icon}
+                  active={isActive(item.href)}
+                  onClick={onClose}
+                />
+              ))}
+            </div>
           </div>
         </nav>
 
         <div className="border-t border-bg-border p-3 space-y-2">
-          {/* Workspace owner */}
           {owner && (
             <div className="flex items-center gap-2.5 rounded-xl border border-bg-border bg-bg-card p-2.5">
               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gradient-brand text-[11px] font-bold text-white shadow-glow">
@@ -216,9 +226,6 @@ export default function Sidebar({
               </span>
             </div>
             <div className="mt-1 text-[11px] text-ink-tertiary">All systems operational</div>
-            <button className="mt-3 w-full rounded-md border border-bg-border bg-bg-hover py-1.5 text-[11px] text-ink-secondary hover:text-ink-primary">
-              View Status
-            </button>
           </div>
         </div>
       </aside>

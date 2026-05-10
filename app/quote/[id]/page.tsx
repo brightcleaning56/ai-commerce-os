@@ -1,5 +1,6 @@
 "use client";
-import { CheckCircle2, Clock, Lock, Sparkles, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, Lock, XCircle } from "lucide-react";
+import { AvynMark } from "@/components/AvynLogo";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -109,11 +110,11 @@ export default function QuotePublicPage() {
       <header className="border-b border-bg-border bg-bg-panel/80 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-4">
           <Link href="/welcome" className="flex items-center gap-2.5">
-            <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-brand shadow-glow">
-              <Sparkles className="h-4 w-4" />
+            <div className="grid h-8 w-8 place-items-center rounded-lg" style={{ background: "#0a0014", boxShadow: "0 0 12px rgba(147,51,234,0.4)" }}>
+              <AvynMark size={22} />
             </div>
             <div>
-              <div className="text-sm font-bold leading-tight">AI Commerce OS</div>
+              <div className="text-sm font-bold leading-tight">AVYN Commerce</div>
               <div className="text-[10px] text-ink-tertiary">Wholesale quote</div>
             </div>
           </Link>

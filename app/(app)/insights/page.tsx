@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import {
   ArrowUpRight,
   Building2,
@@ -109,7 +109,7 @@ function ForecastDetail({ f }: { f: Forecast }) {
         <div className="rounded-lg border border-bg-border bg-bg-card p-3">
           <div className="h-44">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={f.series}>
+              <AreaChart data={f.series} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id={`hist-${f.id}`} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#a87dff" stopOpacity={0.5} />
@@ -399,7 +399,7 @@ export default function InsightsPage() {
                 </div>
                 <div className="mt-3 h-12">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={f.series}>
+                    <AreaChart data={f.series} margin={{ top: 2, right: 4, left: -32, bottom: 0 }}>
                       <defs>
                         <linearGradient id={`spark-${f.id}`} x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#a87dff" stopOpacity={0.5} />
@@ -566,7 +566,7 @@ export default function InsightsPage() {
           </div>
           <div className="flex-1">
             <div className="text-sm font-semibold">
-              Sell your data to other AI Commerce OS users
+              Sell your data to other AVYN Commerce users
             </div>
             <p className="mt-1 text-xs text-ink-secondary">
               Enterprise customers can publish proprietary buyer intent + trend data into the marketplace and earn 70% revenue share on every download.

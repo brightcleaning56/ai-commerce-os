@@ -74,6 +74,7 @@ export default function LearningPage() {
           <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
             Outreach prompt evolution
           </div>
+          <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
               <tr>
@@ -111,6 +112,7 @@ export default function LearningPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         <div className="rounded-xl border border-bg-border bg-bg-card">

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import {
   Activity,
   BarChart3,
@@ -19,6 +19,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Line,
   ResponsiveContainer,
   Tooltip,
@@ -96,7 +97,7 @@ export default function ReportsPage() {
       ...CATEGORY_REVENUE.map((c) => ({ section: "category_revenue", category: c.name, revenue_usd: c.value })),
     ];
     const date = new Date().toISOString().slice(0, 10);
-    downloadCSV(`ai-commerce-os-report-${date}.csv`, rows);
+    downloadCSV(`avyn-commerce-report-${date}.csv`, rows);
     toast(`Exported ${rows.length} rows to CSV`);
   }
 
@@ -147,7 +148,7 @@ export default function ReportsPage() {
           </div>
           <div className="h-72 px-3 py-3">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={REVENUE_BY_MONTH}>
+              <ComposedChart data={REVENUE_BY_MONTH} margin={{ top: 4, right: 20, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="rev2" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#a87dff" stopOpacity={0.6} />
@@ -165,7 +166,7 @@ export default function ReportsPage() {
                 />
                 <Area yAxisId="rev" type="monotone" dataKey="revenue" stroke="#a87dff" strokeWidth={2} fill="url(#rev2)" />
                 <Line yAxisId="deals" type="monotone" dataKey="deals" stroke="#22c55e" strokeWidth={2} dot={{ fill: "#22c55e", r: 3 }} />
-              </AreaChart>
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
         </div>
@@ -212,6 +213,7 @@ export default function ReportsPage() {
               Token spend vs revenue attributed · last 90 days
             </div>
           </div>
+          <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
               <tr>
@@ -247,6 +249,7 @@ export default function ReportsPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
 
         <div className="rounded-xl border border-bg-border bg-bg-card">
@@ -285,6 +288,7 @@ export default function ReportsPage() {
             Conversion of contacted buyers, last 7 weeks
           </div>
         </div>
+        <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
             <tr>
@@ -318,6 +322,7 @@ export default function ReportsPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

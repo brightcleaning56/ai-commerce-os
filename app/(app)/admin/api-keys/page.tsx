@@ -204,6 +204,7 @@ export default function ApiKeysPage() {
 
       {tab === "keys" && (
         <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+          <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
               <tr className="border-b border-bg-border">
@@ -229,7 +230,7 @@ export default function ApiKeysPage() {
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2 font-mono text-xs">
                         {k.prefix}_••••
-                        <CopyChip text={`${k.prefix}_PLACEHOLDER`} />
+                        <CopyChip text={`${k.prefix}••••••••••••••••`} />
                       </div>
                     </td>
                     <td className="px-3 py-3">
@@ -290,6 +291,7 @@ export default function ApiKeysPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -339,6 +341,7 @@ export default function ApiKeysPage() {
               <Plus className="h-3 w-3" /> Add webhook
             </button>
           </div>
+          <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
               <tr>
@@ -384,6 +387,7 @@ export default function ApiKeysPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
