@@ -267,6 +267,51 @@ vercel env add ESCROW_FEE_BPS production            # default 100 (1%)
 
 The webhook verifier is `lib/payments.ts` + `app/api/webhooks/stripe/route.ts`. It checks HMAC-SHA256 with 5-minute replay protection. Without `STRIPE_WEBHOOK_SECRET`, the endpoint returns 503 (refuses unsigned bodies).
 
+### Supplier onboarding (Stripe Connect Express)
+
+For real money to flow to suppliers on `delivered → released → completed`,
+each supplier needs a Stripe Connect account that AVYN's platform owns
+(Express type). The platform creates the account, the supplier completes
+KYC via Stripe's hosted onboarding, and the account ID is stored on the
+transaction. At capture time, Stripe automatically routes the supplier
+portion via `payment_intent_data[transfer_data][destination]`.
+
+```bash
+# 1. Enable Connect on your Stripe dashboard (Test or Live)
+#    https://dashboard.stripe.com/test/connect/accounts/overview
+#    Choose "Platform or marketplace" + "Express accounts"
+
+# 2. Set the platform fee + escrow fee in basis points (already covered above)
+#    These end up in payment_intent_data[application_fee_amount] at checkout time
+
+# 3. Configure return / refresh URLs in your account settings
+#    Return URL:  https://<your-domain>/transactions?connected={txnId}
+#    Refresh URL: https://<your-domain>/api/transactions/{txnId}/connect-supplier/refresh
+#    (AVYN generates AccountLinks dynamically — Stripe uses these as fallbacks
+#     only when the platform-supplied URLs in the AccountLink request fail.)
+```
+
+**Operator workflow:**
+
+1. Open `/transactions`, expand a transaction in `signed` or `escrow_held` state
+2. The "Supplier Connect" panel shows the current onboarding status
+3. Click **Onboard Supplier** — opens Stripe-hosted onboarding in a new tab.
+   The platform creates an Express account in the background, persists the
+   `acct_xxx` to the transaction, and redirects the operator to the URL.
+4. Operator copies the URL and sends it to the supplier (or the supplier is
+   sitting next to them — depends on workflow). Supplier completes KYC.
+5. Stripe redirects back to `/transactions?connected={id}`. The panel now
+   shows "Charges + payouts enabled."
+6. From here, every `pay` call passes `destinationAccountId` to Checkout, so
+   the supplier gets paid the moment Stripe captures the payment minus the
+   platform + escrow fees. Release/completion is just state-machine plumbing
+   on AVYN's side — Stripe already moved the money.
+
+In **simulated mode** (no `STRIPE_SECRET_KEY`), the onboarding flow fakes
+end-to-end so the operator UI can be demoed: a synthetic `sim_acct_*`
+gets persisted, and the panel always reads "Charges + payouts enabled."
+This lets you build the workflow without needing real Stripe creds.
+
 ### Contracts
 
 ```bash

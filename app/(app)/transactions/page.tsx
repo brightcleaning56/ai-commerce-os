@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Clipboard,
   Clock,
+  CreditCard,
   DollarSign,
   Eye,
   FileText,
@@ -85,6 +86,8 @@ type Transaction = {
   paymentMethodLast4?: string;
   shareToken: string;
   aiConfidenceScore?: number;
+  supplierName?: string;
+  supplierStripeAccountId?: string;
 };
 
 type RevenueStats = {
@@ -505,6 +508,9 @@ function TxnRow({
             <MiniStat label="Supplier Out" value={fmtCents(txn.supplierPayoutCents)} />
           </div>
 
+          {/* Stripe Connect supplier onboarding */}
+          <SupplierConnectPanel txn={txn} />
+
           {/* Action panel — varies by state */}
           <ActionPanel
             txn={txn}
@@ -848,6 +854,113 @@ function EmptyState({ filter, totalCount }: { filter: string; totalCount: number
           <FileText className="h-3 w-3" /> Go to Deals
         </Link>
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Supplier Stripe Connect onboarding panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ConnectStatus = {
+  connected: boolean;
+  accountId: string | null;
+  status: {
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
+    detailsSubmitted: boolean;
+    requirementsDue: number;
+  } | null;
+};
+
+function SupplierConnectPanel({ txn }: { txn: Transaction }) {
+  const [status, setStatus] = useState<ConnectStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/transactions/${txn.id}/connect-supplier`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setStatus(d);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [txn.id, txn.supplierStripeAccountId]);
+
+  async function startOnboarding() {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/transactions/${txn.id}/connect-supplier`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.url) {
+        alert(`Onboarding failed: ${d.error ?? r.statusText}`);
+        return;
+      }
+      // Open in a new tab so the operator can copy the link to the supplier
+      window.open(d.url, "_blank", "noopener,noreferrer");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const connected = status?.connected ?? !!txn.supplierStripeAccountId;
+  const s = status?.status;
+  const ready = !!s && s.chargesEnabled && s.payoutsEnabled;
+
+  return (
+    <div className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          {ready ? (
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent-green" />
+          ) : connected ? (
+            <Loader2 className="mt-0.5 h-4 w-4 shrink-0 text-accent-amber" />
+          ) : (
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-ink-tertiary" />
+          )}
+          <div>
+            <div className="text-[12px] font-semibold">
+              {ready
+                ? "Supplier connected — payouts ready"
+                : connected
+                ? "Supplier onboarding in progress"
+                : "Supplier not connected to Stripe"}
+            </div>
+            <div className="mt-0.5 text-[11px] text-ink-tertiary">
+              {ready ? (
+                <>
+                  Stripe acct <span className="font-mono">{status?.accountId?.slice(0, 16)}…</span> · Charges + payouts enabled. Funds release to supplier on settlement.
+                </>
+              ) : connected ? (
+                <>
+                  Stripe acct <span className="font-mono">{status?.accountId?.slice(0, 16)}…</span> ·{" "}
+                  {s?.requirementsDue ? `${s.requirementsDue} field${s.requirementsDue === 1 ? "" : "s"} still due` : "Awaiting Stripe verification"}.
+                  {" "}Re-open onboarding to refresh the link.
+                </>
+              ) : (
+                <>
+                  No Stripe Connect account yet. Without one, escrow release will simulate locally instead of paying out.
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={startOnboarding}
+          disabled={busy}
+          className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-[11px] font-semibold hover:bg-bg-hover disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CreditCard className="h-3 w-3" />}
+          {connected && !ready ? "Refresh onboarding" : connected ? "Update account" : "Onboard Supplier"}
+        </button>
+      </div>
     </div>
   );
 }

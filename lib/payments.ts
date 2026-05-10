@@ -256,3 +256,171 @@ export function fmtCents(cents: number, currency = "USD"): string {
     maximumFractionDigits: 2,
   }).format(cents / 100);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stripe Connect — supplier onboarding for destination charges
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ConnectedAccount = {
+  id: string;                  // acct_xxx
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  detailsSubmitted: boolean;
+  requirementsDue: number;     // count of currently_due fields
+  country: string | null;
+  email: string | null;
+  defaultCurrency: string | null;
+};
+
+/**
+ * Create a Stripe Connect Express account for a supplier.
+ *
+ * The platform owns the account; the supplier completes KYC via the hosted
+ * onboarding flow (use createAccountLink() to get the URL). At capture time,
+ * Stripe transfers the supplier portion automatically because we set
+ * payment_intent_data[transfer_data][destination] to this account id at
+ * checkout creation.
+ *
+ * Returns null in simulated mode (no Stripe creds).
+ */
+export async function createConnectedAccount(input: {
+  email?: string;
+  country?: string;     // 2-letter ISO. Defaults to "US".
+  businessName?: string;
+}): Promise<{ ok: boolean; accountId?: string; errorMessage?: string }> {
+  const mode = getPaymentMode();
+  if (mode === "simulated") {
+    // Fake account so the operator UI can still render an "onboarded" state in dev.
+    return { ok: true, accountId: `sim_acct_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}` };
+  }
+  try {
+    const params = new URLSearchParams();
+    params.append("type", "express");
+    params.append("country", input.country ?? "US");
+    if (input.email) params.append("email", input.email);
+    if (input.businessName) params.append("business_profile[name]", input.businessName);
+    // Capabilities the supplier needs for destination charges + payouts:
+    params.append("capabilities[card_payments][requested]", "true");
+    params.append("capabilities[transfers][requested]", "true");
+
+    const res = await fetch("https://api.stripe.com/v1/accounts", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Stripe-Version": "2024-06-20",
+      },
+      body: params,
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      return { ok: false, errorMessage: body.error?.message ?? `Stripe ${res.status}` };
+    }
+    return { ok: true, accountId: body.id };
+  } catch (e) {
+    return { ok: false, errorMessage: e instanceof Error ? e.message : "Stripe call failed" };
+  }
+}
+
+/**
+ * Generate a Stripe-hosted Account Link the supplier visits to complete KYC.
+ *
+ * `type` should be "account_onboarding" for fresh accounts, or
+ * "account_update" to refresh requirements after Stripe asked for more info.
+ *
+ * In simulated mode returns a synthetic URL pointing at our /transaction page
+ * with `?connected=1` so the dev flow can demo end-to-end.
+ */
+export async function createAccountLink(input: {
+  accountId: string;
+  refreshUrl: string;
+  returnUrl: string;
+  type?: "account_onboarding" | "account_update";
+}): Promise<{ ok: boolean; url?: string; errorMessage?: string }> {
+  const mode = getPaymentMode();
+  if (mode === "simulated") {
+    // Pretend the onboarding flow exists; the return URL just gets the simulated acct id.
+    const u = new URL(input.returnUrl);
+    u.searchParams.set("connected", "1");
+    u.searchParams.set("simulated", "true");
+    return { ok: true, url: u.toString() };
+  }
+  try {
+    const params = new URLSearchParams();
+    params.append("account", input.accountId);
+    params.append("refresh_url", input.refreshUrl);
+    params.append("return_url", input.returnUrl);
+    params.append("type", input.type ?? "account_onboarding");
+
+    const res = await fetch("https://api.stripe.com/v1/account_links", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Stripe-Version": "2024-06-20",
+      },
+      body: params,
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      return { ok: false, errorMessage: body.error?.message ?? `Stripe ${res.status}` };
+    }
+    return { ok: true, url: body.url };
+  } catch (e) {
+    return { ok: false, errorMessage: e instanceof Error ? e.message : "Stripe call failed" };
+  }
+}
+
+/**
+ * Retrieve current onboarding status for a connected account. Used by the
+ * operator UI to surface "Charges enabled · Payouts enabled" or list
+ * outstanding KYC requirements.
+ */
+export async function retrieveConnectedAccount(
+  accountId: string,
+): Promise<{ ok: boolean; account?: ConnectedAccount; errorMessage?: string }> {
+  const mode = getPaymentMode();
+  if (mode === "simulated" || accountId.startsWith("sim_acct_")) {
+    return {
+      ok: true,
+      account: {
+        id: accountId,
+        chargesEnabled: true,
+        payoutsEnabled: true,
+        detailsSubmitted: true,
+        requirementsDue: 0,
+        country: "US",
+        email: null,
+        defaultCurrency: "usd",
+      },
+    };
+  }
+  try {
+    const res = await fetch(`https://api.stripe.com/v1/accounts/${encodeURIComponent(accountId)}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${process.env.STRIPE_SECRET_KEY}`,
+        "Stripe-Version": "2024-06-20",
+      },
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      return { ok: false, errorMessage: body.error?.message ?? `Stripe ${res.status}` };
+    }
+    return {
+      ok: true,
+      account: {
+        id: body.id,
+        chargesEnabled: !!body.charges_enabled,
+        payoutsEnabled: !!body.payouts_enabled,
+        detailsSubmitted: !!body.details_submitted,
+        requirementsDue: Array.isArray(body.requirements?.currently_due) ? body.requirements.currently_due.length : 0,
+        country: body.country ?? null,
+        email: body.email ?? null,
+        defaultCurrency: body.default_currency ?? null,
+      },
+    };
+  } catch (e) {
+    return { ok: false, errorMessage: e instanceof Error ? e.message : "Stripe call failed" };
+  }
+}

@@ -60,6 +60,12 @@ function isPublic(pathname: string): boolean {
   for (const p of PUBLIC_PREFIXES) {
     if (pathname.startsWith(p)) return true;
   }
+  // Stripe Connect refresh endpoints — Stripe redirects the supplier here
+  // when an AccountLink expires. We mint a fresh link and 302 them back.
+  // Path shape: /api/transactions/<txnId>/connect-supplier/refresh
+  if (/^\/api\/transactions\/[^/]+\/connect-supplier\/refresh\/?$/.test(pathname)) {
+    return true;
+  }
   // Static asset extensions
   if (/\.(png|jpe?g|gif|svg|ico|webmanifest|css|js|map|txt)$/i.test(pathname)) return true;
   return false;
