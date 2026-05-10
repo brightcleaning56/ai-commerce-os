@@ -227,6 +227,24 @@ export default function BillingPage() {
         </button>
       </div>
 
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+        <div className="flex items-start gap-3 text-[12px]">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <CreditCard className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1 text-ink-secondary">
+            <span className="font-semibold text-accent-amber">Plans preview</span>
+            {" "}
+            — Plan switching + invoice download UI is functional locally; the live billing
+            backend (Stripe Subscription + tax) ships in a follow-up. For real revenue and
+            platform fees collected, see{" "}
+            <a href="/earnings" className="text-brand-300 hover:text-brand-200 underline">/earnings</a>{" "}
+            and{" "}
+            <a href="/reports" className="text-brand-300 hover:text-brand-200 underline">/reports</a>.
+          </div>
+        </div>
+      </div>
+
       <div className="rounded-xl border border-bg-border bg-gradient-to-br from-brand-500/10 to-transparent p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>

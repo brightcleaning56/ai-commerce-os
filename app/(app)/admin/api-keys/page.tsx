@@ -165,6 +165,23 @@ export default function ApiKeysPage() {
         </div>
       </div>
 
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+        <div className="flex items-start gap-3 text-[12px]">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <Plug className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1 text-ink-secondary">
+            <span className="font-semibold text-accent-amber">Public API preview</span>
+            {" "}
+            — Key generation + rotation UI works locally; the gateway middleware that authenticates
+            external API calls against these keys ships in a follow-up. For now, server-to-server
+            calls into AVYN go through the operator{" "}
+            <code className="rounded bg-bg-hover px-1 text-[10px]">ADMIN_TOKEN</code>{" "}
+            (see PRODUCTION.md → Step 2).
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Active Keys" value={keys.filter((k) => k.status === "Active").length} />
         <Stat label="Calls 24h" value={totalCalls24h.toLocaleString()} />

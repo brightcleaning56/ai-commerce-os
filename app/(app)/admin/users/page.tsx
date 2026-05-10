@@ -150,6 +150,23 @@ export default function UsersPage() {
         </button>
       </div>
 
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+        <div className="flex items-start gap-3 text-[12px]">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <Users className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1 text-ink-secondary">
+            <span className="font-semibold text-accent-amber">Multi-user preview</span>
+            {" "}
+            — AVYN currently runs in single-operator mode (you, owner). Inviting members and
+            multi-role workflows ship in a follow-up. Today the workspace identity is driven by{" "}
+            <code className="rounded bg-bg-hover px-1 text-[10px]">OPERATOR_NAME</code> /{" "}
+            <code className="rounded bg-bg-hover px-1 text-[10px]">OPERATOR_EMAIL</code> env vars
+            (managed at Settings).
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {Object.entries(counts).map(([k, v]) => (
           <div key={k} className="rounded-xl border border-bg-border bg-bg-card p-4">
