@@ -5,37 +5,43 @@ const config: Config = {
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
   ],
+  // Class-based dark mode — toggled by adding `.dark` to <html>.
+  // Default theme is dark (applied in app/layout.tsx); user can switch via
+  // the TopBar theme button. All `bg-bg-*`, `text-ink-*`, `accent-*` tokens
+  // resolve via CSS variables defined in app/globals.css so the same class
+  // names work in both modes.
+  darkMode: ["class"],
   theme: {
     extend: {
       colors: {
         bg: {
-          base: "#0a0a14",
-          panel: "#11111c",
-          card: "#161624",
-          hover: "#1d1d2e",
-          border: "#252538",
+          base: "var(--color-bg-base)",
+          panel: "var(--color-bg-panel)",
+          card: "var(--color-bg-card)",
+          hover: "var(--color-bg-hover)",
+          border: "var(--color-bg-border)",
         },
         brand: {
           50: "#f3eeff",
           100: "#e2d4ff",
-          200: "#c5a8ff",
-          300: "#a87dff",
-          400: "#8b52ff",
-          500: "#7c3aed",
-          600: "#6d28d9",
-          700: "#5b21b6",
+          200: "var(--color-brand-200)",
+          300: "var(--color-brand-300)",
+          400: "var(--color-brand-400)",
+          500: "var(--color-brand-500)",
+          600: "var(--color-brand-600)",
+          700: "var(--color-brand-700)",
         },
         accent: {
-          green: "#22c55e",
-          red: "#ef4444",
-          amber: "#f59e0b",
-          blue: "#3b82f6",
-          cyan: "#06b6d4",
+          green: "var(--color-accent-green)",
+          red: "var(--color-accent-red)",
+          amber: "var(--color-accent-amber)",
+          blue: "var(--color-accent-blue)",
+          cyan: "var(--color-accent-cyan)",
         },
         ink: {
-          primary: "#f5f5fa",
-          secondary: "#9b9bb5",
-          tertiary: "#6e6e85",
+          primary: "var(--color-ink-primary)",
+          secondary: "var(--color-ink-secondary)",
+          tertiary: "var(--color-ink-tertiary)",
         },
       },
       fontFamily: {
@@ -43,9 +49,8 @@ const config: Config = {
       },
       backgroundImage: {
         "gradient-brand":
-          "linear-gradient(135deg, #7c3aed 0%, #a87dff 100%)",
-        "gradient-card":
-          "linear-gradient(135deg, rgba(124,58,237,0.08) 0%, rgba(168,125,255,0.04) 100%)",
+          "linear-gradient(135deg, var(--color-brand-500) 0%, var(--color-brand-300) 100%)",
+        "gradient-card": "var(--gradient-card)",
       },
       boxShadow: {
         glow: "0 0 32px -8px rgba(124,58,237,0.4)",

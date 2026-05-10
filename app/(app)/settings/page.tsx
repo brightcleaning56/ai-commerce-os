@@ -1,7 +1,8 @@
 "use client";
-import { ArrowRight, Bell, Check, Globe, Shield, ShieldCheck, Sparkles, User } from "lucide-react";
+import { ArrowRight, Bell, Check, Globe, Palette, Shield, ShieldCheck, Sparkles, User } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const STORAGE_KEY = "aicos:settings:v1";
 
@@ -198,6 +199,18 @@ export default function SettingsPage() {
           </div>
         </Section>
       </div>
+
+      <Section title="Appearance" Icon={Palette}>
+        <div className="space-y-3">
+          <div>
+            <div className="mb-1 text-sm font-medium">Theme</div>
+            <div className="text-[11px] text-ink-tertiary">
+              Light / Dark / System. The choice persists across sessions and follows you between devices when signed in.
+            </div>
+          </div>
+          <ThemeToggle variant="full" />
+        </div>
+      </Section>
 
       <Section title="Notifications" Icon={Bell}>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

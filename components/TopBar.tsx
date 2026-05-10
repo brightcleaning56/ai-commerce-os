@@ -3,6 +3,7 @@ import { Bell, Bot, ChevronDown, Mail, Menu, Package, Search, Send, Users, X } f
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useCommandPalette } from "./CommandPalette";
+import ThemeToggle from "./ThemeToggle";
 
 type OperatorProfile = { name: string; title: string; initials: string };
 
@@ -368,11 +369,13 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
         )}
       </div>
 
+      <ThemeToggle />
+
       <Link
         href="/settings"
         className="flex shrink-0 items-center gap-2 rounded-lg border border-bg-border bg-bg-card pl-1 pr-2 py-1 hover:bg-bg-hover sm:pr-3"
       >
-        <div className="grid h-8 w-8 place-items-center rounded-md bg-gradient-brand text-xs font-bold">
+        <div className="grid h-8 w-8 place-items-center rounded-md bg-gradient-brand text-xs font-bold text-white">
           {operator.initials || "?"}
         </div>
         <div className="hidden text-right sm:block">
