@@ -10,10 +10,12 @@ import {
   Loader2,
   Package,
   RefreshCw,
+  Search,
   Sparkles,
   Zap,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { AgentRun } from "@/lib/store";
 
 type RunResp = { runs: AgentRun[] };
@@ -31,11 +33,58 @@ function relativeTime(iso: string): string {
   return `${Math.floor(ms / 86_400_000)}d ago`;
 }
 
+type AgentKey = AgentRun["agent"];
+type DateWindow = "24h" | "7d" | "30d" | "all";
+type StatusFilter = "all" | "success" | "error";
+
+const AGENT_LABEL: Record<AgentKey, string> = {
+  "trend-hunter": "Trend Hunter",
+  "buyer-discovery": "Buyer Discovery",
+  "supplier-finder": "Supplier Finder",
+  outreach: "Outreach",
+  negotiation: "Negotiation",
+  risk: "Risk",
+};
+
+const DATE_WINDOW_MS: Record<DateWindow, number | null> = {
+  "24h": 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+  all: null,
+};
+
 export default function AgentRunsPage() {
+  return (
+    <Suspense fallback={<div className="grid place-items-center py-16 text-ink-tertiary"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+      <AgentRunsInner />
+    </Suspense>
+  );
+}
+
+function AgentRunsInner() {
+  const router = useRouter();
+  const search = useSearchParams();
+  const initialAgent = search.get("agent") as AgentKey | null;
+
   const [runs, setRuns] = useState<AgentRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agentFilter, setAgentFilter] = useState<AgentKey | "all">(initialAgent ?? "all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [dateWindow, setDateWindow] = useState<DateWindow>("7d");
+  const [query, setQuery] = useState("");
+
+  // Sync ?agent= back to URL when changed (no scroll)
+  useEffect(() => {
+    const params = new URLSearchParams(search.toString());
+    if (agentFilter === "all") params.delete("agent");
+    else params.set("agent", agentFilter);
+    const next = params.toString();
+    const url = next ? `/agent-runs?${next}` : "/agent-runs";
+    router.replace(url, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentFilter]);
 
   async function fetchRuns() {
     setLoading(true);
@@ -74,12 +123,47 @@ export default function AgentRunsPage() {
     }
   }
 
+  // Apply filters
+  const visible = useMemo(() => {
+    const cutoff = (() => {
+      const window = DATE_WINDOW_MS[dateWindow];
+      return window == null ? 0 : Date.now() - window;
+    })();
+    const q = query.trim().toLowerCase();
+    return runs.filter((r) => {
+      if (agentFilter !== "all" && r.agent !== agentFilter) return false;
+      if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (cutoff > 0 && new Date(r.startedAt).getTime() < cutoff) return false;
+      if (q) {
+        const haystack = [
+          r.inputProductName ?? "",
+          r.inputCategory ?? "",
+          r.modelUsed ?? "",
+          r.errorMessage ?? "",
+          r.id,
+        ].join(" ").toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [runs, agentFilter, statusFilter, dateWindow, query]);
+
   const totals = {
-    runs: runs.length,
-    products: runs.reduce((s, r) => s + r.productCount, 0),
-    cost: runs.reduce((s, r) => s + (r.estCostUsd ?? 0), 0),
-    avgMs: runs.length ? Math.round(runs.reduce((s, r) => s + r.durationMs, 0) / runs.length) : 0,
+    runs: visible.length,
+    products: visible.reduce((s, r) => s + r.productCount, 0),
+    cost: visible.reduce((s, r) => s + (r.estCostUsd ?? 0), 0),
+    avgMs: visible.length
+      ? Math.round(visible.reduce((s, r) => s + r.durationMs, 0) / visible.length)
+      : 0,
   };
+
+  // Per-agent counts for the filter chips (uses ALL runs, not filtered, so the
+  // chip badges always reflect total volume regardless of current filter)
+  const agentCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: runs.length };
+    for (const r of runs) counts[r.agent] = (counts[r.agent] ?? 0) + 1;
+    return counts;
+  }, [runs]);
 
   return (
     <div className="space-y-5">
@@ -91,7 +175,11 @@ export default function AgentRunsPage() {
           <div>
             <h1 className="text-2xl font-bold">Agent Runs</h1>
             <p className="text-xs text-ink-secondary">
-              Live execution history · {totals.runs} runs · {totals.products} products discovered
+              Live execution history · {totals.runs} run{totals.runs === 1 ? "" : "s"} match
+              {agentFilter !== "all" || statusFilter !== "all" || dateWindow !== "all" || query
+                ? " current filters"
+                : ""}{" "}
+              · {totals.products} product{totals.products === 1 ? "" : "s"} discovered
             </p>
           </div>
         </div>
@@ -123,6 +211,91 @@ export default function AgentRunsPage() {
         <Stat label="Total cost" v={totals.cost > 0 ? `$${totals.cost.toFixed(4)}` : "$0.00"} Icon={DollarSign} />
         <Stat label="Avg duration" v={totals.avgMs > 0 ? `${(totals.avgMs / 1000).toFixed(2)}s` : "—"} Icon={Clock} />
       </div>
+
+      {/* Filter bar — only shows when there are runs to filter */}
+      {runs.length > 0 && (
+        <div className="space-y-3 rounded-xl border border-bg-border bg-bg-card p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-tertiary" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by product, category, model, error, or run ID…"
+                className="h-9 w-full rounded-lg border border-bg-border bg-bg-card pl-9 pr-3 text-sm placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+              />
+            </div>
+            <select
+              value={dateWindow}
+              onChange={(e) => setDateWindow(e.target.value as DateWindow)}
+              className="h-9 rounded-lg border border-bg-border bg-bg-card px-3 text-sm focus:border-brand-500 focus:outline-none"
+            >
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+              <option value="all">All time</option>
+            </select>
+            <div className="flex items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs">
+              {(["all", "success", "error"] as StatusFilter[]).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`rounded-md px-2.5 py-1 capitalize ${
+                    statusFilter === s
+                      ? "bg-brand-500/15 text-brand-200"
+                      : "text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+            {(agentFilter !== "all" || statusFilter !== "all" || dateWindow !== "all" || query) && (
+              <button
+                onClick={() => {
+                  setAgentFilter("all");
+                  setStatusFilter("all");
+                  setDateWindow("all");
+                  setQuery("");
+                }}
+                className="text-[11px] text-brand-300 hover:text-brand-200"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+          {/* Agent chips */}
+          <div className="flex flex-wrap items-center gap-1 text-xs">
+            <button
+              onClick={() => setAgentFilter("all")}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 ${
+                agentFilter === "all"
+                  ? "bg-brand-500/15 text-brand-200 border border-brand-500/40"
+                  : "border border-bg-border text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+              }`}
+            >
+              All <span className="text-[10px] opacity-70">{agentCounts.all ?? 0}</span>
+            </button>
+            {(Object.keys(AGENT_LABEL) as AgentKey[]).map((agent) => {
+              const count = agentCounts[agent] ?? 0;
+              if (count === 0) return null;
+              return (
+                <button
+                  key={agent}
+                  onClick={() => setAgentFilter(agent)}
+                  className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 ${
+                    agentFilter === agent
+                      ? "bg-brand-500/15 text-brand-200 border border-brand-500/40"
+                      : "border border-bg-border text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+                  }`}
+                >
+                  {AGENT_LABEL[agent]} <span className="text-[10px] opacity-70">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-accent-red/30 bg-accent-red/5 p-3 text-xs text-accent-red">
@@ -157,7 +330,14 @@ export default function AgentRunsPage() {
               </tr>
             </thead>
             <tbody>
-              {runs.map((r) => {
+              {visible.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-5 py-8 text-center text-[11px] text-ink-tertiary">
+                    No runs match the current filter. Try widening the date window or clearing chips.
+                  </td>
+                </tr>
+              )}
+              {visible.map((r) => {
                 const tone = STATUS_TONE[r.status];
                 const Icon = tone.Icon;
                 return (
