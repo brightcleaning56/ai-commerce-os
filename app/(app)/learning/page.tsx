@@ -69,7 +69,7 @@ export default function LearningPage() {
             <Brain className="h-3.5 w-3.5 text-accent-amber" />
           </div>
           <div className="flex-1">
-            <span className="font-semibold text-accent-amber">Showcase</span>
+            <span className="font-semibold text-accent-amber">Showcase — every number on this page is illustrative</span>
             <span className="text-ink-secondary">
               {" "}
               — Prompt versioning + auto-tuning is in the roadmap. Today the agents use fixed
@@ -92,8 +92,9 @@ export default function LearningPage() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 rounded-xl border border-bg-border bg-bg-card">
-          <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
-            Outreach prompt evolution
+          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+            <div className="text-sm font-semibold">Outreach prompt evolution</div>
+            <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
           </div>
           <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
@@ -137,8 +138,9 @@ export default function LearningPage() {
         </div>
 
         <div className="rounded-xl border border-bg-border bg-bg-card">
-          <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
-            Lead source ROI (last 90d)
+          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+            <div className="text-sm font-semibold">Lead source ROI (last 90d)</div>
+            <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
           </div>
           <div className="space-y-2.5 p-5">
             {[
@@ -172,8 +174,11 @@ export default function LearningPage() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-bg-border bg-bg-card">
-          <div className="flex items-center gap-2 border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
-            <TrendingUp className="h-4 w-4 text-accent-green" /> Patterns that won
+          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <TrendingUp className="h-4 w-4 text-accent-green" /> Patterns that won
+            </div>
+            <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
           </div>
           <ul className="divide-y divide-bg-border">
             {WINNERS.map((w) => (
@@ -189,8 +194,11 @@ export default function LearningPage() {
         </div>
 
         <div className="rounded-xl border border-bg-border bg-bg-card">
-          <div className="flex items-center gap-2 border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
-            <TrendingDown className="h-4 w-4 text-accent-red" /> Patterns that lost
+          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <TrendingDown className="h-4 w-4 text-accent-red" /> Patterns that lost
+            </div>
+            <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
           </div>
           <ul className="divide-y divide-bg-border">
             {LOSERS.map((l) => (
@@ -210,6 +218,7 @@ export default function LearningPage() {
         <div className="mb-3 flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-brand-300" />
           <h2 className="text-base font-semibold">AI improvement recommendations</h2>
+          <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
         </div>
         <div className="space-y-3">
           {RECOMMENDATIONS.map((r) => (
@@ -230,10 +239,18 @@ export default function LearningPage() {
                   </div>
                   <p className="mt-1 text-xs text-ink-secondary">{r.d}</p>
                   <div className="mt-3 flex items-center gap-2">
-                    <button className="flex items-center gap-1 rounded-md bg-gradient-brand px-3 py-1.5 text-xs font-semibold shadow-glow">
+                    <button
+                      disabled
+                      title="Learning engine ships in roadmap"
+                      className="flex items-center gap-1 rounded-md bg-gradient-brand px-3 py-1.5 text-xs font-semibold shadow-glow opacity-40 cursor-not-allowed"
+                    >
                       Apply <ChevronRight className="h-3 w-3" />
                     </button>
-                    <button className="rounded-md border border-bg-border bg-bg-hover/40 px-3 py-1.5 text-xs hover:bg-bg-hover">
+                    <button
+                      disabled
+                      title="A/B test runner ships in roadmap"
+                      className="rounded-md border border-bg-border bg-bg-hover/40 px-3 py-1.5 text-xs opacity-40 cursor-not-allowed"
+                    >
                       Run as A/B test
                     </button>
                   </div>
