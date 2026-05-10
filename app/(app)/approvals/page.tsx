@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Clock,
   Filter,
+  Keyboard,
   Mail,
   RefreshCw,
   Send,
@@ -14,7 +15,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
 
 type Severity = "Critical" | "High" | "Medium" | "Low";
@@ -87,6 +88,11 @@ export default function ApprovalsPage() {
   const [policies, setPolicies] = useState<Policies>(DEFAULT_POLICIES);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "drafts" | "risks">("all");
+  // Keyboard navigation: which pending draft is selected, and whether the
+  // shortcut help overlay is showing.
+  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
+  const draftRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const { toast } = useToast();
 
   async function refresh() {
@@ -195,6 +201,109 @@ export default function ApprovalsPage() {
     persistRiskActions({ ...riskActions, [id]: action });
     toast(`${action === "applied" ? "Applied" : action === "dismissed" ? "Dismissed" : "Snoozed"} risk flag`);
   }
+
+  // ── Keyboard shortcuts for fast review ──────────────────────────────
+  // j/k or ↓/↑   move selection through pending drafts
+  // a            approve current
+  // r            reject current
+  // s            send current (must be approved first)
+  // ?            toggle the shortcut help overlay
+  // Esc          clear selection / close help
+
+  const visibleDraftIds = useMemo(
+    () => drafts.filter((d) => d.status === "draft").map((d) => d.id),
+    [drafts],
+  );
+
+  // Auto-select the first pending draft on mount once data loads
+  useEffect(() => {
+    if (selectedDraftId && visibleDraftIds.includes(selectedDraftId)) return;
+    if (visibleDraftIds.length > 0) setSelectedDraftId(visibleDraftIds[0]);
+    else setSelectedDraftId(null);
+  }, [visibleDraftIds, selectedDraftId]);
+
+  const moveSelection = useCallback(
+    (delta: 1 | -1) => {
+      if (visibleDraftIds.length === 0) return;
+      const cur = selectedDraftId ? visibleDraftIds.indexOf(selectedDraftId) : -1;
+      const next = (cur + delta + visibleDraftIds.length) % visibleDraftIds.length;
+      const id = visibleDraftIds[next];
+      setSelectedDraftId(id);
+      // Scroll into view
+      const el = draftRefs.current[id];
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    },
+    [selectedDraftId, visibleDraftIds],
+  );
+
+  useEffect(() => {
+    function onKeydown(e: KeyboardEvent) {
+      // Ignore when typing in form fields
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      // Ignore when modifier keys are held (don't hijack Cmd+R reload, etc.)
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      switch (e.key) {
+        case "j":
+        case "ArrowDown":
+          e.preventDefault();
+          moveSelection(1);
+          break;
+        case "k":
+        case "ArrowUp":
+          e.preventDefault();
+          moveSelection(-1);
+          break;
+        case "a": {
+          if (!selectedDraftId) break;
+          e.preventDefault();
+          setDraftStatus(selectedDraftId, "approved");
+          toast("Approved · press s to send", "success");
+          break;
+        }
+        case "r": {
+          if (!selectedDraftId) break;
+          e.preventDefault();
+          setDraftStatus(selectedDraftId, "rejected");
+          toast("Rejected", "info");
+          // Move to the next draft after rejecting
+          moveSelection(1);
+          break;
+        }
+        case "s": {
+          if (!selectedDraftId) break;
+          const target = drafts.find((d) => d.id === selectedDraftId);
+          if (!target) break;
+          if (target.status !== "approved") {
+            toast("Approve first (a) before sending (s)", "info");
+            break;
+          }
+          e.preventDefault();
+          sendDraft(selectedDraftId);
+          break;
+        }
+        case "?":
+        case "/":
+          e.preventDefault();
+          setShortcutHelpOpen((v) => !v);
+          break;
+        case "Escape":
+          if (shortcutHelpOpen) setShortcutHelpOpen(false);
+          break;
+      }
+    }
+    window.addEventListener("keydown", onKeydown);
+    return () => window.removeEventListener("keydown", onKeydown);
+  }, [selectedDraftId, moveSelection, drafts, shortcutHelpOpen, toast]);
 
   // Build the unified queue
   const pendingDrafts = drafts.filter((d) => d.status === "draft");
@@ -411,7 +520,16 @@ export default function ApprovalsPage() {
 
           {/* Drafts */}
           {visible.drafts.map((d) => (
-            <div key={d.id} className="rounded-xl border border-bg-border bg-bg-card p-4">
+            <div
+              key={d.id}
+              ref={(el) => { draftRefs.current[d.id] = el; }}
+              onClick={() => setSelectedDraftId(d.id)}
+              className={`rounded-xl border bg-bg-card p-4 transition cursor-pointer ${
+                selectedDraftId === d.id
+                  ? "border-brand-500/60 shadow-glow"
+                  : "border-bg-border hover:border-brand-500/30"
+              }`}
+            >
               <div className="flex items-start gap-3">
                 <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-cyan/15">
                   <Mail className="h-4 w-4 text-accent-cyan" />
@@ -501,7 +619,70 @@ export default function ApprovalsPage() {
           </div>
         </div>
       </div>
+
+      {/* Keyboard shortcut hint footer — always visible at the bottom of the page */}
+      {pendingDrafts.length > 0 && (
+        <div className="sticky bottom-3 z-10 mx-auto flex w-fit items-center gap-3 rounded-full border border-bg-border bg-bg-panel/95 px-4 py-2 text-[11px] text-ink-secondary shadow-glow backdrop-blur">
+          <Keyboard className="h-3 w-3 text-brand-300" />
+          <span><Kbd>j</Kbd>/<Kbd>k</Kbd> nav</span>
+          <span><Kbd>a</Kbd> approve</span>
+          <span><Kbd>r</Kbd> reject</span>
+          <span><Kbd>s</Kbd> send</span>
+          <button
+            onClick={() => setShortcutHelpOpen((v) => !v)}
+            className="text-brand-300 hover:text-brand-200"
+            title="Press ? for help"
+          >
+            <Kbd>?</Kbd> help
+          </button>
+        </div>
+      )}
+
+      {/* Shortcut help overlay */}
+      {shortcutHelpOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShortcutHelpOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl border border-bg-border bg-bg-panel p-5 shadow-2xl"
+          >
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
+              <Keyboard className="h-4 w-4 text-brand-300" />
+              Keyboard shortcuts
+            </div>
+            <div className="space-y-1.5 text-xs">
+              {[
+                { k: "j  ↓", l: "Move selection down" },
+                { k: "k  ↑", l: "Move selection up" },
+                { k: "a", l: "Approve selected draft" },
+                { k: "r", l: "Reject selected draft" },
+                { k: "s", l: "Send selected draft (must be approved first)" },
+                { k: "?", l: "Toggle this help" },
+                { k: "Esc", l: "Close help" },
+              ].map((row) => (
+                <div key={row.k} className="flex items-center justify-between rounded-md bg-bg-hover/40 px-3 py-1.5">
+                  <span className="text-ink-secondary">{row.l}</span>
+                  <span className="font-mono text-[10px] text-ink-primary">{row.k}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 text-[10px] text-ink-tertiary">
+              Shortcuts ignore presses while typing in inputs/textareas.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="rounded border border-bg-border bg-bg-card px-1.5 py-0.5 font-mono text-[10px] text-ink-primary">
+      {children}
+    </kbd>
   );
 }
 
