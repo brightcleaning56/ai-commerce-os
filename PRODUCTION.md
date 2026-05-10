@@ -312,6 +312,34 @@ end-to-end so the operator UI can be demoed: a synthetic `sim_acct_*`
 gets persisted, and the panel always reads "Charges + payouts enabled."
 This lets you build the workflow without needing real Stripe creds.
 
+### Auto-release escrow (no orphan funds)
+
+The platform shouldn't hold buyer funds indefinitely if the operator
+forgets to click Release. The **`cron-auto-release`** scheduled function
+runs every 6 hours and finds transactions in `delivered` state whose
+`deliveredAt` is older than `AUTO_RELEASE_HOURS` (default 168h = 7 days)
+without a dispute, then drives them through `released → completed`.
+
+```bash
+# Default: auto-release 7 days post-delivery
+vercel env add AUTO_RELEASE_HOURS production    # default 168 (7 days)
+# Set to a smaller window for active markets, larger for high-trust
+# wholesale flows. Below 24 hours we recommend keeping manual-only.
+```
+
+The /transactions UI surfaces this on every delivered transaction:
+"Auto-releases in ~3d if no dispute" countdown next to the **Release
+Now** button. Once a transaction crosses the threshold, the UI says
+"Eligible for auto-release at next cron tick" so the operator knows
+manual action is no longer required.
+
+Auto-released transactions get an extra detail line on their
+stateHistory:
+> Auto-released after 168h post-delivery (no dispute raised)
+
+so they're visually distinct in `/admin/audit` from operator-released
+ones.
+
 ### Contracts
 
 ```bash

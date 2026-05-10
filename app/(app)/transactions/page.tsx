@@ -691,22 +691,45 @@ function ActionPanel({
         </div>
       )}
 
-      {txn.state === "delivered" && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] text-ink-secondary">
-            Delivered{txn.deliveredAt ? ` ${relTime(txn.deliveredAt)}` : ""}. Release escrow to supplier.
-          </span>
-          <button
-            disabled={isBusy("release")}
-            onClick={() => onAction(txn.id, "release", undefined, "Funds released")}
-            className="flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 py-1.5 text-xs font-semibold shadow-glow disabled:opacity-50"
-          >
-            {isBusy("release") ? <Loader2 className="h-3 w-3 animate-spin" /> : <Banknote className="h-3 w-3" />}
-            Release to Supplier
-          </button>
-          {buyerLinkBtn}
-        </div>
-      )}
+      {txn.state === "delivered" && (() => {
+        const deliveredMs = txn.deliveredAt ? new Date(txn.deliveredAt).getTime() : 0;
+        const ageMs = deliveredMs ? Date.now() - deliveredMs : 0;
+        const autoHours = 168;
+        const remainingHours = Math.max(0, autoHours - ageMs / (60 * 60 * 1000));
+        const willAutoSoon = remainingHours <= 24 && remainingHours > 0;
+        const overdue = remainingHours <= 0;
+        return (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] text-ink-secondary">
+                Delivered{txn.deliveredAt ? ` ${relTime(txn.deliveredAt)}` : ""}.
+                {overdue ? (
+                  <span className="ml-1 text-accent-amber">
+                    Eligible for auto-release at next cron tick.
+                  </span>
+                ) : willAutoSoon ? (
+                  <span className="ml-1 text-accent-amber">
+                    Auto-releases in ~{Math.ceil(remainingHours)}h if no dispute.
+                  </span>
+                ) : (
+                  <span className="ml-1 text-ink-tertiary">
+                    Auto-releases in ~{Math.ceil(remainingHours / 24)}d if no dispute.
+                  </span>
+                )}
+              </span>
+              <button
+                disabled={isBusy("release")}
+                onClick={() => onAction(txn.id, "release", undefined, "Funds released")}
+                className="flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 py-1.5 text-xs font-semibold shadow-glow disabled:opacity-50"
+              >
+                {isBusy("release") ? <Loader2 className="h-3 w-3 animate-spin" /> : <Banknote className="h-3 w-3" />}
+                Release Now
+              </button>
+              {buyerLinkBtn}
+            </div>
+          </div>
+        );
+      })()}
 
       {txn.state === "disputed" && (
         <div className="space-y-2">
