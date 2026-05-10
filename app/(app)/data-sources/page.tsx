@@ -6,52 +6,57 @@ import {
   Plug,
   Plus,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Source = {
   id: string;
   name: string;
   category: "Trends" | "Marketplaces" | "Buyers" | "Suppliers" | "Outreach" | "Comms";
   emoji: string;
-  status: "Connected" | "Needs auth" | "Disabled" | "Error";
-  recordsToday: number;
+  status: "Live" | "Coming soon" | "Needs auth" | "Disabled" | "Error";
+  recordsToday: number | null;
   lastSync: string;
   rateLimit: string;
   premium?: boolean;
+  scraperKey?: "reddit" | "hn";
 };
 
 const SOURCES: Source[] = [
-  { id: "tt", name: "TikTok Hashtag API", category: "Trends", emoji: "🎵", status: "Connected", recordsToday: 18_412, lastSync: "1m ago", rateLimit: "5K/hr" },
-  { id: "ig", name: "Instagram Reels", category: "Trends", emoji: "📸", status: "Connected", recordsToday: 9_201, lastSync: "3m ago", rateLimit: "2K/hr" },
-  { id: "rd", name: "Reddit (32 subs)", category: "Trends", emoji: "👽", status: "Connected", recordsToday: 4_120, lastSync: "5m ago", rateLimit: "Unlimited" },
-  { id: "yt", name: "YouTube Shorts", category: "Trends", emoji: "📺", status: "Connected", recordsToday: 6_881, lastSync: "8m ago", rateLimit: "1K/hr" },
-  { id: "gt", name: "Google Trends", category: "Trends", emoji: "📈", status: "Connected", recordsToday: 12_004, lastSync: "12m ago", rateLimit: "Public" },
-  { id: "fb", name: "Facebook Ads Library", category: "Trends", emoji: "📰", status: "Needs auth", recordsToday: 0, lastSync: "—", rateLimit: "—" },
+  { id: "rd", name: "Reddit (6 product subs)", category: "Trends", emoji: "👽", status: "Live", recordsToday: null, lastSync: "live", rateLimit: "Unrestricted public", scraperKey: "reddit" },
+  { id: "hn", name: "Hacker News", category: "Trends", emoji: "🔶", status: "Live", recordsToday: null, lastSync: "live", rateLimit: "Public", scraperKey: "hn" },
 
-  { id: "am", name: "Amazon BSR + Reviews", category: "Marketplaces", emoji: "📦", status: "Connected", recordsToday: 24_512, lastSync: "2m ago", rateLimit: "10K/hr" },
-  { id: "et", name: "Etsy Marketplace", category: "Marketplaces", emoji: "🧶", status: "Connected", recordsToday: 3_402, lastSync: "15m ago", rateLimit: "1K/hr" },
-  { id: "sh", name: "Shopify Polaris", category: "Marketplaces", emoji: "🛍️", status: "Connected", recordsToday: 8_412, lastSync: "9m ago", rateLimit: "5K/hr", premium: true },
+  { id: "tt", name: "TikTok Hashtag API", category: "Trends", emoji: "🎵", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "5K/hr (planned)" },
+  { id: "ig", name: "Instagram Reels", category: "Trends", emoji: "📸", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "2K/hr (planned)" },
+  { id: "yt", name: "YouTube Shorts", category: "Trends", emoji: "📺", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "1K/hr (planned)" },
+  { id: "gt", name: "Google Trends", category: "Trends", emoji: "📈", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "Public (planned)" },
+  { id: "fb", name: "Facebook Ads Library", category: "Trends", emoji: "📰", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "—" },
 
-  { id: "ali", name: "Alibaba / 1688", category: "Suppliers", emoji: "🏭", status: "Connected", recordsToday: 14_201, lastSync: "11m ago", rateLimit: "3K/hr" },
-  { id: "mic", name: "Made-in-China", category: "Suppliers", emoji: "🇨🇳", status: "Connected", recordsToday: 5_801, lastSync: "1h ago", rateLimit: "1K/hr" },
-  { id: "fa", name: "Faire (wholesale)", category: "Suppliers", emoji: "🤝", status: "Disabled", recordsToday: 0, lastSync: "—", rateLimit: "—" },
+  { id: "am", name: "Amazon BSR + Reviews", category: "Marketplaces", emoji: "📦", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "10K/hr (planned)" },
+  { id: "et", name: "Etsy Marketplace", category: "Marketplaces", emoji: "🧶", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "1K/hr (planned)" },
+  { id: "sh", name: "Shopify Polaris", category: "Marketplaces", emoji: "🛍️", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "5K/hr (planned)", premium: true },
 
-  { id: "ln", name: "LinkedIn Sales Nav", category: "Buyers", emoji: "💼", status: "Connected", recordsToday: 2_891, lastSync: "30m ago", rateLimit: "Seat-based", premium: true },
-  { id: "ap", name: "Apollo.io", category: "Buyers", emoji: "🚀", status: "Connected", recordsToday: 4_404, lastSync: "8m ago", rateLimit: "Plan-based", premium: true },
-  { id: "hu", name: "Hunter.io", category: "Buyers", emoji: "🎯", status: "Connected", recordsToday: 1_240, lastSync: "20m ago", rateLimit: "Plan-based" },
-  { id: "cl", name: "Clay (enrichment)", category: "Buyers", emoji: "🪨", status: "Error", recordsToday: 0, lastSync: "Yesterday · token expired", rateLimit: "—" },
+  { id: "ali", name: "Alibaba / 1688", category: "Suppliers", emoji: "🏭", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "3K/hr (planned)" },
+  { id: "mic", name: "Made-in-China", category: "Suppliers", emoji: "🇨🇳", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "1K/hr (planned)" },
+  { id: "fa", name: "Faire (wholesale)", category: "Suppliers", emoji: "🤝", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "—" },
 
-  { id: "gm", name: "Gmail / Workspace", category: "Outreach", emoji: "📧", status: "Connected", recordsToday: 891, lastSync: "1m ago", rateLimit: "OAuth" },
-  { id: "ms", name: "Microsoft 365 Outlook", category: "Outreach", emoji: "🅰️", status: "Connected", recordsToday: 412, lastSync: "2m ago", rateLimit: "OAuth" },
-  { id: "tw", name: "Twilio (SMS + voice)", category: "Outreach", emoji: "💬", status: "Connected", recordsToday: 142, lastSync: "5m ago", rateLimit: "Plan-based" },
+  { id: "ln", name: "LinkedIn Sales Nav", category: "Buyers", emoji: "💼", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "Seat-based (planned)", premium: true },
+  { id: "ap", name: "Apollo.io", category: "Buyers", emoji: "🚀", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "Plan-based (planned)", premium: true },
+  { id: "hu", name: "Hunter.io", category: "Buyers", emoji: "🎯", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "Plan-based (planned)" },
+  { id: "cl", name: "Clay (enrichment)", category: "Buyers", emoji: "🪨", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "—" },
 
-  { id: "sl", name: "Slack", category: "Comms", emoji: "💼", status: "Connected", recordsToday: 24, lastSync: "Today", rateLimit: "OAuth" },
-  { id: "cal", name: "Calendly / Cal.com", category: "Comms", emoji: "📅", status: "Connected", recordsToday: 11, lastSync: "1h ago", rateLimit: "OAuth" },
+  { id: "gm", name: "Gmail / Workspace", category: "Outreach", emoji: "📧", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "OAuth (planned)" },
+  { id: "ms", name: "Microsoft 365 Outlook", category: "Outreach", emoji: "🅰️", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "OAuth (planned)" },
+  { id: "tw", name: "Twilio (SMS + voice)", category: "Outreach", emoji: "💬", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "Plan-based (planned)" },
+
+  { id: "sl", name: "Slack", category: "Comms", emoji: "💼", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "OAuth (planned)" },
+  { id: "cal", name: "Calendly / Cal.com", category: "Comms", emoji: "📅", status: "Coming soon", recordsToday: null, lastSync: "—", rateLimit: "OAuth (planned)" },
 ];
 
-const STATUS_TONE: Record<string, { bg: string; text: string; Icon: React.ComponentType<{ className?: string }> }> = {
-  Connected: { bg: "bg-accent-green/15", text: "text-accent-green", Icon: CheckCircle2 },
+const STATUS_TONE: Record<Source["status"], { bg: string; text: string; Icon: React.ComponentType<{ className?: string }> }> = {
+  Live: { bg: "bg-accent-green/15", text: "text-accent-green", Icon: CheckCircle2 },
+  "Coming soon": { bg: "bg-bg-hover", text: "text-ink-tertiary", Icon: Sparkles },
   "Needs auth": { bg: "bg-accent-amber/15", text: "text-accent-amber", Icon: AlertCircle },
   Disabled: { bg: "bg-bg-hover", text: "text-ink-tertiary", Icon: Plug },
   Error: { bg: "bg-accent-red/15", text: "text-accent-red", Icon: AlertCircle },
@@ -59,11 +64,49 @@ const STATUS_TONE: Record<string, { bg: string; text: string; Icon: React.Compon
 
 const CATEGORIES = ["All", "Trends", "Marketplaces", "Buyers", "Suppliers", "Outreach", "Comms"] as const;
 
+type SignalsResponse = {
+  signals: {
+    scrapedAt: string;
+    reddit: { signals: unknown[] };
+    hn: { signals: unknown[] };
+    totalSignals: number;
+  } | null;
+};
+
+function formatLastSync(iso: string | undefined): string {
+  if (!iso) return "—";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 export default function DataSourcesPage() {
   const [cat, setCat] = useState<(typeof CATEGORIES)[number]>("All");
+  const [signals, setSignals] = useState<SignalsResponse["signals"]>(null);
+
+  useEffect(() => {
+    fetch("/api/signals")
+      .then((r) => r.json())
+      .then((d: SignalsResponse) => setSignals(d.signals))
+      .catch(() => {});
+  }, []);
+
+  const liveCounts = useMemo<Record<"reddit" | "hn", number>>(
+    () => ({
+      reddit: signals?.reddit.signals.length ?? 0,
+      hn: signals?.hn.signals.length ?? 0,
+    }),
+    [signals]
+  );
+  const lastSyncLabel = formatLastSync(signals?.scrapedAt);
 
   const list = SOURCES.filter((s) => cat === "All" || s.category === cat);
-  const totals = SOURCES.reduce((s, src) => s + src.recordsToday, 0);
+  const liveSourceCount = SOURCES.filter((s) => s.status === "Live").length;
+  const totalLiveRecords = (signals?.totalSignals ?? 0).toLocaleString();
 
   return (
     <div className="space-y-5">
@@ -75,13 +118,20 @@ export default function DataSourcesPage() {
           <div>
             <h1 className="text-2xl font-bold">Data Sources</h1>
             <p className="text-xs text-ink-secondary">
-              {SOURCES.filter((s) => s.status === "Connected").length} of {SOURCES.length} connected · {totals.toLocaleString()} records ingested today
+              {liveSourceCount} live signal source{liveSourceCount === 1 ? "" : "s"} · {totalLiveRecords} records ingested today · last sync {lastSyncLabel}
             </p>
           </div>
         </div>
         <button className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow">
           <Plus className="h-4 w-4" /> Connect new source
         </button>
+      </div>
+
+      <div className="flex items-start gap-2 rounded-xl border border-bg-border bg-bg-card p-3 text-xs text-ink-secondary">
+        <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand-200" />
+        <div>
+          <span className="font-semibold text-ink-primary">Live</span> sources are actually firing today (see <code className="rounded bg-bg-hover px-1">lib/scrapers/</code>). Everything labelled <span className="font-semibold text-ink-primary">Coming soon</span> is roadmap UI — counts and limits are aspirational, not real. We do this on purpose so you can see what&apos;s shipped vs planned.
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs w-fit">
@@ -109,6 +159,14 @@ export default function DataSourcesPage() {
         {list.map((s) => {
           const tone = STATUS_TONE[s.status];
           const Icon = tone.Icon;
+          const liveRecords = s.scraperKey ? liveCounts[s.scraperKey] : null;
+          const recordsLabel =
+            liveRecords !== null
+              ? liveRecords.toLocaleString()
+              : s.recordsToday !== null
+                ? s.recordsToday.toLocaleString()
+                : "—";
+          const syncLabel = s.scraperKey ? lastSyncLabel : s.lastSync;
           return (
             <div
               key={s.id}
@@ -138,11 +196,11 @@ export default function DataSourcesPage() {
               <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Records</div>
-                  <div className="text-sm font-semibold">{s.recordsToday.toLocaleString()}</div>
+                  <div className="text-sm font-semibold">{recordsLabel}</div>
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Last sync</div>
-                  <div className="text-sm font-semibold">{s.lastSync}</div>
+                  <div className="text-sm font-semibold">{syncLabel}</div>
                 </div>
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Limit</div>
@@ -150,10 +208,16 @@ export default function DataSourcesPage() {
                 </div>
               </div>
               <div className="mt-3 flex gap-2">
-                <button className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-bg-border bg-bg-hover/40 py-1.5 text-xs hover:bg-bg-hover">
+                <button
+                  disabled={s.status !== "Live"}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-bg-border bg-bg-hover/40 py-1.5 text-xs hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-40"
+                >
                   <RefreshCw className="h-3 w-3" /> Sync now
                 </button>
-                <button className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-bg-border bg-bg-hover/40 py-1.5 text-xs hover:bg-bg-hover">
+                <button
+                  disabled={s.status !== "Live"}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-bg-border bg-bg-hover/40 py-1.5 text-xs hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-40"
+                >
                   Configure
                 </button>
               </div>
