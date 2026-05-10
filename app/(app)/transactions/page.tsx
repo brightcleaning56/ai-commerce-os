@@ -83,6 +83,8 @@ type Transaction = {
   deliveredAt?: string;
   disputedAt?: string;
   disputeReason?: string;
+  disputeResolution?: "refund_buyer" | "release_supplier" | "split" | "pending";
+  disputeResolutionNotes?: string;
   paymentMethodLast4?: string;
   shareToken: string;
   aiConfidenceScore?: number;
@@ -425,6 +427,7 @@ function TxnRow({
   // Forms — local row state
   const [trackingForm, setTrackingForm] = useState({ carrier: "FedEx", trackingNumber: "" });
   const [resolveForm, setResolveForm] = useState<"refund_buyer" | "release_supplier" | "split">("refund_buyer");
+  const [resolveNotes, setResolveNotes] = useState("");
   const [cancelReason, setCancelReason] = useState("");
 
   const isBusy = (action: string) => busyKey === `${txn.id}-${action}`;
@@ -519,6 +522,8 @@ function TxnRow({
             setTrackingForm={setTrackingForm}
             resolveForm={resolveForm}
             setResolveForm={setResolveForm}
+            resolveNotes={resolveNotes}
+            setResolveNotes={setResolveNotes}
             cancelReason={cancelReason}
             setCancelReason={setCancelReason}
             onAction={onAction}
@@ -560,7 +565,7 @@ function TxnRow({
 
 function ActionPanel({
   txn, isBusy, trackingForm, setTrackingForm, resolveForm, setResolveForm,
-  cancelReason, setCancelReason, onAction, onCopyLink,
+  resolveNotes, setResolveNotes, cancelReason, setCancelReason, onAction, onCopyLink,
 }: {
   txn: Transaction;
   isBusy: (action: string) => boolean;
@@ -568,6 +573,8 @@ function ActionPanel({
   setTrackingForm: (v: { carrier: string; trackingNumber: string }) => void;
   resolveForm: "refund_buyer" | "release_supplier" | "split";
   setResolveForm: (v: "refund_buyer" | "release_supplier" | "split") => void;
+  resolveNotes: string;
+  setResolveNotes: (v: string) => void;
   cancelReason: string;
   setCancelReason: (v: string) => void;
   onAction: (txnId: string, path: string, body?: any, label?: string) => Promise<void>;
@@ -750,13 +757,30 @@ function ActionPanel({
             </select>
             <button
               disabled={isBusy("resolve")}
-              onClick={() => onAction(txn.id, "resolve", { resolution: resolveForm }, "Dispute resolved")}
+              onClick={() => onAction(
+                txn.id,
+                "resolve",
+                { resolution: resolveForm, notes: resolveNotes.trim() || undefined },
+                "Dispute resolved",
+              )}
               className="flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 py-1.5 text-xs font-semibold shadow-glow disabled:opacity-50"
             >
               {isBusy("resolve") ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
               Resolve
             </button>
           </div>
+          <textarea
+            value={resolveNotes}
+            onChange={(e) => setResolveNotes(e.target.value.slice(0, 500))}
+            placeholder="Resolution rationale (optional, 500 chars max) — what evidence convinced you, what's the precedent, etc. Persisted to the audit trail."
+            rows={2}
+            className="w-full rounded-md border border-bg-border bg-bg-card p-2 text-[11px] placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+          />
+          {resolveNotes.length > 0 && (
+            <div className="text-right text-[10px] text-ink-tertiary">
+              {resolveNotes.length}/500
+            </div>
+          )}
         </div>
       )}
 
@@ -770,13 +794,36 @@ function ActionPanel({
       )}
 
       {(txn.state === "cancelled" || txn.state === "refunded") && (
-        <div className="flex flex-wrap items-center gap-2 text-[11px]">
-          <span className="flex items-center gap-1 rounded-md bg-bg-hover px-2 py-1 text-ink-secondary">
-            <PauseCircle className="h-3 w-3" /> {txn.state === "refunded" ? "Refunded — closed" : "Cancelled — closed"}
-          </span>
-          {viewBtn}
+        <div className="space-y-2 text-[11px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-1 rounded-md bg-bg-hover px-2 py-1 text-ink-secondary">
+              <PauseCircle className="h-3 w-3" /> {txn.state === "refunded" ? "Refunded — closed" : "Cancelled — closed"}
+            </span>
+            {viewBtn}
+          </div>
+          {txn.disputeResolutionNotes && (
+            <div className="rounded-md border border-bg-border bg-bg-hover/30 p-2.5">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                Resolution rationale
+              </div>
+              <div className="mt-0.5 text-[11px] text-ink-secondary">
+                {txn.disputeResolutionNotes}
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Show rationale on released-post-dispute too (release_supplier path) */}
+      {(txn.state === "released" || txn.state === "completed") &&
+        txn.disputeResolutionNotes && (
+          <div className="rounded-md border border-bg-border bg-bg-hover/30 p-2.5 text-[11px]">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+              Resolution rationale (post-dispute)
+            </div>
+            <div className="mt-0.5 text-ink-secondary">{txn.disputeResolutionNotes}</div>
+          </div>
+        )}
 
       {/* Cancel row — visible for early states only */}
       {cancellable && (

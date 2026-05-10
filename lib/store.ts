@@ -277,6 +277,12 @@ export type Transaction = {
   disputedAt?: string;
   disputeReason?: string;
   disputeResolution?: "refund_buyer" | "release_supplier" | "split" | "pending";
+  /**
+   * Operator's free-text rationale captured at resolve time. Persisted alongside
+   * the resolution choice so audit trail shows WHY, not just WHAT. Max 500 chars
+   * (enforced server-side); empty/null when the operator skipped the field.
+   */
+  disputeResolutionNotes?: string;
   refundedAt?: string;
   refundCents?: number;
 

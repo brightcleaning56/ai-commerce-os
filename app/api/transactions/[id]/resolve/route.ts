@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * POST /api/transactions/[id]/resolve  — operator resolves a dispute.
- * Body: { resolution: "refund_buyer" | "release_supplier" | "split" }
+ * Body: { resolution: "refund_buyer" | "release_supplier" | "split", notes?: string }
  *
  * Transitions:
  *   disputed → refunded         (when resolution = refund_buyer or split with refund)
@@ -19,12 +19,19 @@ export const dynamic = "force-dynamic";
  *   refund_buyer:    full refund to buyer — Stripe refund call in live mode
  *   release_supplier: full payout to supplier — same path as normal release
  *   split:           refund half + release half (50/50) — partial Stripe refund
+ *
+ * `notes` (optional, max 500 chars) captures operator rationale — persisted
+ * on the txn as disputeResolutionNotes + appended to the stateHistory detail
+ * line so /admin/audit shows WHY, not just WHAT.
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const auth = requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
-  let body: { resolution?: "refund_buyer" | "release_supplier" | "split" } = {};
+  let body: {
+    resolution?: "refund_buyer" | "release_supplier" | "split";
+    notes?: string;
+  } = {};
   try {
     body = await req.json();
   } catch {
@@ -36,6 +43,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       { status: 400 },
     );
   }
+
+  // Sanitize notes: trim, hard-cap at 500 chars, empty → undefined
+  const rawNotes = typeof body.notes === "string" ? body.notes.trim() : "";
+  const notes: string | undefined = rawNotes ? rawNotes.slice(0, 500) : undefined;
+  const notesSuffix = notes ? ` · "${notes.slice(0, 80)}${notes.length > 80 ? "…" : ""}"` : "";
 
   const txn = await store.getTransaction(params.id);
   if (!txn) return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
@@ -53,9 +65,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         id: params.id,
         to: "released",
         actor: "operator",
-        detail: "Dispute resolved — escrow released to supplier",
+        detail: `Dispute resolved — escrow released to supplier${notesSuffix}`,
         patch: {
           disputeResolution: "release_supplier",
+          disputeResolutionNotes: notes,
           escrowReleasedAt: new Date().toISOString(),
           escrowReleaseAuthorizedBy: "operator",
         },
@@ -85,9 +98,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         id: params.id,
         to: "refunded",
         actor: "operator",
-        detail: "Dispute resolved — full refund to buyer",
+        detail: `Dispute resolved — full refund to buyer${notesSuffix}`,
         patch: {
           disputeResolution: "refund_buyer",
+          disputeResolutionNotes: notes,
           refundedAt: new Date().toISOString(),
           refundCents: txn.productTotalCents,
         },
@@ -114,9 +128,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       id: params.id,
       to: "refunded",
       actor: "operator",
-      detail: `Dispute resolved — 50/50 split (buyer refunded $${(halfCents / 100).toFixed(2)})`,
+      detail: `Dispute resolved — 50/50 split (buyer refunded $${(halfCents / 100).toFixed(2)})${notesSuffix}`,
       patch: {
         disputeResolution: "split",
+        disputeResolutionNotes: notes,
         refundedAt: new Date().toISOString(),
         refundCents: halfCents,
       },
