@@ -86,6 +86,7 @@ function TransactionView() {
   const token = search.get("t") || "";
 
   const [txn, setTxn] = useState<Txn | null>(null);
+  const [autoReleaseHours, setAutoReleaseHours] = useState<number>(168);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,6 +112,7 @@ function TransactionView() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `${res.status}`);
       setTxn(data.transaction);
+      if (typeof data.autoReleaseHours === "number") setAutoReleaseHours(data.autoReleaseHours);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -373,26 +375,61 @@ function TransactionView() {
               </div>
             )}
 
-            {txn.state === "delivered" && (
-              <div className="mt-4">
-                <div className="rounded-lg border border-accent-green/30 bg-accent-green/5 p-3 text-xs">
-                  <div className="flex items-center gap-2 font-semibold text-accent-green">
-                    <Package className="h-3.5 w-3.5" />
-                    Delivered {txn.deliveredAt ? new Date(txn.deliveredAt).toLocaleString() : ""}
+            {txn.state === "delivered" && (() => {
+              const deliveredMs = txn.deliveredAt ? new Date(txn.deliveredAt).getTime() : 0;
+              const ageMs = deliveredMs ? Date.now() - deliveredMs : 0;
+              const remainingMs = Math.max(0, autoReleaseHours * 60 * 60 * 1000 - ageMs);
+              const remainingHours = remainingMs / (60 * 60 * 1000);
+              const remainingDays = remainingHours / 24;
+              let countdownText: string;
+              let countdownTone: "green" | "amber" | "red";
+              if (remainingHours <= 0) {
+                countdownText = "Dispute window closed — funds release at next platform sweep.";
+                countdownTone = "red";
+              } else if (remainingHours < 24) {
+                countdownText = `${Math.ceil(remainingHours)}h left to inspect & dispute. After that, funds auto-release to the seller.`;
+                countdownTone = "amber";
+              } else {
+                countdownText = `${Math.floor(remainingDays)} day${Math.floor(remainingDays) === 1 ? "" : "s"} ${Math.ceil(remainingHours - Math.floor(remainingDays) * 24)}h left to inspect & dispute. After that, funds auto-release to the seller.`;
+                countdownTone = "green";
+              }
+              const countdownClass =
+                countdownTone === "red"
+                  ? "border-accent-red/30 bg-accent-red/5"
+                  : countdownTone === "amber"
+                  ? "border-accent-amber/30 bg-accent-amber/5"
+                  : "border-accent-green/30 bg-accent-green/5";
+              const countdownIconClass =
+                countdownTone === "red"
+                  ? "text-accent-red"
+                  : countdownTone === "amber"
+                  ? "text-accent-amber"
+                  : "text-accent-green";
+              return (
+                <div className="mt-4">
+                  <div className={`rounded-lg border ${countdownClass} p-3 text-xs`}>
+                    <div className={`flex items-center gap-2 font-semibold ${countdownIconClass}`}>
+                      <Package className="h-3.5 w-3.5" />
+                      Delivered {txn.deliveredAt ? new Date(txn.deliveredAt).toLocaleString() : ""}
+                    </div>
+                    <div className="mt-1 text-ink-secondary">
+                      Inspect the goods now. If everything matches the order, confirm delivery to release escrow.
+                    </div>
+                    <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-medium ${countdownIconClass}`}>
+                      <Clock className="h-3 w-3" />
+                      {countdownText}
+                    </div>
                   </div>
-                  <div className="mt-1 text-ink-secondary">
-                    Inspect the goods. If everything matches the order, confirm delivery to release escrow. You have 7 days to raise a dispute.
-                  </div>
+                  <button
+                    onClick={confirmDelivery}
+                    disabled={confirming}
+                    className="mt-3 w-full rounded-lg bg-gradient-brand px-4 py-3 text-sm font-semibold shadow-glow disabled:opacity-50"
+                  >
+                    {confirming ? "Confirming…" : "Confirm delivery — release escrow"}
+                  </button>
                 </div>
-                <button
-                  onClick={confirmDelivery}
-                  disabled={confirming}
-                  className="mt-3 w-full rounded-lg bg-gradient-brand px-4 py-3 text-sm font-semibold shadow-glow disabled:opacity-50"
-                >
-                  {confirming ? "Confirming…" : "Confirm delivery — release escrow"}
-                </button>
-              </div>
-            )}
+              );
+            })()}
 
             {txn.state === "disputed" && (
               <div className="mt-4 rounded-lg border border-accent-amber/30 bg-accent-amber/5 p-3 text-xs">
@@ -446,15 +483,26 @@ function TransactionView() {
           </div>
         )}
 
-        {(txn.state === "completed" || txn.state === "released") && (
-          <div className="rounded-xl border border-accent-green/40 bg-accent-green/5 p-5 text-center">
-            <CheckCircle2 className="mx-auto h-10 w-10 text-accent-green" />
-            <h2 className="mt-3 text-lg font-bold">Transaction complete</h2>
-            <p className="mt-1 text-xs text-ink-secondary">
-              Escrow released. Supplier paid. Thank you for your business.
-            </p>
-          </div>
-        )}
+        {(txn.state === "completed" || txn.state === "released") && (() => {
+          const releasedAt = (txn as any).escrowReleasedAt;
+          const releasedBy = (txn as any).escrowReleaseAuthorizedBy;
+          const wasAutoReleased = releasedBy === "auto";
+          return (
+            <div className="rounded-xl border border-accent-green/40 bg-accent-green/5 p-5 text-center">
+              <CheckCircle2 className="mx-auto h-10 w-10 text-accent-green" />
+              <h2 className="mt-3 text-lg font-bold">Transaction complete</h2>
+              <p className="mt-1 text-xs text-ink-secondary">
+                Escrow released. Supplier paid. Thank you for your business.
+              </p>
+              {releasedAt && (
+                <p className="mt-2 text-[11px] text-ink-tertiary">
+                  Released {new Date(releasedAt).toLocaleString()}
+                  {wasAutoReleased && " · auto-released after dispute window closed"}
+                </p>
+              )}
+            </div>
+          );
+        })()}
 
         {txn.state === "refunded" && (
           <div className="rounded-xl border border-accent-amber/40 bg-accent-amber/5 p-5 text-center">

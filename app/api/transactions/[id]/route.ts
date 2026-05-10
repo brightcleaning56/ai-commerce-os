@@ -17,17 +17,21 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const txn = await store.getTransaction(params.id);
   if (!txn) return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
 
+  // Auto-release window — exposed so the buyer page can render the
+  // dispute-deadline countdown authoritatively.
+  const autoReleaseHours = Math.max(1, Number(process.env.AUTO_RELEASE_HOURS ?? "168") || 168);
+
   const token = req.nextUrl.searchParams.get("t") || "";
   if (token && token === txn.shareToken) {
     // Public buyer access — check expiry
     if (Date.now() > new Date(txn.shareExpiresAt).getTime()) {
       return NextResponse.json({ error: "Share link expired" }, { status: 410 });
     }
-    return NextResponse.json({ transaction: txn, viewer: "buyer" });
+    return NextResponse.json({ transaction: txn, viewer: "buyer", autoReleaseHours });
   }
 
   // Otherwise require admin
   const auth = requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
-  return NextResponse.json({ transaction: txn, viewer: "operator" });
+  return NextResponse.json({ transaction: txn, viewer: "operator", autoReleaseHours });
 }
