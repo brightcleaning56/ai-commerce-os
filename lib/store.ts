@@ -286,6 +286,16 @@ export type Transaction = {
   refundedAt?: string;
   refundCents?: number;
 
+  /**
+   * Free-form operator scratchpad — anything not state-machine driven.
+   * Examples: "Sarah said she'd ship by Friday", "Buyer was 3 days late
+   * on last deal", "Watch this one — first order over $50K". Max 1000
+   * chars (enforced server-side). Private to operators (not exposed via
+   * the public buyer-page API).
+   */
+  operatorNotes?: string;
+  operatorNotesUpdatedAt?: string;
+
   // AI confidence + risk
   aiConfidenceScore?: number;  // 0-100, computed at proposal time
   riskFlags?: string[];        // ids of any risk flags triggered

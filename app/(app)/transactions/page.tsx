@@ -85,6 +85,8 @@ type Transaction = {
   disputeReason?: string;
   disputeResolution?: "refund_buyer" | "release_supplier" | "split" | "pending";
   disputeResolutionNotes?: string;
+  operatorNotes?: string;
+  operatorNotesUpdatedAt?: string;
   paymentMethodLast4?: string;
   shareToken: string;
   aiConfidenceScore?: number;
@@ -513,6 +515,9 @@ function TxnRow({
 
           {/* Stripe Connect supplier onboarding */}
           <SupplierConnectPanel txn={txn} />
+
+          {/* Operator notes — free-form scratchpad, private to operators */}
+          <OperatorNotes txn={txn} />
 
           {/* Action panel — varies by state */}
           <ActionPanel
@@ -1032,5 +1037,123 @@ function SupplierConnectPanel({ txn }: { txn: Transaction }) {
         </button>
       </div>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Operator notes — free-form, private scratchpad per transaction
+// ─────────────────────────────────────────────────────────────────────────────
+
+function OperatorNotes({ txn }: { txn: Transaction }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(txn.operatorNotes ?? "");
+  const [saving, setSaving] = useState(false);
+
+  // If parent txn updates (poll/refresh), drop stale draft when not actively editing
+  useEffect(() => {
+    if (!editing) setDraft(txn.operatorNotes ?? "");
+  }, [txn.operatorNotes, editing]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/transactions/${txn.id}/note`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: draft }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        alert(`Save failed: ${d.error ?? r.statusText}`);
+        return;
+      }
+      setEditing(false);
+      // The parent /transactions page polls every 20s, so the txn prop will
+      // refresh with the new operatorNotes shortly. We could optimistically
+      // mutate but the parent handles it.
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancel() {
+    setDraft(txn.operatorNotes ?? "");
+    setEditing(false);
+  }
+
+  const hasNote = !!txn.operatorNotes;
+
+  if (!editing && !hasNote) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-bg-border bg-bg-hover/20 px-3 py-2 text-[11px] text-ink-tertiary hover:border-brand-500/40 hover:bg-bg-hover/40 hover:text-ink-secondary"
+      >
+        <FileText className="h-3 w-3" />
+        Add operator note (private — not visible to buyer)
+      </button>
+    );
+  }
+
+  if (editing) {
+    return (
+      <div className="rounded-lg border border-brand-500/40 bg-bg-hover/30 p-3">
+        <div className="flex items-center gap-2 text-[11px] font-semibold">
+          <FileText className="h-3 w-3 text-brand-300" />
+          Operator note
+          <span className="text-ink-tertiary">· private</span>
+        </div>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value.slice(0, 1000))}
+          autoFocus
+          placeholder="Anything not state-machine driven — 'Sarah said she'd ship by Friday', 'Watch this one — first order over $50K', etc."
+          rows={3}
+          className="mt-2 w-full rounded-md border border-bg-border bg-bg-card p-2 text-[11px] placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+        />
+        <div className="mt-2 flex items-center justify-between text-[10px]">
+          <span className="text-ink-tertiary">{draft.length}/1000 · Cmd+Enter to save</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={cancel}
+              className="rounded-md border border-bg-border bg-bg-card px-2.5 py-1 hover:bg-bg-hover"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="flex items-center gap-1 rounded-md bg-gradient-brand px-2.5 py-1 font-semibold shadow-glow disabled:opacity-60"
+            >
+              {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Display mode — has note, not editing
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className="w-full rounded-lg border border-bg-border bg-bg-hover/30 p-3 text-left transition hover:border-brand-500/40"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-[11px] font-semibold">
+          <FileText className="h-3 w-3 text-brand-300" />
+          Operator note
+          <span className="text-ink-tertiary">· private</span>
+        </div>
+        <span className="text-[10px] text-ink-tertiary">
+          {txn.operatorNotesUpdatedAt ? `Edited ${relTime(txn.operatorNotesUpdatedAt)}` : ""}
+          <span className="ml-2 text-brand-300">Edit</span>
+        </span>
+      </div>
+      <div className="mt-1.5 whitespace-pre-wrap text-[11px] text-ink-secondary">
+        {txn.operatorNotes}
+      </div>
+    </button>
   );
 }

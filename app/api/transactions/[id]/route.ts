@@ -27,7 +27,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (Date.now() > new Date(txn.shareExpiresAt).getTime()) {
       return NextResponse.json({ error: "Share link expired" }, { status: 410 });
     }
-    return NextResponse.json({ transaction: txn, viewer: "buyer", autoReleaseHours });
+    // Strip operator-private fields before returning to the buyer
+    const { operatorNotes, operatorNotesUpdatedAt, ...buyerSafe } = txn;
+    return NextResponse.json({ transaction: buyerSafe, viewer: "buyer", autoReleaseHours });
   }
 
   // Otherwise require admin
