@@ -115,6 +115,7 @@ export default function ApprovalsPage() {
   // Keyboard navigation: which pending draft is selected, and whether the
   // shortcut help overlay is showing.
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   const draftRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const { toast } = useToast();
@@ -264,7 +265,7 @@ export default function ApprovalsPage() {
   );
 
   useEffect(() => {
-    function onKeydown(e: KeyboardEvent) {
+    async function onKeydown(e: KeyboardEvent) {
       // Ignore when typing in form fields
       const target = e.target as HTMLElement | null;
       if (
@@ -290,32 +291,70 @@ export default function ApprovalsPage() {
           e.preventDefault();
           moveSelection(-1);
           break;
-        case "a": {
+        case " ": // Space — toggle current draft into bulk-select set
+        case "x": {
           if (!selectedDraftId) break;
           e.preventDefault();
-          setDraftStatus(selectedDraftId, "approved");
-          toast("Approved · press s to send", "success");
+          setBulkSelected((prev) => {
+            const next = new Set(prev);
+            if (next.has(selectedDraftId)) next.delete(selectedDraftId);
+            else next.add(selectedDraftId);
+            return next;
+          });
+          break;
+        }
+        case "a": {
+          e.preventDefault();
+          // If bulk-select is non-empty, approve all selected. Otherwise
+          // approve the highlighted one.
+          if (bulkSelected.size > 0) {
+            const ids = Array.from(bulkSelected);
+            await Promise.all(ids.map((id) => setDraftStatus(id, "approved")));
+            toast(`Approved ${ids.length} draft${ids.length === 1 ? "" : "s"} · press s to send`, "success");
+          } else {
+            if (!selectedDraftId) break;
+            setDraftStatus(selectedDraftId, "approved");
+            toast("Approved · press s to send", "success");
+          }
           break;
         }
         case "r": {
-          if (!selectedDraftId) break;
           e.preventDefault();
-          setDraftStatus(selectedDraftId, "rejected");
-          toast("Rejected", "info");
-          // Move to the next draft after rejecting
-          moveSelection(1);
+          if (bulkSelected.size > 0) {
+            const ids = Array.from(bulkSelected);
+            await Promise.all(ids.map((id) => setDraftStatus(id, "rejected")));
+            toast(`Rejected ${ids.length} draft${ids.length === 1 ? "" : "s"}`, "info");
+            setBulkSelected(new Set());
+          } else {
+            if (!selectedDraftId) break;
+            setDraftStatus(selectedDraftId, "rejected");
+            toast("Rejected", "info");
+            moveSelection(1);
+          }
           break;
         }
         case "s": {
-          if (!selectedDraftId) break;
-          const target = drafts.find((d) => d.id === selectedDraftId);
-          if (!target) break;
-          if (target.status !== "approved") {
-            toast("Approve first (a) before sending (s)", "info");
-            break;
-          }
           e.preventDefault();
-          sendDraft(selectedDraftId);
+          if (bulkSelected.size > 0) {
+            const ids = Array.from(bulkSelected);
+            const sendable = drafts.filter((d) => ids.includes(d.id) && d.status === "approved");
+            if (sendable.length === 0) {
+              toast("Approve first (a), then send (s) — none of the selected drafts are approved yet", "info");
+              break;
+            }
+            await Promise.all(sendable.map((d) => sendDraft(d.id)));
+            toast(`Sent ${sendable.length} draft${sendable.length === 1 ? "" : "s"}`, "success");
+            setBulkSelected(new Set());
+          } else {
+            if (!selectedDraftId) break;
+            const target = drafts.find((d) => d.id === selectedDraftId);
+            if (!target) break;
+            if (target.status !== "approved") {
+              toast("Approve first (a) before sending (s)", "info");
+              break;
+            }
+            sendDraft(selectedDraftId);
+          }
           break;
         }
         case "?":
@@ -324,13 +363,31 @@ export default function ApprovalsPage() {
           setShortcutHelpOpen((v) => !v);
           break;
         case "Escape":
-          if (shortcutHelpOpen) setShortcutHelpOpen(false);
+          if (shortcutHelpOpen) {
+            setShortcutHelpOpen(false);
+          } else if (bulkSelected.size > 0) {
+            // Escape clears bulk-select before exiting any other mode
+            setBulkSelected(new Set());
+          }
           break;
       }
     }
     window.addEventListener("keydown", onKeydown);
     return () => window.removeEventListener("keydown", onKeydown);
-  }, [selectedDraftId, moveSelection, drafts, shortcutHelpOpen, toast]);
+  }, [selectedDraftId, moveSelection, drafts, shortcutHelpOpen, toast, bulkSelected]);
+
+  // Drop bulk-selected ids that are no longer in the visible queue
+  useEffect(() => {
+    if (bulkSelected.size === 0) return;
+    const ids = new Set(visibleDraftIds);
+    let dirty = false;
+    const next = new Set<string>();
+    for (const id of bulkSelected) {
+      if (ids.has(id)) next.add(id);
+      else dirty = true;
+    }
+    if (dirty) setBulkSelected(next);
+  }, [visibleDraftIds, bulkSelected]);
 
   // Build the unified queue
   const pendingDrafts = drafts.filter((d) => d.status === "draft");
@@ -550,6 +607,7 @@ export default function ApprovalsPage() {
             const isFollowup = !!d.parentDraftId;
             const parent = isFollowup ? draftsById.get(d.parentDraftId!) : null;
             const depth = isFollowup ? followupDepth(d, draftsById) : 1;
+            const isBulkChecked = bulkSelected.has(d.id);
             return (
             <div
               key={d.id}
@@ -558,10 +616,32 @@ export default function ApprovalsPage() {
               className={`rounded-xl border bg-bg-card p-4 transition cursor-pointer ${
                 selectedDraftId === d.id
                   ? "border-brand-500/60 shadow-glow"
+                  : isBulkChecked
+                  ? "border-accent-green/40"
                   : "border-bg-border hover:border-brand-500/30"
               }`}
             >
               <div className="flex items-start gap-3">
+                {/* Bulk-select checkbox — click toggles, doesn't propagate to row select */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setBulkSelected((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(d.id)) next.delete(d.id);
+                      else next.add(d.id);
+                      return next;
+                    });
+                  }}
+                  className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded border transition ${
+                    isBulkChecked
+                      ? "border-accent-green bg-accent-green text-white"
+                      : "border-bg-border bg-bg-card hover:border-brand-500/60"
+                  }`}
+                  aria-label={isBulkChecked ? "Remove from bulk selection" : "Add to bulk selection"}
+                >
+                  {isBulkChecked && <CheckCircle2 className="h-3 w-3" />}
+                </button>
                 <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
                   isFollowup ? "bg-brand-500/15" : "bg-accent-cyan/15"
                 }`}>
@@ -685,11 +765,64 @@ export default function ApprovalsPage() {
         </div>
       </div>
 
-      {/* Keyboard shortcut hint footer — always visible at the bottom of the page */}
-      {pendingDrafts.length > 0 && (
+      {/* Sticky footer — bulk action bar when selection > 0, otherwise the
+          keyboard hint pill. Both are bottom-3 z-10. */}
+      {bulkSelected.size > 0 ? (
+        <div className="sticky bottom-3 z-10 mx-auto flex w-fit flex-wrap items-center gap-3 rounded-full border border-accent-green/40 bg-bg-panel/95 px-4 py-2 text-[11px] shadow-glow backdrop-blur">
+          <CheckCircle2 className="h-3 w-3 text-accent-green" />
+          <span className="font-semibold">
+            {bulkSelected.size} draft{bulkSelected.size === 1 ? "" : "s"} selected
+          </span>
+          <button
+            onClick={async () => {
+              const ids = Array.from(bulkSelected);
+              await Promise.all(ids.map((id) => setDraftStatus(id, "approved")));
+              toast(`Approved ${ids.length} draft${ids.length === 1 ? "" : "s"}`, "success");
+            }}
+            className="flex items-center gap-1 rounded-md bg-gradient-brand px-2.5 py-1 text-[11px] font-semibold text-white"
+          >
+            <CheckCircle2 className="h-3 w-3" /> Approve all <Kbd>a</Kbd>
+          </button>
+          <button
+            onClick={async () => {
+              const ids = Array.from(bulkSelected);
+              const sendable = drafts.filter((d) => ids.includes(d.id) && d.status === "approved");
+              if (sendable.length === 0) {
+                toast("Approve first (a), then send (s)", "info");
+                return;
+              }
+              await Promise.all(sendable.map((d) => sendDraft(d.id)));
+              toast(`Sent ${sendable.length} draft${sendable.length === 1 ? "" : "s"}`, "success");
+              setBulkSelected(new Set());
+            }}
+            className="flex items-center gap-1 rounded-md border border-bg-border bg-bg-hover px-2.5 py-1 text-[11px] font-semibold hover:bg-bg-card"
+          >
+            <Send className="h-3 w-3" /> Send all <Kbd>s</Kbd>
+          </button>
+          <button
+            onClick={async () => {
+              const ids = Array.from(bulkSelected);
+              await Promise.all(ids.map((id) => setDraftStatus(id, "rejected")));
+              toast(`Rejected ${ids.length}`, "info");
+              setBulkSelected(new Set());
+            }}
+            className="flex items-center gap-1 rounded-md border border-bg-border bg-bg-hover px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-accent-red/10 hover:text-accent-red"
+          >
+            <XCircle className="h-3 w-3" /> Reject all <Kbd>r</Kbd>
+          </button>
+          <button
+            onClick={() => setBulkSelected(new Set())}
+            className="text-[11px] text-ink-tertiary hover:text-ink-primary"
+            title="Clear selection (Esc)"
+          >
+            Clear <Kbd>Esc</Kbd>
+          </button>
+        </div>
+      ) : pendingDrafts.length > 0 ? (
         <div className="sticky bottom-3 z-10 mx-auto flex w-fit items-center gap-3 rounded-full border border-bg-border bg-bg-panel/95 px-4 py-2 text-[11px] text-ink-secondary shadow-glow backdrop-blur">
           <Keyboard className="h-3 w-3 text-brand-300" />
           <span><Kbd>j</Kbd>/<Kbd>k</Kbd> nav</span>
+          <span><Kbd>x</Kbd>/<Kbd>Space</Kbd> select</span>
           <span><Kbd>a</Kbd> approve</span>
           <span><Kbd>r</Kbd> reject</span>
           <span><Kbd>s</Kbd> send</span>
@@ -701,7 +834,7 @@ export default function ApprovalsPage() {
             <Kbd>?</Kbd> help
           </button>
         </div>
-      )}
+      ) : null}
 
       {/* Shortcut help overlay */}
       {shortcutHelpOpen && (
@@ -721,11 +854,12 @@ export default function ApprovalsPage() {
               {[
                 { k: "j  ↓", l: "Move selection down" },
                 { k: "k  ↑", l: "Move selection up" },
-                { k: "a", l: "Approve selected draft" },
-                { k: "r", l: "Reject selected draft" },
-                { k: "s", l: "Send selected draft (must be approved first)" },
+                { k: "x  Space", l: "Toggle current draft into bulk-select" },
+                { k: "a", l: "Approve (bulk if selection > 0, else single)" },
+                { k: "r", l: "Reject (bulk if selection > 0, else single)" },
+                { k: "s", l: "Send approved drafts (bulk if selection > 0)" },
                 { k: "?", l: "Toggle this help" },
-                { k: "Esc", l: "Close help" },
+                { k: "Esc", l: "Clear bulk-select / close help" },
               ].map((row) => (
                 <div key={row.k} className="flex items-center justify-between rounded-md bg-bg-hover/40 px-3 py-1.5">
                   <span className="text-ink-secondary">{row.l}</span>
@@ -734,7 +868,8 @@ export default function ApprovalsPage() {
               ))}
             </div>
             <div className="mt-3 text-[10px] text-ink-tertiary">
-              Shortcuts ignore presses while typing in inputs/textareas.
+              Shortcuts ignore presses while typing in inputs/textareas. With bulk-select active,{" "}
+              <Kbd>a</Kbd>/<Kbd>r</Kbd>/<Kbd>s</Kbd> apply to all selected; otherwise to the highlighted row.
             </div>
           </div>
         </div>
