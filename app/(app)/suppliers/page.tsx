@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import Drawer from "@/components/ui/Drawer";
+import SupplierHistory from "@/components/suppliers/SupplierHistory";
 import { useToast } from "@/components/Toast";
 import { SUPPLIERS, type Supplier } from "@/lib/suppliers";
 
@@ -88,6 +89,9 @@ function SupplierDetail({
           <div className="mt-1 text-base font-semibold">{s.leadTimeDays}d</div>
         </div>
       </div>
+
+      {/* Relationship history — transactions matched by supplierName */}
+      <SupplierHistory supplierName={s.name} />
 
       <div>
         <div className="mb-2 text-xs font-semibold">Capacity & Response</div>
