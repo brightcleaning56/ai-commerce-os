@@ -1,20 +1,22 @@
-﻿"use client";
+"use client";
 import {
   Activity,
   BarChart3,
   Calendar,
   Download,
   Filter,
+  Sparkles,
   TrendingDown,
   TrendingUp,
   Users,
   Workflow,
 } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { downloadCSV } from "@/lib/csv";
 import {
   Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -27,52 +29,15 @@ import {
   YAxis,
 } from "recharts";
 
-const REVENUE_BY_MONTH = [
-  { m: "Dec", revenue: 38_400, deals: 6 },
-  { m: "Jan", revenue: 52_100, deals: 9 },
-  { m: "Feb", revenue: 71_800, deals: 12 },
-  { m: "Mar", revenue: 98_600, deals: 17 },
-  { m: "Apr", revenue: 142_300, deals: 22 },
-  { m: "May", revenue: 218_900, deals: 31 },
-  { m: "Jun", revenue: 287_400, deals: 38 },
-];
-
-const AGENT_ROI = [
-  { agent: "Outreach", spend: 1240, revenue: 86_400, roi: 6868 },
-  { agent: "Buyer Discovery", spend: 980, revenue: 72_100, roi: 7257 },
-  { agent: "Negotiation", spend: 2100, revenue: 64_300, roi: 2962 },
-  { agent: "Trend Hunter", spend: 420, revenue: 41_800, roi: 9852 },
-  { agent: "CRM Intel", spend: 310, revenue: 28_500, roi: 9094 },
-  { agent: "Demand Intel", spend: 280, revenue: 18_400, roi: 6471 },
-];
-
-const FUNNEL = [
-  { stage: "Buyers identified", value: 4_812, fill: "#7c3aed" },
-  { stage: "Contacted", value: 2_451, fill: "#a87dff" },
-  { stage: "Opened", value: 1_134, fill: "#3b82f6" },
-  { stage: "Replied", value: 654, fill: "#06b6d4" },
-  { stage: "Meetings", value: 142, fill: "#22c55e" },
-  { stage: "Closed Won", value: 31, fill: "#10b981" },
-];
-
-const COHORTS = [
-  { week: "W-7", contacted: 412, replied: 58, meetings: 14, closed: 4 },
-  { week: "W-6", contacted: 524, replied: 71, meetings: 18, closed: 5 },
-  { week: "W-5", contacted: 612, replied: 84, meetings: 21, closed: 6 },
-  { week: "W-4", contacted: 698, replied: 97, meetings: 24, closed: 7 },
-  { week: "W-3", contacted: 754, replied: 112, meetings: 27, closed: 6 },
-  { week: "W-2", contacted: 821, replied: 128, meetings: 31, closed: 8 },
-  { week: "W-1", contacted: 897, replied: 142, meetings: 35, closed: 9 },
-];
-
-const CATEGORY_REVENUE = [
-  { name: "Sports & Outdoors", value: 124_300 },
-  { name: "Pet Supplies", value: 86_700 },
-  { name: "Home & Kitchen", value: 71_200 },
-  { name: "Beauty & Care", value: 52_400 },
-  { name: "Electronics", value: 38_900 },
-  { name: "Home Decor", value: 24_100 },
-];
+type ReportsData = {
+  hasAnyData: boolean;
+  revenueByMonth: { m: string; revenue: number; deals: number }[];
+  agentROI: { agent: string; spend: number; revenue: number; roi: number }[];
+  funnel: { stage: string; value: number; fill: string }[];
+  cohorts: { week: string; contacted: number; replied: number; meetings: number; closed: number }[];
+  categoryRevenue: { name: string; value: number }[];
+  headline: { totalRevenue: number; totalDeals: number; lastMonthRevenue: number; prevMonthRevenue: number };
+};
 
 function fmtUSD(n: number) {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
@@ -81,25 +46,91 @@ function fmtUSD(n: number) {
 }
 
 export default function ReportsPage() {
-  const totalRev = REVENUE_BY_MONTH.reduce((s, m) => s + m.revenue, 0);
-  const totalDeals = REVENUE_BY_MONTH.reduce((s, m) => s + m.deals, 0);
-  const lastMonth = REVENUE_BY_MONTH.at(-1)!;
-  const prevMonth = REVENUE_BY_MONTH.at(-2)!;
-  const delta = ((lastMonth.revenue - prevMonth.revenue) / prevMonth.revenue) * 100;
+  const [data, setData] = useState<ReportsData | null>(null);
   const { toast } = useToast();
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/reports", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setData(d);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function handleExport() {
+    if (!data) {
+      toast("Nothing to export yet — run a pipeline first.", "info");
+      return;
+    }
     const rows = [
-      ...REVENUE_BY_MONTH.map((m) => ({ section: "revenue_by_month", month: m.m, revenue_usd: m.revenue, deals: m.deals })),
-      ...AGENT_ROI.map((a) => ({ section: "agent_roi", agent: a.agent, spend_usd: a.spend, revenue_usd: a.revenue, roi_pct: a.roi })),
-      ...FUNNEL.map((f) => ({ section: "outreach_funnel", stage: f.stage, count: f.value })),
-      ...COHORTS.map((c) => ({ section: "weekly_cohorts", week: c.week, contacted: c.contacted, replied: c.replied, meetings: c.meetings, closed: c.closed })),
-      ...CATEGORY_REVENUE.map((c) => ({ section: "category_revenue", category: c.name, revenue_usd: c.value })),
+      ...data.revenueByMonth.map((m) => ({ section: "revenue_by_month", month: m.m, revenue_usd: m.revenue, deals: m.deals })),
+      ...data.agentROI.map((a) => ({ section: "agent_roi", agent: a.agent, spend_usd: a.spend, revenue_usd: a.revenue, roi_pct: a.roi })),
+      ...data.funnel.map((f) => ({ section: "outreach_funnel", stage: f.stage, count: f.value })),
+      ...data.cohorts.map((c) => ({ section: "weekly_cohorts", week: c.week, contacted: c.contacted, replied: c.replied, meetings: c.meetings, closed: c.closed })),
+      ...data.categoryRevenue.map((c) => ({ section: "category_revenue", category: c.name, revenue_usd: c.value })),
     ];
+    if (rows.length === 0) {
+      toast("Nothing to export — your store is empty.", "info");
+      return;
+    }
     const date = new Date().toISOString().slice(0, 10);
     downloadCSV(`avyn-commerce-report-${date}.csv`, rows);
     toast(`Exported ${rows.length} rows to CSV`);
   }
+
+  // ── Empty state for fresh installs ──────────────────────────────────
+  if (data && !data.hasAnyData) {
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-brand shadow-glow">
+            <BarChart3 className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold">Reports &amp; Analytics</h1>
+            <p className="text-xs text-ink-secondary">Live aggregations from your transaction ledger and agent runs</p>
+          </div>
+        </div>
+        <div className="rounded-xl border border-brand-500/30 bg-gradient-to-br from-brand-500/5 to-transparent p-8 text-center">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-brand-500/15">
+            <Sparkles className="h-7 w-7 text-brand-300" />
+          </div>
+          <div className="mt-4 text-base font-semibold">No data to report yet</div>
+          <p className="mx-auto mt-1 max-w-md text-sm text-ink-secondary">
+            Reports populate from your real transactions, drafts, and agent runs. Run your first pipeline,
+            send some outreach, and close a deal — every chart below fills in automatically.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <Link href="/pipeline" className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-xs font-semibold shadow-glow">
+              <Sparkles className="h-3 w-3" /> Run pipeline
+            </Link>
+            <Link href="/transactions" className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-xs hover:bg-bg-hover">
+              <Workflow className="h-3 w-3" /> View Transactions
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const totalRev = data?.headline.totalRevenue ?? 0;
+  const totalDeals = data?.headline.totalDeals ?? 0;
+  const lastMonth = data?.revenueByMonth.at(-1);
+  const prevMonth = data?.revenueByMonth.at(-2);
+  const delta =
+    lastMonth && prevMonth && prevMonth.revenue > 0
+      ? ((lastMonth.revenue - prevMonth.revenue) / prevMonth.revenue) * 100
+      : null;
+
+  const replyRatePct =
+    data && data.funnel[1] && data.funnel[1].value > 0
+      ? ((data.funnel[3]?.value ?? 0) / data.funnel[1].value) * 100
+      : null;
 
   return (
     <div className="space-y-5">
@@ -111,7 +142,7 @@ export default function ReportsPage() {
           <div>
             <h1 className="text-2xl font-bold">Reports &amp; Analytics</h1>
             <p className="text-xs text-ink-secondary">
-              Trailing 7 months · {totalDeals} deals closed · {fmtUSD(totalRev)} total revenue
+              Live · {totalDeals} deals closed · {fmtUSD(totalRev)} platform fees · trailing 7 months
             </p>
           </div>
         </div>
@@ -132,10 +163,34 @@ export default function ReportsPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Kpi label="Revenue (latest)" value={fmtUSD(lastMonth.revenue)} delta={`+${delta.toFixed(1)}%`} positive Icon={TrendingUp} />
-        <Kpi label="Deals Closed" value={String(lastMonth.deals)} delta={`+${lastMonth.deals - prevMonth.deals}`} positive Icon={Workflow} />
-        <Kpi label="Reply Rate" value="14.9%" delta="+1.4pp" positive Icon={Activity} />
-        <Kpi label="CAC" value="$382" delta="−12%" positive Icon={Users} />
+        <Kpi
+          label="Revenue (latest mo)"
+          value={lastMonth ? fmtUSD(lastMonth.revenue) : "—"}
+          delta={delta != null ? `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%` : "—"}
+          positive={delta == null || delta >= 0}
+          Icon={TrendingUp}
+        />
+        <Kpi
+          label="Deals Closed (latest mo)"
+          value={String(lastMonth?.deals ?? 0)}
+          delta={lastMonth && prevMonth ? `${lastMonth.deals - prevMonth.deals >= 0 ? "+" : ""}${lastMonth.deals - prevMonth.deals}` : "—"}
+          positive={!lastMonth || !prevMonth || lastMonth.deals >= prevMonth.deals}
+          Icon={Workflow}
+        />
+        <Kpi
+          label="Reply Rate"
+          value={replyRatePct != null ? `${replyRatePct.toFixed(1)}%` : "—"}
+          delta="vs sent"
+          positive
+          Icon={Activity}
+        />
+        <Kpi
+          label="Total Closed Deals"
+          value={String(totalDeals)}
+          delta="lifetime"
+          positive
+          Icon={Users}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -147,27 +202,31 @@ export default function ReportsPage() {
             <div className="text-[11px] text-ink-tertiary">Trailing 7 months</div>
           </div>
           <div className="h-72 px-3 py-3">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={REVENUE_BY_MONTH} margin={{ top: 4, right: 20, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="rev2" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#a87dff" stopOpacity={0.6} />
-                    <stop offset="100%" stopColor="#7c3aed" stopOpacity={0.05} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="#252538" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="m" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis yAxisId="rev" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
-                <YAxis yAxisId="deals" orientation="right" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ background: "#161624", border: "1px solid #252538", borderRadius: 8 }}
-                  labelStyle={{ color: "#9b9bb5" }}
-                  formatter={(v: number, n: string) => (n === "revenue" ? fmtUSD(v) : v)}
-                />
-                <Area yAxisId="rev" type="monotone" dataKey="revenue" stroke="#a87dff" strokeWidth={2} fill="url(#rev2)" />
-                <Line yAxisId="deals" type="monotone" dataKey="deals" stroke="#22c55e" strokeWidth={2} dot={{ fill: "#22c55e", r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
+            {(data?.revenueByMonth.length ?? 0) === 0 ? (
+              <ChartEmpty line="Revenue posts here once a transaction reaches Released or Completed." />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={data!.revenueByMonth} margin={{ top: 4, right: 20, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="rev2" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#a87dff" stopOpacity={0.6} />
+                      <stop offset="100%" stopColor="#7c3aed" stopOpacity={0.05} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="#252538" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="m" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="rev" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
+                  <YAxis yAxisId="deals" orientation="right" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{ background: "#161624", border: "1px solid #252538", borderRadius: 8 }}
+                    labelStyle={{ color: "#9b9bb5" }}
+                    formatter={(v: number, n: string) => (n === "revenue" ? fmtUSD(v) : v)}
+                  />
+                  <Area yAxisId="rev" type="monotone" dataKey="revenue" stroke="#a87dff" strokeWidth={2} fill="url(#rev2)" />
+                  <Line yAxisId="deals" type="monotone" dataKey="deals" stroke="#22c55e" strokeWidth={2} dot={{ fill: "#22c55e", r: 3 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
@@ -176,19 +235,20 @@ export default function ReportsPage() {
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Activity className="h-4 w-4 text-brand-300" /> Outreach Funnel
             </div>
-            <div className="mt-0.5 text-[11px] text-ink-tertiary">Last 30 days</div>
+            <div className="mt-0.5 text-[11px] text-ink-tertiary">From buyers → closed</div>
           </div>
           <div className="space-y-2 p-5">
-            {FUNNEL.map((s, i) => {
-              const pct = (s.value / FUNNEL[0].value) * 100;
-              const drop = i > 0 ? ((FUNNEL[i - 1].value - s.value) / FUNNEL[i - 1].value) * 100 : 0;
+            {(data?.funnel ?? []).map((s, i) => {
+              const top = data?.funnel[0]?.value ?? 0;
+              const pct = top === 0 ? 0 : (s.value / top) * 100;
+              const drop = i > 0 && data ? ((data.funnel[i - 1].value - s.value) / Math.max(1, data.funnel[i - 1].value)) * 100 : 0;
               return (
                 <div key={s.stage}>
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-ink-secondary">{s.stage}</span>
                     <span className="flex items-center gap-2">
                       <span className="font-semibold">{s.value.toLocaleString()}</span>
-                      {i > 0 && (
+                      {i > 0 && data && data.funnel[i - 1].value > 0 && (
                         <span className="text-[10px] text-ink-tertiary">−{drop.toFixed(0)}%</span>
                       )}
                     </span>
@@ -199,6 +259,11 @@ export default function ReportsPage() {
                 </div>
               );
             })}
+            {data?.funnel.every((s) => s.value === 0) && (
+              <div className="py-2 text-center text-[11px] text-ink-tertiary">
+                Run outreach to populate this funnel.
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -210,45 +275,49 @@ export default function ReportsPage() {
               <BarChart3 className="h-4 w-4 text-brand-300" /> Agent ROI
             </div>
             <div className="mt-0.5 text-[11px] text-ink-tertiary">
-              Token spend vs revenue attributed · last 90 days
+              Anthropic spend per agent vs platform revenue (split evenly across agents that ran)
             </div>
           </div>
           <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
-              <tr>
-                <th className="px-5 py-2.5 text-left font-medium">Agent</th>
-                <th className="px-3 py-2.5 text-right font-medium">Spend</th>
-                <th className="px-3 py-2.5 text-right font-medium">Revenue Attributed</th>
-                <th className="px-3 py-2.5 text-right font-medium">ROI</th>
-                <th className="px-5 py-2.5 text-left font-medium">Performance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {AGENT_ROI.map((a) => {
-                const max = Math.max(...AGENT_ROI.map((x) => x.roi));
-                const pct = (a.roi / max) * 100;
-                return (
-                  <tr key={a.agent} className="border-t border-bg-border">
-                    <td className="px-5 py-3 font-medium">{a.agent}</td>
-                    <td className="px-3 py-3 text-right text-ink-secondary">${a.spend.toLocaleString()}</td>
-                    <td className="px-3 py-3 text-right font-semibold">{fmtUSD(a.revenue)}</td>
-                    <td className="px-3 py-3 text-right font-bold text-accent-green">
-                      {a.roi.toLocaleString()}%
-                    </td>
-                    <td className="w-44 px-5 py-3">
-                      <div className="h-1.5 overflow-hidden rounded-full bg-bg-hover">
-                        <div
-                          className="h-full bg-gradient-brand"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
+            <table className="min-w-full text-sm">
+              <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
+                <tr>
+                  <th className="px-5 py-2.5 text-left font-medium">Agent</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Spend</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Revenue Attributed</th>
+                  <th className="px-3 py-2.5 text-right font-medium">ROI</th>
+                  <th className="px-5 py-2.5 text-left font-medium">Performance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.agentROI ?? []).map((a) => {
+                  const max = Math.max(1, ...(data?.agentROI ?? []).map((x) => x.roi));
+                  const pct = (a.roi / max) * 100;
+                  return (
+                    <tr key={a.agent} className="border-t border-bg-border">
+                      <td className="px-5 py-3 font-medium">{a.agent}</td>
+                      <td className="px-3 py-3 text-right text-ink-secondary">${a.spend.toLocaleString()}</td>
+                      <td className="px-3 py-3 text-right font-semibold">{fmtUSD(a.revenue)}</td>
+                      <td className="px-3 py-3 text-right font-bold text-accent-green">
+                        {a.roi.toLocaleString()}%
+                      </td>
+                      <td className="w-44 px-5 py-3">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-bg-hover">
+                          <div className="h-full bg-gradient-brand" style={{ width: `${pct}%` }} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {data && data.agentROI.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-6 text-center text-[11px] text-ink-tertiary">
+                      No agent runs yet — fire a pipeline from <Link href="/pipeline" className="text-brand-300">Pipeline</Link>.
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -259,22 +328,26 @@ export default function ReportsPage() {
             </div>
           </div>
           <div className="h-72 px-3 py-3">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={CATEGORY_REVENUE} layout="vertical" margin={{ left: 8, right: 16 }}>
-                <CartesianGrid stroke="#252538" strokeDasharray="3 3" horizontal={false} />
-                <XAxis type="number" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
-                <YAxis dataKey="name" type="category" tick={{ fill: "#9b9bb5", fontSize: 11 }} axisLine={false} tickLine={false} width={130} />
-                <Tooltip
-                  contentStyle={{ background: "#161624", border: "1px solid #252538", borderRadius: 8 }}
-                  formatter={(v: number) => fmtUSD(v)}
-                />
-                <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                  {CATEGORY_REVENUE.map((_, i) => (
-                    <Cell key={i} fill={`hsl(${260 + i * 12}, 70%, ${55 + i * 2}%)`} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            {(data?.categoryRevenue.length ?? 0) === 0 ? (
+              <ChartEmpty line="Closes by product category appear once you settle a deal." />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data!.categoryRevenue} layout="vertical" margin={{ left: 8, right: 16 }}>
+                  <CartesianGrid stroke="#252538" strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" tick={{ fill: "#6e6e85", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
+                  <YAxis dataKey="name" type="category" tick={{ fill: "#9b9bb5", fontSize: 11 }} axisLine={false} tickLine={false} width={130} />
+                  <Tooltip
+                    contentStyle={{ background: "#161624", border: "1px solid #252538", borderRadius: 8 }}
+                    formatter={(v: number) => fmtUSD(v)}
+                  />
+                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                    {data!.categoryRevenue.map((_, i) => (
+                      <Cell key={i} fill={`hsl(${260 + i * 12}, 70%, ${55 + i * 2}%)`} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>
@@ -285,45 +358,63 @@ export default function ReportsPage() {
             <Activity className="h-4 w-4 text-brand-300" /> Weekly Cohorts
           </div>
           <div className="mt-0.5 text-[11px] text-ink-tertiary">
-            Conversion of contacted buyers, last 7 weeks
+            Last 7 weeks · contacted → replied → meetings → closed
           </div>
         </div>
         <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
-            <tr>
-              <th className="px-5 py-2.5 text-left font-medium">Week</th>
-              <th className="px-3 py-2.5 text-right font-medium">Contacted</th>
-              <th className="px-3 py-2.5 text-right font-medium">Replied</th>
-              <th className="px-3 py-2.5 text-right font-medium">Reply %</th>
-              <th className="px-3 py-2.5 text-right font-medium">Meetings</th>
-              <th className="px-3 py-2.5 text-right font-medium">Mtg %</th>
-              <th className="px-3 py-2.5 text-right font-medium">Closed</th>
-              <th className="px-5 py-2.5 text-right font-medium">Win %</th>
-            </tr>
-          </thead>
-          <tbody>
-            {COHORTS.map((c) => {
-              const replyPct = (c.replied / c.contacted) * 100;
-              const mtgPct = (c.meetings / c.replied) * 100;
-              const winPct = (c.closed / c.meetings) * 100;
-              return (
-                <tr key={c.week} className="border-t border-bg-border">
-                  <td className="px-5 py-3 font-medium">{c.week}</td>
-                  <td className="px-3 py-3 text-right text-ink-secondary">{c.contacted.toLocaleString()}</td>
-                  <td className="px-3 py-3 text-right">{c.replied}</td>
-                  <td className="px-3 py-3 text-right text-accent-cyan">{replyPct.toFixed(1)}%</td>
-                  <td className="px-3 py-3 text-right">{c.meetings}</td>
-                  <td className="px-3 py-3 text-right text-brand-200">{mtgPct.toFixed(1)}%</td>
-                  <td className="px-3 py-3 text-right font-semibold">{c.closed}</td>
-                  <td className="px-5 py-3 text-right font-bold text-accent-green">{winPct.toFixed(1)}%</td>
+          <table className="min-w-full text-sm">
+            <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
+              <tr>
+                <th className="px-5 py-2.5 text-left font-medium">Week</th>
+                <th className="px-3 py-2.5 text-right font-medium">Contacted</th>
+                <th className="px-3 py-2.5 text-right font-medium">Replied</th>
+                <th className="px-3 py-2.5 text-right font-medium">Reply %</th>
+                <th className="px-3 py-2.5 text-right font-medium">Meetings</th>
+                <th className="px-3 py-2.5 text-right font-medium">Mtg %</th>
+                <th className="px-3 py-2.5 text-right font-medium">Closed</th>
+                <th className="px-5 py-2.5 text-right font-medium">Win %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.cohorts ?? []).map((c) => {
+                const replyPct = c.contacted > 0 ? (c.replied / c.contacted) * 100 : 0;
+                const mtgPct = c.replied > 0 ? (c.meetings / c.replied) * 100 : 0;
+                const winPct = c.meetings > 0 ? (c.closed / c.meetings) * 100 : 0;
+                return (
+                  <tr key={c.week} className="border-t border-bg-border">
+                    <td className="px-5 py-3 font-medium">{c.week}</td>
+                    <td className="px-3 py-3 text-right text-ink-secondary">{c.contacted.toLocaleString()}</td>
+                    <td className="px-3 py-3 text-right">{c.replied}</td>
+                    <td className="px-3 py-3 text-right text-accent-cyan">{c.contacted > 0 ? `${replyPct.toFixed(1)}%` : "—"}</td>
+                    <td className="px-3 py-3 text-right">{c.meetings}</td>
+                    <td className="px-3 py-3 text-right text-brand-200">{c.replied > 0 ? `${mtgPct.toFixed(1)}%` : "—"}</td>
+                    <td className="px-3 py-3 text-right font-semibold">{c.closed}</td>
+                    <td className="px-5 py-3 text-right font-bold text-accent-green">{c.meetings > 0 ? `${winPct.toFixed(1)}%` : "—"}</td>
+                  </tr>
+                );
+              })}
+              {data && data.cohorts.every((c) => c.contacted === 0) && (
+                <tr>
+                  <td colSpan={8} className="px-5 py-6 text-center text-[11px] text-ink-tertiary">
+                    No outreach this period — drafts you mark Sent appear here weekly.
+                  </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ChartEmpty({ line }: { line: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+      <div className="grid h-10 w-10 place-items-center rounded-lg bg-brand-500/15">
+        <Sparkles className="h-5 w-5 text-brand-300" />
+      </div>
+      <div className="text-[11px] text-ink-tertiary max-w-xs">{line}</div>
     </div>
   );
 }
