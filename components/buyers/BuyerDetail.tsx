@@ -16,6 +16,7 @@ import {
 import Link from "next/link";
 import { useState } from "react";
 import type { Buyer } from "@/lib/buyers";
+import BuyerHistory from "@/components/buyers/BuyerHistory";
 
 type LocalTask = {
   id: string;
@@ -147,6 +148,9 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
         <Stat label="Revenue" value={b.revenue} />
         <Stat label="Employees" value={b.employees} />
       </div>
+
+      {/* Relationship history — drafts + transactions for this buyer */}
+      <BuyerHistory buyerCompany={b.company} />
 
       <div className="rounded-lg border border-bg-border bg-bg-card">
         <div className="border-b border-bg-border px-4 py-2.5 text-xs font-semibold">
