@@ -29,42 +29,45 @@ type Automation = {
   lastRun: string;
 };
 
+// Preset rule shapes — runtime trigger engine isn't wired yet (see banner),
+// so all run/success/lastRun fields stay zero. The page is for shaping rules,
+// not pretending they've fired.
 const AUTOMATIONS: Automation[] = [
   {
     id: "a1",
     name: "Auto-contact buyers when product trends +200%",
     description: "Trend Hunter spike → Buyer Discovery match → Outreach",
-    enabled: true,
+    enabled: false,
     triggerType: "Trend spike",
     conditionCount: 2,
     actionType: "Send outreach",
-    runs7d: 142,
-    successRate: 94.4,
-    lastRun: "12m ago",
+    runs7d: 0,
+    successRate: 0,
+    lastRun: "—",
   },
   {
     id: "a2",
     name: "Pause supplier if risk score > 60",
     description: "Risk Agent flag → Pause supplier outreach + alert team",
-    enabled: true,
+    enabled: false,
     triggerType: "Risk alert",
     conditionCount: 1,
     actionType: "Pause + Slack",
-    runs7d: 8,
-    successRate: 100,
-    lastRun: "2h ago",
+    runs7d: 0,
+    successRate: 0,
+    lastRun: "—",
   },
   {
     id: "a3",
     name: "Escalate to human if buyer asks about pricing",
     description: "Outreach reply contains pricing question → Notify owner",
-    enabled: true,
+    enabled: false,
     triggerType: "Reply intent",
     conditionCount: 1,
     actionType: "Notify owner",
-    runs7d: 31,
-    successRate: 96.8,
-    lastRun: "1h ago",
+    runs7d: 0,
+    successRate: 0,
+    lastRun: "—",
   },
   {
     id: "a4",
@@ -82,25 +85,25 @@ const AUTOMATIONS: Automation[] = [
     id: "a5",
     name: "Daily 9am: send pipeline summary to Slack",
     description: "Cron 9:00 ET → Compile + post to #sales-pipeline",
-    enabled: true,
+    enabled: false,
     triggerType: "Schedule",
     conditionCount: 0,
     actionType: "Slack message",
-    runs7d: 7,
-    successRate: 100,
-    lastRun: "Today 9:00 am",
+    runs7d: 0,
+    successRate: 0,
+    lastRun: "—",
   },
   {
     id: "a6",
     name: "Block deal if margin < 25%",
     description: "Quote builder → Margin Watchdog → Reject + suggest counter",
-    enabled: true,
+    enabled: false,
     triggerType: "Quote built",
     conditionCount: 1,
     actionType: "Reject + suggest",
-    runs7d: 4,
-    successRate: 100,
-    lastRun: "Yesterday",
+    runs7d: 0,
+    successRate: 0,
+    lastRun: "—",
   },
 ];
 
@@ -135,7 +138,6 @@ export default function AutomationsPage() {
   const [actions, setActions] = useState<string[]>([]);
   const [approvalRequired, setApprovalRequired] = useState(true);
 
-  const totalRuns = list.reduce((s, a) => s + a.runs7d, 0);
   const enabled = list.filter((a) => a.enabled).length;
 
   return (
@@ -148,7 +150,7 @@ export default function AutomationsPage() {
           <div>
             <h1 className="text-2xl font-bold">Automations</h1>
             <p className="text-xs text-ink-secondary">
-              {enabled} of {list.length} enabled · {totalRuns} runs in last 7 days
+              {list.length} preset rule{list.length === 1 ? "" : "s"} · {enabled} active · runtime engine in next slice
             </p>
           </div>
         </div>
@@ -180,10 +182,10 @@ export default function AutomationsPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Active" value={enabled} hint="enabled rules" />
-        <Stat label="Runs 7d" value={totalRuns} hint={`avg ${Math.round(totalRuns / 7)}/day`} />
-        <Stat label="Avg success" value={`${(list.reduce((s, a) => s + a.successRate, 0) / list.length).toFixed(1)}%`} hint="across all rules" />
-        <Stat label="Approval queue" value={3} hint="awaiting human" />
+        <Stat label="Total rules" value={list.length} hint="presets + your own" />
+        <Stat label="Active" value={enabled} hint="enabled" />
+        <Stat label="Paused" value={list.length - enabled} hint="not running" />
+        <Stat label="Runtime status" value="Preview" hint="trigger engine pending" />
       </div>
 
       {openBuilder && (
@@ -465,9 +467,9 @@ export default function AutomationsPage() {
             <Bot className="h-5 w-5 text-brand-200" />
           </div>
           <div className="flex-1">
-            <div className="text-sm font-semibold">AI suggests these automations</div>
+            <div className="text-sm font-semibold">Common patterns to automate</div>
             <p className="mt-1 text-xs text-ink-secondary">
-              Based on your activity in the last 30 days, these patterns repeat often enough to be worth automating.
+              Starter templates worth building once the runtime engine ships. These aren&apos;t derived from your activity yet — they&apos;re curated rule shapes that show up in every B2B operator&apos;s workflow.
             </p>
             <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
               {[
