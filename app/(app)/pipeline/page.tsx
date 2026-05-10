@@ -142,12 +142,40 @@ export default function PipelinePage() {
     outreach: "idle",
   });
 
-  // Hydrate history from sessionStorage + share TTL preference from localStorage
+  // Hydrate history from sessionStorage + share TTL preference from localStorage.
+  // Validates each entry — any item missing required fields is dropped, and we
+  // invalidate the cache on schema-version mismatch so a refactor never crashes
+  // the page with stale data.
   useEffect(() => {
+    const STORAGE_VERSION = "v2"; // bump when PipelineResult shape changes
+    try {
+      const versionKey = "pipeline-history-version";
+      const stored = typeof window !== "undefined" ? sessionStorage.getItem(versionKey) : null;
+      if (stored !== STORAGE_VERSION) {
+        sessionStorage.removeItem("pipeline-history");
+        sessionStorage.setItem(versionKey, STORAGE_VERSION);
+      }
+    } catch {}
+
     const raw = typeof window !== "undefined" ? sessionStorage.getItem("pipeline-history") : null;
     if (raw) {
       try {
-        setHistory(JSON.parse(raw));
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          // Filter to entries that have the minimum shape we expect
+          const safe = parsed.filter(
+            (h: any) =>
+              h &&
+              typeof h === "object" &&
+              typeof h.pipelineId === "string" &&
+              h.totals &&
+              typeof h.totals.products === "number" &&
+              typeof h.totals.buyers === "number" &&
+              typeof h.totals.drafts === "number" &&
+              typeof h.totals.totalCost === "number",
+          );
+          setHistory(safe);
+        }
       } catch {}
     }
     try {
@@ -297,21 +325,35 @@ export default function PipelinePage() {
 
       // Reshape the StoredPipelineRun snapshot into PipelineResult-ish
       // for the existing UI consumers (history list, results panel).
+      // IMPORTANT: the result UI expects drafts to have `email: { subject, body }`,
+      // but the stored snapshot only persists `emailSubject` + `emailPreview`
+      // for share-link safety. Reconstruct the minimal shape the renderer needs.
       const data: PipelineResult = {
         pipelineId: run.id,
         shareToken: run.shareToken,
         shareExpiresAt: run.shareExpiresAt,
-        triggeredBy: run.triggeredBy,
         startedAt: run.startedAt,
         finishedAt: run.finishedAt,
-        steps: run.steps,
-        products: run.productSummaries,
-        buyers: run.buyerSummaries,
-        suppliers: run.supplierSummaries,
-        drafts: run.draftSummaries,
-        riskFlags: run.riskFlagSummaries,
-        totals: { ...run.totals, totalMs: run.durationMs },
-      } as any;
+        steps: (run.steps ?? []) as StepLog[],
+        products: run.productSummaries ?? [],
+        buyers: run.buyerSummaries ?? [],
+        suppliers: run.supplierSummaries ?? [],
+        drafts: (run.draftSummaries ?? []).map((d: any) => ({
+          id: d.id,
+          buyerCompany: d.buyerCompany,
+          buyerName: d.buyerName,
+          productName: d.productName,
+          email: { subject: d.emailSubject ?? "", body: d.emailPreview ?? "" },
+        })),
+        totals: {
+          products: run.totals?.products ?? 0,
+          buyers: run.totals?.buyers ?? 0,
+          suppliers: run.totals?.suppliers ?? 0,
+          drafts: run.totals?.drafts ?? 0,
+          totalCost: run.totals?.totalCost ?? 0,
+          totalMs: run.durationMs ?? 0,
+        },
+      };
 
       // Fold final per-stage statuses
       const next: Record<string, StageState> = {
@@ -353,9 +395,18 @@ export default function PipelinePage() {
   }
 
   const totalRunsToday = history.length;
-  const totalProductsToday = useMemo(() => history.reduce((s, h) => s + h.totals.products, 0), [history]);
-  const totalDraftsToday = useMemo(() => history.reduce((s, h) => s + h.totals.drafts, 0), [history]);
-  const totalCostToday = useMemo(() => history.reduce((s, h) => s + h.totals.totalCost, 0), [history]);
+  const totalProductsToday = useMemo(
+    () => history.reduce((s, h) => s + (h?.totals?.products ?? 0), 0),
+    [history],
+  );
+  const totalDraftsToday = useMemo(
+    () => history.reduce((s, h) => s + (h?.totals?.drafts ?? 0), 0),
+    [history],
+  );
+  const totalCostToday = useMemo(
+    () => history.reduce((s, h) => s + (h?.totals?.totalCost ?? 0), 0),
+    [history],
+  );
 
   return (
     <div className="space-y-5">
@@ -636,7 +687,12 @@ export default function PipelinePage() {
             </div>
             <ol className="divide-y divide-bg-border">
               {result.steps.map((s, i) => {
-                const info = AGENT_INFO[s.agent];
+                const info = AGENT_INFO[s.agent] ?? {
+                  name: String(s.agent ?? "Unknown"),
+                  Icon: Workflow,
+                  color: "text-ink-secondary",
+                  bg: "bg-bg-hover",
+                };
                 return (
                   <li key={i} className="flex items-start gap-3 px-4 py-2.5">
                     <div className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${info.bg}`}>
