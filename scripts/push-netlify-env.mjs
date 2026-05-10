@@ -24,7 +24,7 @@ const envs = {
   LOG_FORMAT: "json",
   LOG_LEVEL: "info",
   CRON_ENABLED: "true",
-  NEXT_PUBLIC_APP_ORIGIN: "https://ai-commerce-os.netlify.app",
+  NEXT_PUBLIC_APP_ORIGIN: "https://avyncommerce.com",
 };
 
 const headers = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };

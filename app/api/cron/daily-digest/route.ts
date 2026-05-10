@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Compose the email ──────────────────────────────────────────────
-  const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://ai-commerce-os.netlify.app";
+  const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://avyncommerce.com";
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",

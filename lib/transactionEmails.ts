@@ -33,7 +33,7 @@ function fmtCents(cents: number): string {
 }
 
 function publicViewerUrl(txn: Transaction): string {
-  const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://ai-commerce-os.netlify.app";
+  const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://avyncommerce.com";
   return `${origin}/transaction/${txn.id}?t=${txn.shareToken}`;
 }
 
