@@ -10,7 +10,8 @@
    `dark:` variants in source still work. */
 
 :root,
-:root.dark {
+:root.dark,
+.dark {
   color-scheme: dark;
 
   --color-bg-base:   #0a0a14;

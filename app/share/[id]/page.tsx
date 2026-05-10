@@ -97,7 +97,7 @@ export default function SharePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-bg-base">
+      <div className="dark min-h-screen bg-bg-base text-ink-primary">
         <div className="mx-auto max-w-5xl px-6 py-20 text-center text-sm text-ink-tertiary">
           Loading run…
         </div>
@@ -133,7 +133,7 @@ export default function SharePage() {
       ? "The pipeline run for this URL is no longer available. Persistence is per-instance and may have rotated."
       : `Couldn't load this run: ${error}`;
     return (
-      <div className="min-h-screen bg-bg-base">
+      <div className="dark min-h-screen bg-bg-base text-ink-primary">
         <div className="mx-auto max-w-2xl px-6 py-32 text-center">
           <div className={`mx-auto grid h-16 w-16 place-items-center rounded-2xl ${tone.bg}`}>
             <Icon className={`h-7 w-7 ${tone.text}`} />
@@ -155,7 +155,7 @@ export default function SharePage() {
   const fmt = startedDate.toLocaleString();
 
   return (
-    <div className="min-h-screen bg-bg-base">
+    <div className="dark min-h-screen bg-bg-base text-ink-primary">
       {/* Branded header */}
       <header className="border-b border-bg-border bg-bg-panel/80 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">

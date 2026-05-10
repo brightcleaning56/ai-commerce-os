@@ -79,7 +79,7 @@ export default function QuotePublicPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-bg-base">
+      <div className="dark min-h-screen bg-bg-base text-ink-primary">
         <div className="mx-auto max-w-3xl px-6 py-20 text-center text-sm text-ink-tertiary">
           Loading quote…
         </div>
@@ -89,7 +89,7 @@ export default function QuotePublicPage() {
 
   if (error || !quote) {
     return (
-      <div className="min-h-screen bg-bg-base">
+      <div className="dark min-h-screen bg-bg-base text-ink-primary">
         <div className="mx-auto max-w-2xl px-6 py-32 text-center">
           <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-bg-card">
             <Lock className="h-7 w-7 text-ink-tertiary" />
@@ -106,7 +106,7 @@ export default function QuotePublicPage() {
     quote.status === "accepted" || quote.status === "rejected" || quote.status === "expired";
 
   return (
-    <div className="min-h-screen bg-bg-base">
+    <div className="dark min-h-screen bg-bg-base text-ink-primary">
       <header className="border-b border-bg-border bg-bg-panel/80 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-4">
           <Link href="/welcome" className="flex items-center gap-2.5">
