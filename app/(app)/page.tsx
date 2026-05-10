@@ -3,6 +3,7 @@ import { Calendar, Plus } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import KpiGrid from "@/components/dashboard/KpiGrid";
+import NeedsAttention from "@/components/dashboard/NeedsAttention";
 import SetupChecklist from "@/components/dashboard/SetupChecklist";
 import TopProductsTable from "@/components/dashboard/TopProductsTable";
 import TopBuyersTable from "@/components/dashboard/TopBuyersTable";
@@ -93,6 +94,8 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      <NeedsAttention />
 
       <SetupChecklist />
 
