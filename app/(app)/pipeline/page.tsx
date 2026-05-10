@@ -682,9 +682,80 @@ export default function PipelinePage() {
 
           {/* Step timeline */}
           <div className="mt-4 rounded-lg border border-bg-border bg-bg-panel">
-            <div className="border-b border-bg-border px-4 py-2.5 text-xs font-semibold">
-              Step timeline
+            <div className="border-b border-bg-border px-4 py-2.5 flex items-center justify-between">
+              <span className="text-xs font-semibold">Step timeline</span>
+              {(() => {
+                const totalMs = result.steps.reduce((s, x) => s + x.durationMs, 0);
+                const totalCost = result.steps.reduce((s, x) => s + (x.cost ?? 0), 0);
+                if (totalMs === 0) return null;
+                return (
+                  <span className="text-[10px] text-ink-tertiary">
+                    Total {(totalMs / 1000).toFixed(2)}s
+                    {totalCost > 0 && <> · ${totalCost.toFixed(5)}</>}
+                  </span>
+                );
+              })()}
             </div>
+
+            {/* Proportional Gantt — bar lengths are share of total run time, so
+                operators see at a glance which stage dominates the run. */}
+            {(() => {
+              const totalMs = result.steps.reduce((s, x) => s + x.durationMs, 0);
+              if (totalMs === 0) return null;
+              const COLOR: Record<string, string> = {
+                "trend-hunter": "#a87dff",
+                "buyer-discovery": "#3b82f6",
+                "supplier-finder": "#f59e0b",
+                outreach: "#06b6d4",
+                negotiation: "#22c55e",
+                risk: "#ef4444",
+              };
+              return (
+                <div className="border-b border-bg-border px-4 py-3">
+                  <div className="flex h-6 w-full overflow-hidden rounded-md bg-bg-hover/40">
+                    {result.steps.map((s, i) => {
+                      const pct = (s.durationMs / totalMs) * 100;
+                      const color = COLOR[s.agent] ?? "#6e6e85";
+                      return (
+                        <div
+                          key={i}
+                          title={`${AGENT_INFO[s.agent]?.name ?? s.agent} · ${(s.durationMs / 1000).toFixed(2)}s${s.cost ? ` · $${s.cost.toFixed(5)}` : ""}${s.status === "error" ? " · ERROR" : ""}`}
+                          style={{
+                            width: `${Math.max(0.5, pct)}%`,
+                            background: s.status === "error"
+                              ? `repeating-linear-gradient(45deg, #ef4444, #ef4444 4px, #b91c1c 4px, #b91c1c 8px)`
+                              : color,
+                          }}
+                          className="border-r border-bg-base/40 last:border-r-0"
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px]">
+                    {result.steps.map((s, i) => {
+                      const info = AGENT_INFO[s.agent] ?? {
+                        name: String(s.agent ?? "Unknown"),
+                        Icon: Workflow,
+                        color: "text-ink-secondary",
+                        bg: "bg-bg-hover",
+                      };
+                      const color = COLOR[s.agent] ?? "#6e6e85";
+                      const pct = (s.durationMs / totalMs) * 100;
+                      return (
+                        <span key={i} className="flex items-center gap-1 text-ink-tertiary">
+                          <span
+                            className="h-2 w-2 shrink-0 rounded-sm"
+                            style={{ background: s.status === "error" ? "#ef4444" : color }}
+                          />
+                          {info.name} <span className="text-ink-secondary">{pct.toFixed(0)}%</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
             <ol className="divide-y divide-bg-border">
               {result.steps.map((s, i) => {
                 const info = AGENT_INFO[s.agent] ?? {
