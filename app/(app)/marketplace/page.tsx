@@ -334,7 +334,7 @@ export default function MarketplacePage() {
           <div>
             <h1 className="text-2xl font-bold">Marketplace</h1>
             <p className="text-xs text-ink-secondary">
-              {LISTINGS.length} live listings · {RFQS.filter((r) => r.status === "Open").length} open RFQs · platform takes 2% per transaction
+              Internal supplier+buyer marketplace · 2% platform fee on every closed transaction
             </p>
           </div>
         </div>
@@ -345,6 +345,30 @@ export default function MarketplacePage() {
           <button className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow">
             <Plus className="h-4 w-4" /> List Inventory
           </button>
+        </div>
+      </div>
+
+      {/* Preview banner — Marketplace is forward-looking; today AVYN's flow goes
+          through Supplier Finder (external sources) → Quote → Transaction. */}
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+        <div className="flex items-start gap-3 text-[12px]">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <Sparkles className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1">
+            <span className="font-semibold text-accent-amber">Preview · in-platform marketplace coming soon</span>
+            <span className="text-ink-secondary">
+              {" "}
+              — AVYN&apos;s current flow goes through{" "}
+              <a href="/suppliers" className="text-brand-300 hover:text-brand-200 underline">Supplier Finder</a>
+              {" "}(external sourcing) →{" "}
+              <a href="/deals" className="text-brand-300 hover:text-brand-200 underline">Quote</a>
+              {" "}→{" "}
+              <a href="/transactions" className="text-brand-300 hover:text-brand-200 underline">Transaction</a>
+              . The internal listing/RFQ marketplace below is a preview of what supplier-side onboarding
+              will look like once Stripe Connect supplier flows are wired.
+            </span>
+          </div>
         </div>
       </div>
 

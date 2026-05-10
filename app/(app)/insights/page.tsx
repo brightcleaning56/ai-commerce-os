@@ -338,6 +338,27 @@ export default function InsightsPage() {
         </div>
       </div>
 
+      {/* Preview banner — set expectations honestly */}
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+        <div className="flex items-start gap-3 text-[12px]">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <Sparkles className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1">
+            <span className="font-semibold text-accent-amber">Preview data</span>
+            <span className="text-ink-secondary">
+              {" "}
+              — Forecasts and intent reports below are aggregated public-market signal samples for the
+              showcase. Live forecasts wire in once you have 30+ days of platform-specific transaction
+              history. For real numbers, see{" "}
+              <a href="/reports" className="text-brand-300 hover:text-brand-200 underline">Reports</a>{" "}
+              and{" "}
+              <a href="/demand" className="text-brand-300 hover:text-brand-200 underline">Demand Intelligence</a>.
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs">
         {(
           [
