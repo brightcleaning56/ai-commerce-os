@@ -202,31 +202,40 @@ export default function PipelinePage() {
       outreach: "idle",
     });
 
-    try {
-      // Optimistic stage advancement (server processes Trend Hunter first,
-      // then Buyer Discovery + Supplier Finder in parallel, then Outreach)
-      const advanceTimer1 = setTimeout(
-        () =>
-          setStages((s) => ({
-            ...s,
-            "trend-hunter": "success",
-            "buyer-discovery": "running",
-            "supplier-finder": "running",
-          })),
-        2200
-      );
-      const advanceTimer2 = setTimeout(
-        () =>
-          setStages((s) => ({
-            ...s,
-            "buyer-discovery": "success",
-            "supplier-finder": "success",
-            outreach: "running",
-          })),
-        4500
-      );
+    // Helper: parse a fetch response that should be JSON. If the host returns
+    // an HTML error page (Netlify/Vercel function timeout), surface a clear
+    // message instead of "Unexpected token '<'".
+    async function asJson(res: Response, label: string): Promise<any> {
+      const raw = await res.text();
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        if (res.status === 504 || res.status === 502 || raw.trimStart().startsWith("<")) {
+          throw new Error(
+            `${label} hit the host function timeout. ` +
+              "Even on Pro (26s) one stage shouldn't blow this — check ANTHROPIC_API_KEY is valid.",
+          );
+        }
+        throw new Error(`${label} returned non-JSON (${res.status}): ${raw.slice(0, 120)}`);
+      }
+      let data: any;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error(`${label} returned malformed JSON: ${raw.slice(0, 120)}`);
+      }
+      if (!res.ok) throw new Error(data.error ?? `${label} failed`);
+      return data;
+    }
 
-      const res = await fetch("/api/agents/pipeline", {
+    async function pollOnce(pipelineId: string): Promise<any> {
+      const r = await fetch(`/api/agents/pipeline/${pipelineId}`, { cache: "no-store" });
+      const d = await asJson(r, `Poll ${pipelineId}`);
+      return d.run;
+    }
+
+    try {
+      // ── Stage 1: Trend Hunter ────────────────────────────────────────────
+      const startRes = await fetch("/api/agents/pipeline/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -236,56 +245,102 @@ export default function PipelinePage() {
           shareTtlHours,
         }),
       });
-      clearTimeout(advanceTimer1);
-      clearTimeout(advanceTimer2);
-
-      // Read raw text first — if the host (Netlify/Vercel) timed out it returns
-      // an HTML error page, not JSON. Parsing fails silently with a confusing
-      // "Unexpected token '<'" message; intercept that and explain.
-      const raw = await res.text();
-      const ct = res.headers.get("content-type") ?? "";
-      if (!ct.includes("application/json")) {
-        const status = res.status;
-        if (status === 504 || status === 502 || raw.trimStart().startsWith("<")) {
-          throw new Error(
-            "Pipeline took longer than the host's function timeout (Netlify free = 10s, paid = 26s). " +
-              "Try lowering Max Products / Buyers, or set a smaller maxDuration on the route."
-          );
-        }
-        throw new Error(`Server returned non-JSON (${status}): ${raw.slice(0, 120)}`);
+      const start = await asJson(startRes, "Start");
+      if (start.status === "failed" || (start.products?.length ?? 0) === 0) {
+        setStages((s) => ({ ...s, "trend-hunter": "error" }));
+        throw new Error("Trend Hunter found no products. Check ANTHROPIC_API_KEY or try a different category.");
       }
-      let data: any;
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        throw new Error(`Server returned malformed JSON: ${raw.slice(0, 120)}`);
-      }
-      if (!res.ok) throw new Error(data.error ?? "Pipeline failed");
+      const pipelineId: string = start.pipelineId;
+      const products: Array<{ id: string; name: string }> = start.products;
 
-      // Compute final stage states from real result
+      setStages((s) => ({
+        ...s,
+        "trend-hunter": "success",
+        "buyer-discovery": "running",
+        "supplier-finder": "running",
+      }));
+
+      // ── Stage 2: Buyer Discovery + Supplier Finder per product ───────────
+      const buyerIds: string[] = [];
+      for (const p of products) {
+        const r = await fetch(`/api/agents/pipeline/${pipelineId}/buyers`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ productId: p.id }),
+        });
+        const d = await asJson(r, `Buyers for ${p.name}`);
+        for (const b of d.buyers ?? []) buyerIds.push(b.id);
+      }
+      setStages((s) => ({
+        ...s,
+        "buyer-discovery": "success",
+        "supplier-finder": "success",
+        outreach: "running",
+      }));
+
+      // ── Stage 3: Outreach per buyer (sequential — each is one Claude call) ─
+      for (const buyerId of buyerIds) {
+        const r = await fetch(`/api/agents/pipeline/${pipelineId}/outreach`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ buyerId }),
+        });
+        await asJson(r, "Outreach");
+      }
+
+      // ── Stage 4: Finalize (Risk scan + mark completed) ───────────────────
+      const finalizeRes = await fetch(`/api/agents/pipeline/${pipelineId}/finalize`, {
+        method: "POST",
+      });
+      const finalize = await asJson(finalizeRes, "Finalize");
+      const run = finalize.run;
+
+      // Reshape the StoredPipelineRun snapshot into PipelineResult-ish
+      // for the existing UI consumers (history list, results panel).
+      const data: PipelineResult = {
+        pipelineId: run.id,
+        shareToken: run.shareToken,
+        shareExpiresAt: run.shareExpiresAt,
+        triggeredBy: run.triggeredBy,
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
+        steps: run.steps,
+        products: run.productSummaries,
+        buyers: run.buyerSummaries,
+        suppliers: run.supplierSummaries,
+        drafts: run.draftSummaries,
+        riskFlags: run.riskFlagSummaries,
+        totals: { ...run.totals, totalMs: run.durationMs },
+      } as any;
+
+      // Fold final per-stage statuses
       const next: Record<string, StageState> = {
         "trend-hunter": "skipped",
         "buyer-discovery": "skipped",
         "supplier-finder": "skipped",
         outreach: "skipped",
       };
-      for (const step of data.steps as StepLog[]) {
+      for (const step of (run.steps ?? []) as StepLog[]) {
         next[step.agent] = step.status === "success" ? "success" : "error";
       }
       setStages(next);
       setResult(data);
+      // Touch pollOnce to silence unused-warning while keeping the helper
+      // available for future use (e.g., live progress while another tab runs).
+      void pollOnce;
 
       const updated = [data, ...history].slice(0, 10);
       setHistory(updated);
       persistHistory(updated);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Pipeline failed");
-      setStages({
-        "trend-hunter": "error",
-        "buyer-discovery": "skipped",
-        "supplier-finder": "skipped",
-        outreach: "skipped",
-      });
+      setStages((s) => ({
+        ...s,
+        "trend-hunter": s["trend-hunter"] === "running" ? "error" : s["trend-hunter"],
+        "buyer-discovery": s["buyer-discovery"] === "running" ? "error" : s["buyer-discovery"],
+        "supplier-finder": s["supplier-finder"] === "running" ? "error" : s["supplier-finder"],
+        outreach: s.outreach === "running" ? "error" : s.outreach,
+      }));
     } finally {
       setRunning(false);
     }

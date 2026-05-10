@@ -446,6 +446,25 @@ export type StoredPipelineRun = {
     durationMs: number;
     detail: string;
   }>;
+
+  /**
+   * Lifecycle state for chunked / async pipeline execution.
+   * - undefined or "completed": classic flow — runPipeline ran end-to-end
+   * - "running": stages are landing in real time via /api/agents/pipeline/[id]/...
+   * - "failed": a stage hit an unrecoverable error and the run was abandoned
+   *
+   * Old runs without this field are treated as "completed" for back-compat.
+   */
+  status?: "running" | "completed" | "failed";
+  errorMessage?: string;
+  /**
+   * Original run options — needed by the chunked stage runners so the buyer
+   * /outreach stages know how many to discover per product.
+   */
+  options?: {
+    maxBuyersPerProduct?: number;
+    findSuppliers?: boolean;
+  };
 };
 
 export type CronRun = {
