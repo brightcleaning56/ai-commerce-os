@@ -11,7 +11,7 @@ import {
   ShieldCheck,
   User,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { downloadCSV } from "@/lib/csv";
 
@@ -155,6 +155,8 @@ const CAT_TONE: Record<string, string> = {
   Billing: "bg-accent-green/15 text-accent-green",
   Agent: "bg-brand-500/15 text-brand-200",
   Outreach: "bg-accent-cyan/15 text-accent-cyan",
+  Transaction: "bg-accent-green/15 text-accent-green",
+  Risk: "bg-accent-red/15 text-accent-red",
 };
 
 const ACTOR_ICON: Record<Actor["type"], { Icon: React.ComponentType<{ className?: string }>; bg: string; text: string }> = {
@@ -163,16 +165,46 @@ const ACTOR_ICON: Record<Actor["type"], { Icon: React.ComponentType<{ className?
   system: { Icon: Shield, bg: "bg-bg-hover", text: "text-ink-secondary" },
 };
 
-const CATEGORIES = ["All", "Auth", "Data", "Permissions", "Billing", "Agent", "Outreach"] as const;
+const CATEGORIES = ["All", "Transaction", "Agent", "Outreach", "Billing", "Risk", "Auth", "Data", "Permissions"] as const;
 
 export default function AuditLogsPage() {
   const [query, setQuery] = useState("");
   const [cat, setCat] = useState<(typeof CATEGORIES)[number]>("All");
   const [open, setOpen] = useState<AuditEvent | null>(null);
+  const [events, setEvents] = useState<AuditEvent[] | null>(null);
+  const [hashChainOk, setHashChainOk] = useState<boolean>(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    function load() {
+      fetch("/api/admin/audit", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (cancelled) return;
+          setEvents(d?.events ?? []);
+          setHashChainOk(d?.hashChainOk !== false);
+        })
+        .catch(() => {
+          if (!cancelled) setEvents([]);
+        });
+    }
+    load();
+    const id = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
   const { toast } = useToast();
 
+  const sourceEvents = events ?? [];
+
   function handleExport() {
-    const rows = EVENTS.map((e) => ({
+    if (sourceEvents.length === 0) {
+      toast("No events to export yet — run a pipeline or open a transaction first.", "info");
+      return;
+    }
+    const rows = sourceEvents.map((e) => ({
       timestamp: e.ts,
       actor_type: e.actor.type,
       actor_name: e.actor.name,
@@ -194,7 +226,7 @@ export default function AuditLogsPage() {
   }
 
   const filtered = useMemo(() => {
-    return EVENTS.filter((e) => {
+    return sourceEvents.filter((e) => {
       if (cat !== "All" && e.category !== cat) return false;
       if (
         query &&
@@ -205,7 +237,7 @@ export default function AuditLogsPage() {
       ) return false;
       return true;
     });
-  }, [query, cat]);
+  }, [query, cat, sourceEvents]);
 
   return (
     <div className="space-y-5">
@@ -237,11 +269,21 @@ export default function AuditLogsPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-accent-green/30 bg-accent-green/5 p-3">
+      <div className={`rounded-xl border p-3 ${
+        hashChainOk
+          ? "border-accent-green/30 bg-accent-green/5"
+          : "border-accent-red/30 bg-accent-red/5"
+      }`}>
         <div className="flex items-center gap-2 text-xs">
-          <ShieldCheck className="h-4 w-4 text-accent-green" />
-          <span className="font-medium">Hash chain integrity verified</span>
-          <span className="text-ink-tertiary">· last check 2 min ago · 0 inconsistencies in 18,442 events</span>
+          <ShieldCheck className={`h-4 w-4 ${hashChainOk ? "text-accent-green" : "text-accent-red"}`} />
+          <span className="font-medium">
+            {hashChainOk ? "Hash chain integrity verified" : "Hash chain inconsistency detected"}
+          </span>
+          <span className="text-ink-tertiary">
+            {events === null
+              ? "· loading…"
+              : `· ${sourceEvents.length.toLocaleString()} event${sourceEvents.length === 1 ? "" : "s"} · refreshes every 30s`}
+          </span>
         </div>
       </div>
 
@@ -286,6 +328,32 @@ export default function AuditLogsPage() {
             </tr>
           </thead>
           <tbody>
+            {events === null && (
+              <tr>
+                <td colSpan={5} className="px-5 py-10 text-center text-[11px] text-ink-tertiary">
+                  Loading audit events…
+                </td>
+              </tr>
+            )}
+            {events !== null && filtered.length === 0 && sourceEvents.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-5 py-10 text-center">
+                  <div className="text-sm font-medium">No audit events yet</div>
+                  <div className="mt-1 text-[11px] text-ink-tertiary max-w-md mx-auto">
+                    Audit events are written every time a transaction changes state, an agent runs,
+                    a draft is sent, a quote is accepted, or a risk flag is raised. Run a pipeline
+                    to start populating the trail.
+                  </div>
+                </td>
+              </tr>
+            )}
+            {events !== null && filtered.length === 0 && sourceEvents.length > 0 && (
+              <tr>
+                <td colSpan={5} className="px-5 py-10 text-center text-[11px] text-ink-tertiary">
+                  No events match &quot;{query || cat}&quot;. Try a different search or category.
+                </td>
+              </tr>
+            )}
             {filtered.map((e) => {
               const a = ACTOR_ICON[e.actor.type];
               const ActorIcon = a.Icon;
