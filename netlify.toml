@@ -69,6 +69,46 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "geolocation=(), camera=(), microphone=()"
 
+# Authenticated admin pages must NEVER be edge-cached. Without this, Netlify's
+# CDN was caching /leads HTML for ~50min and serving stale snapshots — newly
+# submitted leads wouldn't appear in the inbox until the cache aged out.
+# Listed paths mirror lib/nav.ts admin routes.
+[[headers]]
+  for = "/leads"
+  [headers.values]
+    Cache-Control = "private, no-store, no-cache, must-revalidate, max-age=0"
+    Netlify-CDN-Cache-Control = "no-store"
+
+[[headers]]
+  for = "/admin/*"
+  [headers.values]
+    Cache-Control = "private, no-store, no-cache, must-revalidate, max-age=0"
+    Netlify-CDN-Cache-Control = "no-store"
+
+[[headers]]
+  for = "/transactions"
+  [headers.values]
+    Cache-Control = "private, no-store, no-cache, must-revalidate, max-age=0"
+    Netlify-CDN-Cache-Control = "no-store"
+
+[[headers]]
+  for = "/approvals"
+  [headers.values]
+    Cache-Control = "private, no-store, no-cache, must-revalidate, max-age=0"
+    Netlify-CDN-Cache-Control = "no-store"
+
+[[headers]]
+  for = "/outreach"
+  [headers.values]
+    Cache-Control = "private, no-store, no-cache, must-revalidate, max-age=0"
+    Netlify-CDN-Cache-Control = "no-store"
+
+[[headers]]
+  for = "/pipeline"
+  [headers.values]
+    Cache-Control = "private, no-store, no-cache, must-revalidate, max-age=0"
+    Netlify-CDN-Cache-Control = "no-store"
+
 # Public share + quote viewers can be embedded (e.g., in pitch decks)
 [[headers]]
   for = "/share/*"
