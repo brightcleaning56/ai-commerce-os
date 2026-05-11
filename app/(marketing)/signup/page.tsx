@@ -263,6 +263,9 @@ export default function SignupPage() {
   const [revenue, setRevenue]     = useState("");
   const [goal, setGoal]           = useState<string | null>(null);
 
+  const [submitting, setSubmitting]   = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
   const next = () => setStep((s) => Math.min(STEPS.length - 1, s + 1));
   const back = () => setStep((s) => Math.max(0, s - 1));
 
@@ -272,6 +275,39 @@ export default function SignupPage() {
     if (step === 2) return !!goal;
     return true;
   })();
+
+  async function submitSignup() {
+    if (submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "signup-form",
+          name, email, phone,
+          company,
+          industry: companyType,
+          budget: revenue,
+          useCases: goal ? [goal] : [],
+          message:
+            `Goal: ${goal ?? "—"}\n` +
+            `Company type: ${companyType || "—"}\n` +
+            `Revenue range: ${revenue || "—"}`,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+      setDone(true);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Failed to submit. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     if (!done) return;
@@ -617,17 +653,25 @@ export default function SignupPage() {
                   </button>
                 ) : <span />}
                 <button
-                  onClick={step === STEPS.length - 1 ? () => setDone(true) : next}
-                  disabled={!canContinue}
+                  onClick={step === STEPS.length - 1 ? () => void submitSignup() : next}
+                  disabled={!canContinue || submitting}
                   className="inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-sm font-bold text-white transition-all disabled:opacity-30"
                   style={{
                     background: "linear-gradient(135deg, #7c3aed, #4f46e5)",
-                    boxShadow: canContinue ? "0 0 28px rgba(124,58,237,0.5)" : "none",
+                    boxShadow: canContinue && !submitting ? "0 0 28px rgba(124,58,237,0.5)" : "none",
                   }}>
-                  {step === STEPS.length - 1 ? "Request AI Outreach" : "Continue"}
+                  {step === STEPS.length - 1
+                    ? (submitting ? "Submitting…" : "Request AI Outreach")
+                    : "Continue"}
                   <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
+              {submitError && (
+                <div className="mt-3 rounded-lg border px-3 py-2 text-[12px]"
+                  style={{ borderColor: "rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.08)", color: "#fca5a5" }}>
+                  {submitError}
+                </div>
+              )}
             </div>
           </div>
 

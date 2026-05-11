@@ -140,7 +140,7 @@ function Navbar() {
             className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
             style={{ background: "linear-gradient(135deg,#7c3aed,#6d28d9)", boxShadow: "0 0 18px rgba(124,58,237,0.4)" }}
           >
-            Start Free Trial <ArrowRight className="h-3.5 w-3.5" />
+            Request Access <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
 
@@ -173,7 +173,7 @@ function Navbar() {
           </nav>
           <div className="mt-4 flex flex-col gap-2">
             <Link href="/signin" onClick={() => setMobileOpen(false)} className="rounded-xl border border-white/10 bg-white/5 py-2.5 text-center text-sm text-white/70">Sign In</Link>
-            <Link href="/signup" onClick={() => setMobileOpen(false)} className="rounded-xl py-2.5 text-center text-sm font-semibold text-white" style={{ background: "linear-gradient(135deg,#7c3aed,#6d28d9)" }}>Start Free Trial</Link>
+            <Link href="/signup" onClick={() => setMobileOpen(false)} className="rounded-xl py-2.5 text-center text-sm font-semibold text-white" style={{ background: "linear-gradient(135deg,#7c3aed,#6d28d9)" }}>Request Access</Link>
           </div>
         </div>
       )}
@@ -506,7 +506,7 @@ export default function WelcomePage() {
 
               <div className="flex flex-wrap items-center gap-3">
                 <Link href="/signup" className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white shadow-[0_0_24px_rgba(124,58,237,0.5)] transition hover:opacity-90" style={{ background: "linear-gradient(135deg, #7c3aed, #6d28d9)" }}>
-                  Start Free Trial <ArrowRight className="h-4 w-4" />
+                  Request Access <ArrowRight className="h-4 w-4" />
                 </Link>
                 <Link href="/demo" className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 py-2.5 text-sm text-white/70 transition hover:bg-white/8 hover:text-white">
                   <span className="grid h-6 w-6 place-items-center rounded-full bg-white/10"><Play className="h-2.5 w-2.5 fill-current" /></span>
@@ -788,7 +788,7 @@ export default function WelcomePage() {
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
               <Link href="/signup" className="inline-flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white shadow-[0_0_30px_rgba(124,58,237,0.5)] transition hover:opacity-90" style={{ background: "linear-gradient(135deg,#7c3aed,#6d28d9)" }}>
-                Start Free Trial <ArrowRight className="h-4 w-4" />
+                Request Access <ArrowRight className="h-4 w-4" />
               </Link>
               <Link href="/signin" className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-medium text-white/70 transition hover:bg-white/8 hover:text-white">
                 Sign In

@@ -83,6 +83,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid email" }, { status: 400 });
   }
 
+  const incomingSource = trim(body.source, 30);
+  const source: Lead["source"] = incomingSource === "signup-form" ? "signup-form" : "contact-form";
+
   const lead: Lead = {
     id: `lead_${crypto.randomBytes(8).toString("hex")}`,
     createdAt: new Date().toISOString(),
@@ -97,7 +100,7 @@ export async function POST(req: NextRequest) {
     timeline: trim(body.timeline, 60),
     budget: trim(body.budget, 60),
     message: trim(body.message, 5000),
-    source: "contact-form",
+    source,
     status: "new",
     ipHash: hashIp(ip),
     userAgent: trim(req.headers.get("user-agent") || "", 300),

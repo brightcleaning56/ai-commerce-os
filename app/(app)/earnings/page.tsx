@@ -147,8 +147,9 @@ export default function EarningsPage() {
         </div>
         <button
           onClick={() => setPayoutOpen(true)}
-          disabled={t.pending === 0 || requested}
-          className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow disabled:opacity-50"
+          disabled={!hasLive || t.pending === 0 || requested}
+          title={!hasLive ? "Payouts activate after the live revenue ledger has activity" : undefined}
+          className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {requested ? (
             <><CheckCircle2 className="h-4 w-4" /> Payout requested</>

@@ -521,7 +521,7 @@ export type Lead = {
   // Step 2 — Solutions
   message?: string;
   // Operator-side
-  source: "contact-form";   // future: "demo-page", "share-link", etc.
+  source: "contact-form" | "signup-form";
   status: LeadStatus;
   notes?: string;           // internal operator notes
   // Light fingerprint for spam triage

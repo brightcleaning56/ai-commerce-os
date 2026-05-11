@@ -62,7 +62,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Outreach",
     items: [
-      { label: "Inbound Leads", href: "/leads", icon: Inbox },
+      { label: "Inbound Leads", href: "/leads", icon: Inbox, badge: "LIVE" },
       { label: "Outreach Automation", href: "/outreach", icon: Send },
       { label: "AI Agents", href: "/agents", icon: Bot, badge: "AI" },
       { label: "Auto Pipeline", href: "/pipeline", icon: Zap, badge: "AUTO" },
