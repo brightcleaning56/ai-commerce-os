@@ -44,6 +44,7 @@ const PUBLIC_PATHS = [
   "/api/operator",          // public profile (name+email — same info we sign emails with)
   "/api/auth/signin",       // sign-in form submits here
   "/api/signin-summary",    // public aggregate stats for the sign-in right panel
+  "/api/leads",             // public POST from /contact form (handler gates GET via requireAdmin)
 ];
 const PUBLIC_PREFIXES = [
   "/share/",
