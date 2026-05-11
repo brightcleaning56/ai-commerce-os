@@ -28,7 +28,38 @@ import {
 import { useEffect, useState } from "react";
 import Drawer from "@/components/ui/Drawer";
 import { useToast } from "@/components/Toast";
-import { CAMPAIGNS, SAMPLE_SEQUENCE, type Campaign } from "@/lib/outreach";
+import { SAMPLE_SEQUENCE, type Campaign } from "@/lib/outreach";
+
+/**
+ * Adapt a real, derived campaign (from /api/outreach/campaigns) into the
+ * shape the existing Campaign UI / Drawer expects. The drawer + table
+ * column components were written against the old static `Campaign` type
+ * (with `channel` singular-plural and `audience` string), so we keep
+ * that shape stable and translate at the boundary.
+ */
+function adaptLiveCampaign(c: LiveCampaign): Campaign {
+  return {
+    id: c.id,
+    name: c.name,
+    status: c.status,
+    channel: c.channels,
+    audience: c.audienceSummary,
+    audienceCount: c.audienceCount,
+    sent: c.sent,
+    opened: c.opened,
+    replied: c.replied,
+    meetings: c.meetings,
+    deals: c.deals,
+    startedAt: c.startedAt
+      ? new Date(c.startedAt).toLocaleDateString(undefined, {
+          month: "short",
+          day: "2-digit",
+          year: "numeric",
+        })
+      : "—",
+    ownerAgent: c.ownerAgent,
+  };
+}
 
 type DraftItem = {
   id: string;
@@ -1118,11 +1149,27 @@ type LiveOutreachStats = {
   replyRatePct: number;
 };
 
+type LiveCampaign = {
+  id: string;
+  name: string;
+  status: "Active" | "Paused" | "Draft" | "Completed";
+  channels: ("Email" | "LinkedIn" | "SMS" | "Phone")[];
+  audienceSummary: string;
+  audienceCount: number;
+  sent: number;
+  opened: number;
+  replied: number;
+  meetings: number;
+  deals: number;
+  startedAt: string;
+  ownerAgent: "Outreach Agent";
+};
+
 export default function OutreachPage() {
   const [open, setOpen] = useState<Campaign | null>(null);
   const [drafts, setDrafts] = useState<DraftItem[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>(CAMPAIGNS);
   const [liveStats, setLiveStats] = useState<LiveOutreachStats | null>(null);
+  const [liveCampaigns, setLiveCampaigns] = useState<LiveCampaign[] | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -1137,20 +1184,32 @@ export default function OutreachPage() {
         // Silent — page falls back to "—" placeholders below.
       }
     }
+    async function loadCampaigns() {
+      try {
+        const r = await fetch("/api/outreach/campaigns", { cache: "no-store" });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!cancelled) setLiveCampaigns(d.campaigns ?? []);
+      } catch {
+        if (!cancelled) setLiveCampaigns([]);
+      }
+    }
     loadStats();
-    const id = setInterval(loadStats, 30_000);
+    loadCampaigns();
+    const id = setInterval(() => { loadStats(); loadCampaigns(); }, 30_000);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   function handleToggleStatus(c: Campaign) {
-    const next: Campaign["status"] =
-      c.status === "Active" ? "Paused" : c.status === "Paused" || c.status === "Draft" || c.status === "Completed" ? "Active" : "Paused";
-    setCampaigns((prev) => prev.map((x) => (x.id === c.id ? { ...x, status: next } : x)));
-    setOpen({ ...c, status: next });
+    // Campaigns are derived from real drafts + transactions — they can't
+    // be manually paused/launched. Status reflects pipeline activity:
+    // Active = drafts in last 7d, Paused = older, Completed = all txns
+    // released. Tell the operator what to do instead.
     toast(
-      next === "Active"
-        ? `Launched "${c.name}" — Outreach Agent is sending now`
-        : `Paused "${c.name}"`
+      c.status === "Active"
+        ? `"${c.name}" is auto-managed by the Outreach Agent. To pause it, stop drafting outreach for this product.`
+        : `"${c.name}" will reactivate the next time the Outreach Agent drafts for this product.`,
+      "info",
     );
   }
 
@@ -1159,25 +1218,12 @@ export default function OutreachPage() {
   }
 
   function handleNewCampaign() {
-    const id = `c_${Date.now().toString(36)}`;
-    const c: Campaign = {
-      id,
-      name: `New Campaign · ${new Date().toLocaleDateString()}`,
-      status: "Draft",
-      channel: ["Email"],
-      audience: "Pick an audience…",
-      audienceCount: 0,
-      sent: 0,
-      opened: 0,
-      replied: 0,
-      meetings: 0,
-      deals: 0,
-      startedAt: "—",
-      ownerAgent: "Outreach Agent",
-    };
-    setCampaigns((prev) => [c, ...prev]);
-    setOpen(c);
-    toast(`Drafted new campaign — configure and launch when ready`);
+    // Campaigns are now derived, not manually created. Direct the
+    // operator to the real lever: draft outreach for a new product.
+    toast(
+      `Campaigns now appear automatically the moment the Outreach Agent drafts for a new product. To start a new one, add a product to the catalog.`,
+      "info",
+    );
   }
 
   useEffect(() => {
@@ -1407,74 +1453,97 @@ export default function OutreachPage() {
         <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
           <div className="flex items-center gap-2 text-sm font-semibold">
             Campaigns
-            <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
+            <span className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-accent-green">
+              Live
+            </span>
           </div>
-          <span className="text-[11px] text-ink-tertiary">Campaign objects ship with the multi-campaign engine</span>
+          <span className="text-[11px] text-ink-tertiary">
+            Auto-grouped by product · counts derived from real drafts &amp; transactions
+          </span>
         </div>
-        <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
-            <tr>
-              <th className="px-5 py-2.5 text-left font-medium">Campaign</th>
-              <th className="px-3 py-2.5 text-left font-medium">Channels</th>
-              <th className="px-3 py-2.5 text-left font-medium">Audience</th>
-              <th className="px-3 py-2.5 text-left font-medium">Sent</th>
-              <th className="px-3 py-2.5 text-left font-medium">Reply</th>
-              <th className="px-3 py-2.5 text-left font-medium">Meetings</th>
-              <th className="px-3 py-2.5 text-left font-medium">Deals</th>
-              <th className="px-5 py-2.5 text-left font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {campaigns.map((c) => (
-              <tr
-                key={c.id}
-                onClick={() => setOpen(c)}
-                className="cursor-pointer border-t border-bg-border hover:bg-bg-hover/30"
-              >
-                <td className="px-5 py-3">
-                  <div className="font-medium">{c.name}</div>
-                  <div className="flex items-center gap-1.5 text-[11px] text-ink-tertiary">
-                    <Calendar className="h-3 w-3" /> {c.startedAt}
-                  </div>
-                </td>
-                <td className="px-3 py-3">
-                  <div className="flex items-center gap-1">
-                    {c.channel.map((ch) => {
-                      const I = CHANNEL_ICON[ch];
-                      return (
-                        <span
-                          key={ch}
-                          className="grid h-6 w-6 place-items-center rounded-md bg-brand-500/10 text-brand-200"
-                        >
-                          <I className="h-3 w-3" />
-                        </span>
-                      );
-                    })}
-                  </div>
-                </td>
-                <td className="px-3 py-3">
-                  <div className="text-xs text-ink-secondary">{c.audience}</div>
-                  <div className="text-[11px] text-ink-tertiary">
-                    {c.audienceCount} prospects
-                  </div>
-                </td>
-                <td className="px-3 py-3">{c.sent}</td>
-                <td className="px-3 py-3 text-accent-cyan">{pct(c.replied, c.sent)}</td>
-                <td className="px-3 py-3">{c.meetings}</td>
-                <td className="px-3 py-3 font-semibold text-accent-green">
-                  {c.deals}
-                </td>
-                <td className="px-5 py-3">
-                  <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[c.status]}`}>
-                    {c.status}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </div>
+        {liveCampaigns === null ? (
+          <div className="flex items-center gap-2 px-5 py-8 text-[12px] text-ink-tertiary">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Loading campaigns…
+          </div>
+        ) : liveCampaigns.length === 0 ? (
+          <div className="px-5 py-8 text-center text-[12px] text-ink-tertiary">
+            <div className="mb-1 font-medium text-ink-secondary">No campaigns yet</div>
+            <div>
+              The Outreach Agent will create one automatically the first time it drafts
+              for a product. Add a product to the catalog to kick things off.
+            </div>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
+                <tr>
+                  <th className="px-5 py-2.5 text-left font-medium">Campaign</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Channels</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Audience</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Sent</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Reply</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Meetings</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Deals</th>
+                  <th className="px-5 py-2.5 text-left font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liveCampaigns.map(adaptLiveCampaign).map((c) => (
+                  <tr
+                    key={c.id}
+                    onClick={() => setOpen(c)}
+                    className="cursor-pointer border-t border-bg-border hover:bg-bg-hover/30"
+                  >
+                    <td className="px-5 py-3">
+                      <div className="font-medium">{c.name}</div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-ink-tertiary">
+                        <Calendar className="h-3 w-3" /> {c.startedAt}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1">
+                        {c.channel.length === 0 ? (
+                          <span className="text-[11px] text-ink-tertiary">—</span>
+                        ) : (
+                          c.channel.map((ch) => {
+                            const I = CHANNEL_ICON[ch];
+                            return (
+                              <span
+                                key={ch}
+                                className="grid h-6 w-6 place-items-center rounded-md bg-brand-500/10 text-brand-200"
+                              >
+                                <I className="h-3 w-3" />
+                              </span>
+                            );
+                          })
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="text-xs text-ink-secondary">{c.audience}</div>
+                      <div className="text-[11px] text-ink-tertiary">
+                        {c.audienceCount} buyer{c.audienceCount === 1 ? "" : "s"}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">{c.sent}</td>
+                    <td className="px-3 py-3 text-accent-cyan">{pct(c.replied, c.sent)}</td>
+                    <td className="px-3 py-3">{c.meetings}</td>
+                    <td className="px-3 py-3 font-semibold text-accent-green">
+                      {c.deals}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[c.status]}`}>
+                        {c.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <Drawer
