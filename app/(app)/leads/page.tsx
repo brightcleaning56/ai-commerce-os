@@ -3,15 +3,19 @@ import {
   Building2,
   CheckCircle2,
   Clock,
+  Flame,
   Inbox,
   Mail,
   Phone,
   RefreshCw,
   Search,
+  Snowflake,
+  ThermometerSun,
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
+import { scoreLead, type LeadTier } from "@/lib/leadScore";
 
 type LeadStatus = "new" | "contacted" | "qualified" | "won" | "lost";
 type AiReply = {
@@ -114,21 +118,40 @@ export default function LeadsPage() {
     return c;
   }, [leads]);
 
-  const visible = useMemo(() => {
+  // Pre-compute score for every lead once, so sorting + tier badges share
+  // the same underlying value and we don't recompute per render of each row.
+  const scored = useMemo(() => {
     if (!leads) return [];
-    return leads.filter((l) => {
-      if (filter !== "all" && l.status !== filter) return false;
-      if (query) {
-        const q = query.toLowerCase();
-        if (
-          !l.name.toLowerCase().includes(q) &&
-          !l.email.toLowerCase().includes(q) &&
-          !l.company.toLowerCase().includes(q)
-        ) return false;
-      }
-      return true;
-    });
-  }, [leads, filter, query]);
+    return leads.map((l) => ({ ...l, _score: scoreLead(l) }));
+  }, [leads]);
+
+  const [sortBy, setSortBy] = useState<"score" | "date">("score");
+
+  const tierCounts = useMemo(() => {
+    const c: Record<LeadTier, number> = { hot: 0, warm: 0, cold: 0 };
+    for (const l of scored) c[l._score.tier] += 1;
+    return c;
+  }, [scored]);
+
+  const visible = useMemo(() => {
+    return scored
+      .filter((l) => {
+        if (filter !== "all" && l.status !== filter) return false;
+        if (query) {
+          const q = query.toLowerCase();
+          if (
+            !l.name.toLowerCase().includes(q) &&
+            !l.email.toLowerCase().includes(q) &&
+            !l.company.toLowerCase().includes(q)
+          ) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortBy === "score") return b._score.total - a._score.total;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+  }, [scored, filter, query, sortBy]);
 
   async function setStatus(lead: Lead, next: LeadStatus) {
     try {
@@ -170,6 +193,33 @@ export default function LeadsPage() {
         </button>
       </div>
 
+      {/* Tier breakdown — at-a-glance triage */}
+      {scored.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-3">
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-accent-red">
+              <Flame className="h-3 w-3" /> Hot
+            </div>
+            <div className="mt-1 text-2xl font-bold text-accent-red">{tierCounts.hot}</div>
+            <div className="text-[10px] text-ink-tertiary">act today</div>
+          </div>
+          <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-3">
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-accent-amber">
+              <ThermometerSun className="h-3 w-3" /> Warm
+            </div>
+            <div className="mt-1 text-2xl font-bold text-accent-amber">{tierCounts.warm}</div>
+            <div className="text-[10px] text-ink-tertiary">act this week</div>
+          </div>
+          <div className="rounded-xl border border-bg-border bg-bg-card p-3">
+            <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-ink-tertiary">
+              <Snowflake className="h-3 w-3" /> Cold
+            </div>
+            <div className="mt-1 text-2xl font-bold text-ink-secondary">{tierCounts.cold}</div>
+            <div className="text-[10px] text-ink-tertiary">trickle / sequence</div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-tertiary" />
@@ -198,6 +248,20 @@ export default function LeadsPage() {
               </button>
             );
           })}
+        </div>
+        <div className="flex items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs">
+          {(["score", "date"] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setSortBy(k)}
+              className={`rounded-md px-2.5 py-1.5 ${
+                sortBy === k ? "bg-brand-500/15 text-brand-200" : "text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+              }`}
+              title={k === "score" ? "Sort hottest first" : "Sort newest first"}
+            >
+              {k === "score" ? "Score" : "Date"}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -246,9 +310,24 @@ export default function LeadsPage() {
                           </div>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-1">
-                          <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${tone.bg} ${tone.text}`}>
-                            {l.status}
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <span
+                              className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                                l._score.tier === "hot"
+                                  ? "bg-accent-red/15 text-accent-red"
+                                  : l._score.tier === "warm"
+                                    ? "bg-accent-amber/15 text-accent-amber"
+                                    : "bg-bg-hover text-ink-tertiary"
+                              }`}
+                              title={l._score.factors.map((f) => `${f.label}: ${f.weight > 0 ? "+" : ""}${f.weight}`).join("\n")}
+                            >
+                              {l._score.tier === "hot" ? <Flame className="h-2.5 w-2.5" /> : l._score.tier === "warm" ? <ThermometerSun className="h-2.5 w-2.5" /> : <Snowflake className="h-2.5 w-2.5" />}
+                              {l._score.total}
+                            </span>
+                            <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${tone.bg} ${tone.text}`}>
+                              {l.status}
+                            </span>
+                          </div>
                           <span className="text-[10px] text-ink-tertiary">{relativeTime(l.createdAt)}</span>
                         </div>
                       </div>
@@ -264,7 +343,26 @@ export default function LeadsPage() {
           {selected ? (
             <div className="space-y-4">
               <div>
-                <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Lead</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Lead</div>
+                  {(() => {
+                    const s = scoreLead(selected);
+                    return (
+                      <span
+                        className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold ${
+                          s.tier === "hot"
+                            ? "bg-accent-red/15 text-accent-red"
+                            : s.tier === "warm"
+                              ? "bg-accent-amber/15 text-accent-amber"
+                              : "bg-bg-hover text-ink-tertiary"
+                        }`}
+                      >
+                        {s.tier === "hot" ? <Flame className="h-3 w-3" /> : s.tier === "warm" ? <ThermometerSun className="h-3 w-3" /> : <Snowflake className="h-3 w-3" />}
+                        {s.tier} · {s.total}
+                      </span>
+                    );
+                  })()}
+                </div>
                 <div className="text-lg font-bold">{selected.name}</div>
                 <div className="text-xs text-ink-secondary">
                   <Building2 className="mr-1 inline h-3 w-3" /> {selected.company}
@@ -316,6 +414,25 @@ export default function LeadsPage() {
                   )}
                 </div>
               )}
+
+              {/* Score breakdown — show every factor that contributed */}
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Score breakdown</div>
+                <div className="mt-1 space-y-1 rounded-md border border-bg-border bg-bg-hover/20 p-2 text-[11px]">
+                  {scoreLead(selected).factors.length === 0 ? (
+                    <div className="text-ink-tertiary">No scored signals (just contact info).</div>
+                  ) : (
+                    scoreLead(selected).factors.map((f, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2">
+                        <span className="text-ink-secondary">{f.label}</span>
+                        <span className={`font-mono font-semibold ${f.weight > 0 ? "text-accent-green" : "text-accent-red"}`}>
+                          {f.weight > 0 ? "+" : ""}{f.weight}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
 
               {selected.message && (
                 <div>
