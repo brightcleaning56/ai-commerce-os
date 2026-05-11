@@ -42,37 +42,34 @@ type RawStore = {
 export class BlobsBackend implements StoreBackend {
   readonly name = "blobs";
   private memCache = new Map<string, unknown>();
-  private storePromise: Promise<BlobStore> | null = null;
 
   /**
-   * Lazy-load the @netlify/blobs `getStore`. Single global namespace so
-   * all keys live in the same blob store ("avyn-data").
+   * Get a fresh @netlify/blobs Store on every call. We do NOT cache the
+   * Store instance — the library's internal auth context is set when the
+   * Store is constructed and is not re-validated. If a long-lived lambda
+   * warm-start cached an expired-token Store, all subsequent calls would
+   * fail with "Failed to decode token: Token expired". Constructing fresh
+   * each call rebinds against the current process.env.NETLIFY_BLOBS_CONTEXT
+   * which the Netlify runtime refreshes per invocation.
    */
-  private getStore(): Promise<BlobStore> {
-    if (this.storePromise) return this.storePromise;
-    this.storePromise = (async () => {
-      try {
-        // Cast through unknown so the strict @netlify/blobs Store signature
-        // narrows to our minimal RawStore (we only use get/set/delete).
-        const raw = getNetlifyStore("avyn-data") as unknown as RawStore;
-        return {
-          get: (k) => raw.get(k),
-          set: async (k, v) => { await raw.set(k, v); },
-          delete: async (k) => { await raw.delete(k); },
-        };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw new Error(`[store/blobs] failed to initialize: ${msg}`);
-      }
-    })();
-    return this.storePromise;
+  private store(): BlobStore {
+    try {
+      const raw = getNetlifyStore("avyn-data") as unknown as RawStore;
+      return {
+        get: (k) => raw.get(k),
+        set: async (k, v) => { await raw.set(k, v); },
+        delete: async (k) => { await raw.delete(k); },
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`[store/blobs] failed to initialize: ${msg}`);
+    }
   }
 
   async read<T>(key: string, fallback: T): Promise<T> {
     if (this.memCache.has(key)) return this.memCache.get(key) as T;
     try {
-      const store = await this.getStore();
-      const raw = await store.get(key);
+      const raw = await this.store().get(key);
       if (raw === null || raw === undefined) return fallback;
       const parsed = JSON.parse(raw) as T;
       this.memCache.set(key, parsed);
@@ -86,8 +83,7 @@ export class BlobsBackend implements StoreBackend {
   async write(key: string, data: unknown): Promise<void> {
     this.memCache.set(key, data);
     try {
-      const store = await this.getStore();
-      await store.set(key, JSON.stringify(data));
+      await this.store().set(key, JSON.stringify(data));
     } catch (e) {
       console.error("[store/blobs] write failed:", key, e);
       throw e;
@@ -97,8 +93,7 @@ export class BlobsBackend implements StoreBackend {
   async remove(key: string): Promise<void> {
     this.memCache.delete(key);
     try {
-      const store = await this.getStore();
-      await store.delete(key);
+      await this.store().delete(key);
     } catch (e) {
       console.error("[store/blobs] delete failed:", key, e);
     }
@@ -106,11 +101,11 @@ export class BlobsBackend implements StoreBackend {
 
   async warmup(keys: string[]): Promise<void> {
     try {
-      const store = await this.getStore();
+      const s = this.store();
       await Promise.all(
         keys.map(async (key) => {
           if (this.memCache.has(key)) return;
-          const raw = await store.get(key);
+          const raw = await s.get(key);
           if (raw === null || raw === undefined) return;
           this.memCache.set(key, JSON.parse(raw));
         }),
@@ -122,12 +117,12 @@ export class BlobsBackend implements StoreBackend {
 
   async health(): Promise<{ name: string; ok: boolean; detail?: string }> {
     try {
-      const store = await this.getStore();
+      const s = this.store();
       // Round-trip a tiny sentinel key to prove the connection works.
       const probe = `_health_probe_${Date.now()}`;
-      await store.set(probe, "1");
-      const got = await store.get(probe);
-      await store.delete(probe);
+      await s.set(probe, "1");
+      const got = await s.get(probe);
+      await s.delete(probe);
       return {
         name: this.name,
         ok: got === "1",
