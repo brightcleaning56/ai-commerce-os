@@ -89,6 +89,13 @@ function fakeFollowup(lead: Lead): LeadFollowupResult {
 }
 
 function buildPrompt(lead: Lead): string {
+  const bookingUrl = (process.env.BOOKING_URL ?? "").trim();
+  const callInstruction = bookingUrl
+    ? `Suggest a 15-min call as the next step and include EXACTLY this link inline: ${bookingUrl}`
+    : `Suggest a 15-min call as the next step and ask them to reply with two ` +
+      `times that work in their timezone. Do NOT invent a booking link or ` +
+      `placeholder like <BOOKING_LINK> — Eric will follow up to schedule.`;
+
   const lines: (string | null)[] = [
     `You're composing the first reply from Eric Moore (founder of AVYN Commerce) `,
     `to a fresh inbound lead who just filled out our /contact or /signup form. `,
@@ -106,12 +113,25 @@ function buildPrompt(lead: Lead): string {
     `- Source: ${lead.source}`,
     ``,
     `Compose subject + body now. Body must address them by first name. `,
-    `Keep total length to 4-8 sentences. Suggest a 15-min call as the next step. `,
+    `Keep total length to 4-8 sentences. ${callInstruction} `,
     `Sign off "Eric Moore · Founder, AVYN Commerce".`,
     ``,
     `Also write an optional SMS variant (max 160 chars) only if their phone was provided.`,
   ];
   return lines.filter(Boolean).join("\n");
+}
+
+/**
+ * Strip any placeholder-style tokens the model might still hallucinate
+ * (<BOOKING_LINK>, [CALENDAR_URL], {{LINK}}, etc.) so they never reach a
+ * real lead's inbox even if the prompt instruction is ignored.
+ */
+function scrubPlaceholders(text: string): string {
+  return text
+    .replace(/[<\[{]{1,2}\s*(BOOKING_LINK|CALENDAR_URL|CALENDLY|MEETING_LINK|LINK|URL)\s*[>\]}]{1,2}/gi, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /**
@@ -147,9 +167,9 @@ export async function generateLeadFollowup(lead: Lead): Promise<LeadFollowupResu
     }
     const payload = toolUse.input as { subject: string; body: string; smsBody?: string };
     return {
-      subject: payload.subject.slice(0, 200),
-      body: payload.body.slice(0, 5000),
-      smsBody: payload.smsBody ? payload.smsBody.slice(0, 320) : undefined,
+      subject: scrubPlaceholders(payload.subject).slice(0, 200),
+      body: scrubPlaceholders(payload.body).slice(0, 5000),
+      smsBody: payload.smsBody ? scrubPlaceholders(payload.smsBody).slice(0, 320) : undefined,
       model: MODEL_SMART,
       estCostUsd: estimateCost(MODEL_SMART, inputTokens, outputTokens),
       usedFallback: false,
