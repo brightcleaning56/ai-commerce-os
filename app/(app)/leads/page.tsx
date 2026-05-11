@@ -40,6 +40,13 @@ type AiFollowup = {
   estCostUsd?: number;
   errorMessage?: string;
 };
+type Resubmission = {
+  at: string;
+  source: "contact-form" | "signup-form";
+  changedFields: string[];
+  newMessage?: string;
+  triggeredAiReply: boolean;
+};
 type Lead = {
   id: string;
   createdAt: string;
@@ -59,6 +66,8 @@ type Lead = {
   notes?: string;
   aiReply?: AiReply;
   aiFollowups?: AiFollowup[];
+  resubmissions?: Resubmission[];
+  lastSubmittedAt?: string;
 };
 
 const STATUS_TONE: Record<LeadStatus, { bg: string; text: string }> = {
@@ -542,6 +551,45 @@ export default function LeadsPage() {
                         <div className="mt-1 text-[10px] text-ink-tertiary">
                           {f.model}{f.estCostUsd != null && <> · ${f.estCostUsd.toFixed(4)}</>}
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selected.resubmissions && selected.resubmissions.length > 0 && (
+                <div>
+                  <div className="mb-1.5 flex items-center gap-2 text-[10px] uppercase tracking-wider text-ink-tertiary">
+                    Re-submitted
+                    <span className="rounded-md bg-accent-amber/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-amber">
+                      {selected.resubmissions.length}× returning
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {selected.resubmissions.map((r, i) => (
+                      <div key={i} className="rounded-md border border-accent-amber/20 bg-accent-amber/5 p-2.5 text-xs">
+                        <div className="flex items-center gap-2 text-[11px] text-ink-secondary">
+                          <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] font-semibold">
+                            {r.source}
+                          </span>
+                          <span className="text-ink-tertiary">·</span>
+                          <span>{relativeTime(r.at)}</span>
+                          {r.triggeredAiReply && (
+                            <span className="ml-auto rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-green">
+                              AI re-fired
+                            </span>
+                          )}
+                        </div>
+                        {r.changedFields.length > 0 && (
+                          <div className="mt-1 text-[11px] text-ink-tertiary">
+                            New info on: <span className="text-ink-secondary">{r.changedFields.join(", ")}</span>
+                          </div>
+                        )}
+                        {r.newMessage && r.newMessage !== selected.message && (
+                          <div className="mt-1 whitespace-pre-wrap text-[11px] text-ink-secondary">
+                            “{r.newMessage}”
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

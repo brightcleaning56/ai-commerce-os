@@ -88,10 +88,7 @@ export async function POST(req: NextRequest) {
   const incomingSource = trim(body.source, 30);
   const source: Lead["source"] = incomingSource === "signup-form" ? "signup-form" : "contact-form";
 
-  const lead: Lead = {
-    id: `lead_${crypto.randomBytes(8).toString("hex")}`,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+  const incoming = {
     name,
     email,
     company,
@@ -102,10 +99,99 @@ export async function POST(req: NextRequest) {
     timeline: trim(body.timeline, 60),
     budget: trim(body.budget, 60),
     message: trim(body.message, 5000),
+  };
+
+  // ── Dedup by email ──────────────────────────────────────────────────
+  // If a lead with this email already exists in the store, merge into it
+  // instead of creating a duplicate. Same person submitting twice (form
+  // refresh, accidental double-submit, returning visitor) should never
+  // produce N records the operator has to reconcile.
+  //
+  //  - within 5 min of a prior submission → silent dedupe (no audit entry,
+  //    no AI re-trigger). Catches double-clicks + form refreshes.
+  //  - longer than 5 min → real resubmission: append an audit entry, merge
+  //    new non-empty fields, fire a fresh AI reply (since the conversation
+  //    may have gone cold and they're re-engaging).
+  const existing = await store.getLeadByEmail(email);
+  const SILENT_DEDUP_WINDOW_MS = 5 * 60 * 1000;
+
+  if (existing) {
+    const lastTouchMs = new Date(existing.lastSubmittedAt ?? existing.createdAt).getTime();
+    const sinceMs = Date.now() - lastTouchMs;
+    const silentDedup = sinceMs < SILENT_DEDUP_WINDOW_MS;
+
+    // Diff incoming vs stored — fields only "merge" when incoming has a
+    // value AND stored is empty. Never overwrite a value with another value
+    // (we can't tell which is more accurate; operator can edit manually).
+    const patch: Partial<Lead> = {};
+    const changedFields: string[] = [];
+    const fields = ["phone", "companySize", "industry", "timeline", "budget"] as const;
+    for (const f of fields) {
+      const incomingVal = (incoming as Record<string, unknown>)[f] as string | undefined;
+      const storedVal = (existing as Record<string, unknown>)[f] as string | undefined;
+      if (incomingVal && !storedVal) {
+        (patch as Record<string, unknown>)[f] = incomingVal;
+        changedFields.push(f);
+      }
+    }
+    // useCases — union the lists
+    if (incoming.useCases.length > 0) {
+      const merged = Array.from(new Set([...(existing.useCases ?? []), ...incoming.useCases]));
+      if (merged.length !== existing.useCases.length) {
+        patch.useCases = merged;
+        changedFields.push("useCases");
+      }
+    }
+    patch.lastSubmittedAt = new Date().toISOString();
+
+    if (!silentDedup) {
+      patch.resubmissions = [
+        ...(existing.resubmissions ?? []),
+        {
+          at: new Date().toISOString(),
+          source,
+          changedFields,
+          newMessage: incoming.message,
+          triggeredAiReply: true,
+        },
+      ];
+    }
+
+    const merged = await store.updateLead(existing.id, patch);
+
+    // Fire a fresh AI reply only if outside the silent window AND the lead
+    // is still in "new" or "contacted" status (don't re-engage closed deals).
+    if (!silentDedup && merged && (merged.status === "new" || merged.status === "contacted")) {
+      await Promise.allSettled([
+        notifyOperator(merged).catch((err) => {
+          console.error("[leads] operator notification failed (resubmit)", err);
+        }),
+        autoReplyToLead(merged).catch((err) => {
+          console.error("[leads] auto-reply failed (resubmit)", err);
+        }),
+      ]);
+    }
+
+    return NextResponse.json({
+      ok: true,
+      id: existing.id,
+      deduped: true,
+      silentDedup,
+      changedFields: silentDedup ? [] : changedFields,
+    });
+  }
+
+  // ── New lead ────────────────────────────────────────────────────────
+  const lead: Lead = {
+    id: `lead_${crypto.randomBytes(8).toString("hex")}`,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...incoming,
     source,
     status: "new",
     ipHash: hashIp(ip),
     userAgent: trim(req.headers.get("user-agent") || "", 300),
+    lastSubmittedAt: new Date().toISOString(),
   };
 
   await store.addLead(lead);
@@ -125,7 +211,7 @@ export async function POST(req: NextRequest) {
     }),
   ]);
 
-  return NextResponse.json({ ok: true, id: lead.id });
+  return NextResponse.json({ ok: true, id: lead.id, deduped: false });
 }
 
 /**

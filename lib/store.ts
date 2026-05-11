@@ -564,6 +564,19 @@ export type Lead = {
     estCostUsd?: number;
     errorMessage?: string;
   }>;
+  // Re-submission history. Whenever a known email submits the form again,
+  // we merge into the existing Lead instead of creating a duplicate, and
+  // append an entry here so the operator can see the audit trail.
+  // - within 5 minutes  → silent dedupe (no entry, no AI re-trigger)
+  // - longer            → entry with the changed fields and a fresh AI reply
+  resubmissions?: Array<{
+    at: string;
+    source: "contact-form" | "signup-form";
+    changedFields: string[];          // names of fields that received new values
+    newMessage?: string;               // if a new message body was provided
+    triggeredAiReply: boolean;
+  }>;
+  lastSubmittedAt?: string;             // ISO of most recent submission
 };
 
 export type ThreadMessage = {
@@ -750,6 +763,12 @@ export const store = {
   async getLead(id: string): Promise<Lead | null> {
     const all = await store.getLeads();
     return all.find((l) => l.id === id) ?? null;
+  },
+  async getLeadByEmail(email: string): Promise<Lead | null> {
+    const norm = email.trim().toLowerCase();
+    if (!norm) return null;
+    const all = await store.getLeads();
+    return all.find((l) => l.email.trim().toLowerCase() === norm) ?? null;
   },
   async addLead(lead: Lead): Promise<void> {
     const existing = await store.getLeads();
