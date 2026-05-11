@@ -72,6 +72,21 @@ function isPublic(pathname: string): boolean {
   return false;
 }
 
+/**
+ * Mark a response as private/no-cache. Critical for authenticated routes:
+ * Netlify's edge CDN was caching `/leads` (and any (app) page) for ~50min
+ * with a cache key that didn't vary on the aicos_admin cookie, so
+ * authenticated users could see stale snapshots from earlier requests.
+ * private + no-store + must-revalidate keeps every authenticated render
+ * fresh and never reusable across users.
+ */
+function withNoCDNCache(res: NextResponse): NextResponse {
+  res.headers.set("Cache-Control", "private, no-store, no-cache, must-revalidate, max-age=0");
+  res.headers.set("CDN-Cache-Control", "no-store");
+  res.headers.set("Netlify-CDN-Cache-Control", "no-store");
+  return res;
+}
+
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const expected = process.env.ADMIN_TOKEN;
@@ -89,13 +104,13 @@ export function middleware(req: NextRequest) {
   const auth = req.headers.get("authorization") ?? "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
   if (bearer && constantTimeEquals(bearer, expected)) {
-    return NextResponse.next();
+    return withNoCDNCache(NextResponse.next());
   }
 
   // Check cookie (browser session)
   const cookie = req.cookies.get("aicos_admin")?.value ?? "";
   if (cookie && constantTimeEquals(cookie, expected)) {
-    return NextResponse.next();
+    return withNoCDNCache(NextResponse.next());
   }
 
   // API requests get 401, browser requests redirect to signin
