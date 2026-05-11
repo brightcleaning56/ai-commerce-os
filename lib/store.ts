@@ -532,6 +532,23 @@ export type Lead = {
   // Light fingerprint for spam triage
   ipHash?: string;
   userAgent?: string;
+  // ── AI auto-reply (slice: lead-followup) ─────────────────────────────────
+  // Set when /api/leads asynchronously fires the Anthropic-generated welcome
+  // email/SMS to the lead. `pending` = scheduled, `sent` = email left the
+  // platform, `skipped` = no transport configured / consent missing,
+  // `error` = handler threw. Operator sees this in the /leads detail panel.
+  aiReply?: {
+    status: "pending" | "sent" | "skipped" | "error";
+    at: string;             // ISO when status was set
+    subject?: string;       // generated email subject
+    body?: string;          // generated email body (plain text)
+    smsBody?: string;       // SMS body if Twilio path fired
+    smsSentTo?: string;     // phone number SMS was actually sent to
+    channel?: ("email" | "sms")[];
+    model?: string;         // anthropic model id used
+    estCostUsd?: number;
+    errorMessage?: string;
+  };
 };
 
 export type ThreadMessage = {

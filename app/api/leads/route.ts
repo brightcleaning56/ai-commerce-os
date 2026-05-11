@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { store, type Lead } from "@/lib/store";
 import { sendEmail } from "@/lib/email";
+import { sendSms } from "@/lib/sms";
 import { requireAdmin } from "@/lib/auth";
+import { generateLeadFollowup } from "@/lib/agents/lead-followup";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -113,6 +115,13 @@ export async function POST(req: NextRequest) {
     console.error("[leads] operator notification failed", err);
   });
 
+  // Fire-and-forget AI auto-reply to the lead. Doesn't block the form submit
+  // response so the user sees "Request received" instantly while we generate
+  // + send the personalized first-touch in the background.
+  void autoReplyToLead(lead).catch((err) => {
+    console.error("[leads] auto-reply failed", err);
+  });
+
   return NextResponse.json({ ok: true, id: lead.id });
 }
 
@@ -148,6 +157,89 @@ async function notifyOperator(lead: Lead): Promise<void> {
     textBody: linesText,
     replyTo: lead.email,
     metadata: { lead_id: lead.id, source: lead.source },
+  });
+}
+
+/**
+ * Generate + send a personalized first-touch reply to the lead immediately
+ * after their submission. Email always fires; SMS only fires when Twilio is
+ * configured AND the lead provided a phone number. Stores everything in
+ * lead.aiReply so the operator can see what we sent from /leads.
+ *
+ * Failures fall back to a deterministic template (Anthropic absent) or
+ * just mark the AI reply as "error" (transport failed) so the lead still
+ * appears in the inbox with a status the operator can act on.
+ */
+async function autoReplyToLead(lead: Lead): Promise<void> {
+  const startedAt = new Date().toISOString();
+  // Mark pending immediately so the operator UI shows "AI follow-up in flight"
+  // even if the generation/send takes a few seconds.
+  await store.updateLead(lead.id, {
+    aiReply: { status: "pending", at: startedAt, channel: [] },
+  });
+
+  let subject = "";
+  let body = "";
+  let smsBody: string | undefined;
+  let model = "fallback (no API key)";
+  let estCostUsd: number | undefined;
+  let usedFallback = true;
+
+  try {
+    const result = await generateLeadFollowup(lead);
+    subject = result.subject;
+    body = result.body;
+    smsBody = result.smsBody;
+    model = result.model;
+    estCostUsd = result.estCostUsd;
+    usedFallback = result.usedFallback;
+  } catch (err) {
+    await store.updateLead(lead.id, {
+      aiReply: {
+        status: "error",
+        at: new Date().toISOString(),
+        errorMessage: err instanceof Error ? err.message : String(err),
+      },
+    });
+    return;
+  }
+
+  const channels: ("email" | "sms")[] = [];
+
+  // Email path — always fires if we have a subject + body.
+  const emailRes = await sendEmail({
+    to: lead.email,
+    subject,
+    textBody: body,
+    // Replies route to the operator's inbox so Eric stays in the loop.
+    replyTo: process.env.OPERATOR_EMAIL || undefined,
+    metadata: { lead_id: lead.id, kind: "lead-followup" },
+  });
+  if (emailRes.ok) channels.push("email");
+
+  // SMS path — only if Twilio is configured AND lead provided a phone.
+  let smsSentTo: string | undefined;
+  if (smsBody && lead.phone) {
+    const smsRes = await sendSms({ to: lead.phone, body: smsBody });
+    if (smsRes.ok) {
+      channels.push("sms");
+      smsSentTo = smsRes.sentTo;
+    }
+  }
+
+  await store.updateLead(lead.id, {
+    aiReply: {
+      status: channels.length > 0 ? "sent" : "skipped",
+      at: new Date().toISOString(),
+      subject,
+      body,
+      smsBody,
+      smsSentTo,
+      channel: channels,
+      model,
+      estCostUsd: usedFallback ? undefined : estCostUsd,
+      errorMessage: channels.length === 0 ? emailRes.errorMessage : undefined,
+    },
   });
 }
 

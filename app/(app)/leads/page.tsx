@@ -14,6 +14,18 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 
 type LeadStatus = "new" | "contacted" | "qualified" | "won" | "lost";
+type AiReply = {
+  status: "pending" | "sent" | "skipped" | "error";
+  at: string;
+  subject?: string;
+  body?: string;
+  smsBody?: string;
+  smsSentTo?: string;
+  channel?: ("email" | "sms")[];
+  model?: string;
+  estCostUsd?: number;
+  errorMessage?: string;
+};
 type Lead = {
   id: string;
   createdAt: string;
@@ -28,9 +40,10 @@ type Lead = {
   timeline?: string;
   budget?: string;
   message?: string;
-  source: "contact-form";
+  source: "contact-form" | "signup-form";
   status: LeadStatus;
   notes?: string;
+  aiReply?: AiReply;
 };
 
 const STATUS_TONE: Record<LeadStatus, { bg: string; text: string }> = {
@@ -310,6 +323,60 @@ export default function LeadsPage() {
                   <div className="mt-1 whitespace-pre-wrap rounded-md border border-bg-border bg-bg-hover/20 p-3 text-xs text-ink-secondary">
                     {selected.message}
                   </div>
+                </div>
+              )}
+
+              {selected.aiReply && (
+                <div>
+                  <div className="mb-1.5 flex items-center gap-2 text-[10px] uppercase tracking-wider text-ink-tertiary">
+                    AI Auto-Reply
+                    <span
+                      className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+                        selected.aiReply.status === "sent"
+                          ? "bg-accent-green/15 text-accent-green"
+                          : selected.aiReply.status === "pending"
+                            ? "bg-accent-amber/15 text-accent-amber"
+                            : selected.aiReply.status === "error"
+                              ? "bg-accent-red/15 text-accent-red"
+                              : "bg-bg-hover text-ink-tertiary"
+                      }`}
+                    >
+                      {selected.aiReply.status}
+                    </span>
+                    {selected.aiReply.channel && selected.aiReply.channel.length > 0 && (
+                      <span className="text-[10px] text-ink-tertiary">
+                        via {selected.aiReply.channel.join(" + ")}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-ink-tertiary">{relativeTime(selected.aiReply.at)}</span>
+                  </div>
+                  {selected.aiReply.subject && (
+                    <div className="rounded-md border border-bg-border bg-bg-hover/20 p-3 text-xs">
+                      <div className="font-semibold text-ink-primary">Subject: {selected.aiReply.subject}</div>
+                      {selected.aiReply.body && (
+                        <div className="mt-2 whitespace-pre-wrap text-ink-secondary">
+                          {selected.aiReply.body}
+                        </div>
+                      )}
+                      {selected.aiReply.smsBody && (
+                        <div className="mt-3 border-t border-bg-border pt-2">
+                          <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">SMS sent to {selected.aiReply.smsSentTo}</div>
+                          <div className="mt-1 text-ink-secondary">{selected.aiReply.smsBody}</div>
+                        </div>
+                      )}
+                      <div className="mt-2 text-[10px] text-ink-tertiary">
+                        {selected.aiReply.model}
+                        {selected.aiReply.estCostUsd != null && (
+                          <span> · ${selected.aiReply.estCostUsd.toFixed(4)}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {selected.aiReply.errorMessage && (
+                    <div className="mt-1 text-[11px] text-accent-red">
+                      Error: {selected.aiReply.errorMessage}
+                    </div>
+                  )}
                 </div>
               )}
 
