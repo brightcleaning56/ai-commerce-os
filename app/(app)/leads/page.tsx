@@ -61,17 +61,30 @@ export default function LeadsPage() {
   const [selected, setSelected] = useState<Lead | null>(null);
   const { toast } = useToast();
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const r = await fetch("/api/leads", { cache: "no-store" });
+      const r = await fetch("/api/leads", { cache: "no-store", credentials: "include" });
       if (r.ok) {
         const d = await r.json();
         setLeads(d.leads ?? []);
-      } else {
-        setLeads((p) => p ?? []);
+        return;
       }
-    } catch {
+      // 401 means cookie is missing/expired/wrong — bounce to /signin so user
+      // can re-auth instead of staring at a silent "No leads yet".
+      if (r.status === 401) {
+        const next = encodeURIComponent("/leads");
+        window.location.href = `/signin?next=${next}`;
+        return;
+      }
+      const body = await r.json().catch(() => ({}));
+      setLoadError(`API returned ${r.status}: ${body.error ?? r.statusText}`);
+      setLeads((p) => p ?? []);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Network error");
       setLeads((p) => p ?? []);
     } finally {
       setLoading(false);
@@ -174,6 +187,13 @@ export default function LeadsPage() {
           })}
         </div>
       </div>
+
+      {loadError && (
+        <div className="rounded-xl border border-accent-red/40 bg-accent-red/5 px-4 py-3 text-xs text-accent-red">
+          <strong className="font-semibold">Couldn&apos;t load leads:</strong> {loadError}
+          <span className="ml-2 text-ink-tertiary">— click Refresh, or sign in again at <a className="underline" href="/signin">/signin</a></span>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
         <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
