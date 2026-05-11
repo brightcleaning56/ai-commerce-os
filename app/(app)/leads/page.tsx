@@ -635,7 +635,17 @@ export default function LeadsPage() {
                 {selected.promotedToBuyerId ? (
                   <div className="flex items-center justify-between rounded-lg border border-accent-green/30 bg-accent-green/5 px-3 py-2 text-[11px]">
                     <div>
-                      <div className="font-semibold text-accent-green">Promoted to buyer</div>
+                      <div className="flex items-center gap-1.5 font-semibold text-accent-green">
+                        Promoted to buyer
+                        {selected.promotedBy === "auto" && (
+                          <span
+                            className="rounded bg-accent-green/20 px-1.5 py-0.5 text-[9px] uppercase tracking-wider"
+                            title="Auto-promoted because lead score crossed AUTO_PROMOTE_LEAD_SCORE (default 70)"
+                          >
+                            Auto
+                          </span>
+                        )}
+                      </div>
                       <div className="text-ink-tertiary">
                         {selected.promotedToBuyerId}
                         {selected.promotedAt && (

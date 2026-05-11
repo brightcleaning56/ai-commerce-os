@@ -5,6 +5,7 @@ import { sendEmail } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { requireAdmin } from "@/lib/auth";
 import { generateLeadFollowup } from "@/lib/agents/lead-followup";
+import { autoPromoteIfHot } from "@/lib/leadAutoPromote";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -170,6 +171,15 @@ export async function POST(req: NextRequest) {
           console.error("[leads] auto-reply failed (resubmit)", err);
         }),
       ]);
+
+      // Auto-promote if the resubmission pushed the score over the threshold.
+      // Re-fetch since autoReplyToLead may have updated the lead in-store.
+      const fresh = (await store.getLead(existing.id)) ?? merged;
+      try {
+        await autoPromoteIfHot(fresh);
+      } catch (err) {
+        console.error("[leads] auto-promote failed (resubmit)", err);
+      }
     }
 
     return NextResponse.json({
@@ -211,7 +221,20 @@ export async function POST(req: NextRequest) {
     }),
   ]);
 
-  return NextResponse.json({ ok: true, id: lead.id, deduped: false });
+  // Auto-promote hot leads to a buyer record so the Outreach Agent picks
+  // them up on its next pipeline run. Re-fetch first since autoReplyToLead
+  // mutates aiReply on the stored copy. No-op for cold/warm leads or when
+  // AUTO_PROMOTE_LEAD_SCORE is set high enough to disable.
+  const fresh = (await store.getLead(lead.id)) ?? lead;
+  let autoPromoted = false;
+  try {
+    const r = await autoPromoteIfHot(fresh);
+    autoPromoted = r.promoted;
+  } catch (err) {
+    console.error("[leads] auto-promote failed", err);
+  }
+
+  return NextResponse.json({ ok: true, id: lead.id, deduped: false, autoPromoted });
 }
 
 /**

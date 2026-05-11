@@ -55,6 +55,7 @@ type Health = {
     pipelineRuns: number;
     riskFlags: number;
     cronRuns: number;
+    leads?: number;
   };
   aiHealth?: {
     status: "ok" | "degraded" | "down" | "idle";
@@ -66,6 +67,15 @@ type Health = {
     lastErrorAgent: string | null;
     lastErrorMessage: string | null;
     suggestedAction: string | null;
+  };
+  autoPromote?: {
+    leads28d: number;
+    promoted28d: number;
+    auto28d: number;
+    operator28d: number;
+    autoPct: number;
+    threshold: number | null;
+    enabled: boolean;
   };
 };
 
@@ -249,6 +259,64 @@ export default function AdminPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Auto-promote summary — visibility on whether the rule is firing */}
+      {health?.autoPromote && (health.autoPromote.leads28d > 0 || !health.autoPromote.enabled) && (
+        <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold">
+              Auto-promote (28d)
+              {!health.autoPromote.enabled ? (
+                <span className="ml-2 rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">
+                  Disabled
+                </span>
+              ) : (
+                <span
+                  className="ml-2 rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-accent-green"
+                  title={`Threshold ≥ ${health.autoPromote.threshold} (env: AUTO_PROMOTE_LEAD_SCORE)`}
+                >
+                  ≥ {health.autoPromote.threshold}
+                </span>
+              )}
+            </div>
+            <a
+              href="/leads"
+              className="text-[11px] text-ink-tertiary hover:text-ink-primary hover:underline"
+            >
+              Open inbox →
+            </a>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Leads</div>
+              <div className="text-lg font-bold">{health.autoPromote.leads28d}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Promoted</div>
+              <div className="text-lg font-bold">{health.autoPromote.promoted28d}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">By AI</div>
+              <div className="text-lg font-bold text-accent-green">{health.autoPromote.auto28d}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">By operator</div>
+              <div className="text-lg font-bold">{health.autoPromote.operator28d}</div>
+            </div>
+          </div>
+          {health.autoPromote.promoted28d > 0 && (
+            <p className="mt-2 text-[11px] text-ink-tertiary">
+              {health.autoPromote.autoPct}% of promoted leads were auto-handled — operator only intervened on{" "}
+              {100 - health.autoPromote.autoPct}%.
+            </p>
+          )}
+          {!health.autoPromote.enabled && (
+            <p className="mt-2 text-[11px] text-ink-tertiary">
+              Set <code className="rounded bg-bg-hover px-1">AUTO_PROMOTE_LEAD_SCORE</code> below 999 in Netlify env to enable.
+            </p>
+          )}
         </div>
       )}
 

@@ -20,7 +20,7 @@ export async function GET(req: Request) {
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const backend = getBackend();
-  const [storageHealth, today, drafts, runs, quotes, pipelines, flags, cron] = await Promise.all([
+  const [storageHealth, today, drafts, runs, quotes, pipelines, flags, cron, leads] = await Promise.all([
     backend.health(),
     store.getTodaySpend(),
     store.getDrafts().catch(() => []),
@@ -29,6 +29,7 @@ export async function GET(req: Request) {
     store.getPipelineRuns().catch(() => []),
     store.getRiskFlags().catch(() => []),
     store.getCronRuns().catch(() => []),
+    store.getLeads().catch(() => []),
   ]);
 
   const limitStr = process.env.ANTHROPIC_DAILY_BUDGET_USD;
@@ -76,13 +77,48 @@ export async function GET(req: Request) {
       pipelineRuns: pipelines.length,
       riskFlags: flags.length,
       cronRuns: cron.length,
+      leads: leads.length,
     },
     // ── AI health (catches silent fallback / 401 storms) ─────────────────
     // The agents fall back to deterministic templates when Anthropic 401s
     // or hits any error. The platform keeps working but the AI personalization
     // is silently degraded. This rollup makes that visible at a glance.
     aiHealth: aiHealthSummary(runs),
+    // ── Auto-promote summary (lead → buyer automation) ───────────────────
+    // Shows whether the lead-auto-promote rule is firing and how often.
+    // If it's set high enough to be disabled, threshold === null.
+    autoPromote: autoPromoteSummary(leads),
   });
+}
+
+type LeadLike = {
+  createdAt: string;
+  promotedToBuyerId?: string;
+  promotedAt?: string;
+  promotedBy?: "operator" | "auto";
+};
+
+function autoPromoteSummary(leads: LeadLike[]) {
+  const TWENTY_EIGHT_DAYS_MS = 28 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - TWENTY_EIGHT_DAYS_MS;
+  const recent = leads.filter((l) => new Date(l.createdAt).getTime() >= cutoff);
+  const promoted = recent.filter((l) => !!l.promotedToBuyerId);
+  const auto = promoted.filter((l) => l.promotedBy === "auto").length;
+  const operator = promoted.filter((l) => l.promotedBy === "operator").length;
+
+  const raw = process.env.AUTO_PROMOTE_LEAD_SCORE;
+  const parsed = raw ? Number.parseInt(raw, 10) : 70;
+  const threshold = !raw || (Number.isFinite(parsed) && parsed >= 0 && parsed < 999) ? parsed : null;
+
+  return {
+    leads28d: recent.length,
+    promoted28d: promoted.length,
+    auto28d: auto,
+    operator28d: operator,
+    autoPct: promoted.length > 0 ? Math.round((auto / promoted.length) * 100) : 0,
+    threshold,                                           // null = disabled (>=999)
+    enabled: threshold !== null,
+  };
 }
 
 type AgentRunLike = {
