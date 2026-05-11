@@ -49,6 +49,17 @@ type Health = {
     riskFlags: number;
     cronRuns: number;
   };
+  aiHealth?: {
+    status: "ok" | "degraded" | "down" | "idle";
+    runs24h: number;
+    errors24h: number;
+    fallbacks24h: number;
+    auth401Count: number;
+    lastErrorAt: string | null;
+    lastErrorAgent: string | null;
+    lastErrorMessage: string | null;
+    suggestedAction: string | null;
+  };
 };
 
 export default function AdminPage() {
@@ -169,6 +180,67 @@ export default function AdminPage() {
           hint={health ? `${health.counts.cronRuns} cron runs total` : "Loading…"}
         />
       </div>
+
+      {/* AI health — surfaces when agents are silently falling back */}
+      {health?.aiHealth && health.aiHealth.status !== "ok" && (
+        <div
+          className={`rounded-xl border p-4 ${
+            health.aiHealth.status === "down"
+              ? "border-accent-red/40 bg-accent-red/5"
+              : health.aiHealth.status === "degraded"
+                ? "border-accent-amber/40 bg-accent-amber/5"
+                : "border-bg-border bg-bg-card"
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <div
+              className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${
+                health.aiHealth.status === "down"
+                  ? "bg-accent-red/15"
+                  : "bg-accent-amber/15"
+              }`}
+            >
+              <AlertOctagon
+                className={`h-4 w-4 ${
+                  health.aiHealth.status === "down"
+                    ? "text-accent-red"
+                    : "text-accent-amber"
+                }`}
+              />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <span
+                  className={
+                    health.aiHealth.status === "down"
+                      ? "text-accent-red"
+                      : "text-accent-amber"
+                  }
+                >
+                  AI {health.aiHealth.status === "down" ? "DOWN" : health.aiHealth.status === "idle" ? "idle" : "degraded"}
+                </span>
+                <span className="text-ink-tertiary text-xs font-normal">
+                  · last 24h: {health.aiHealth.runs24h} runs · {health.aiHealth.errors24h} errors · {health.aiHealth.fallbacks24h} fallbacks
+                  {health.aiHealth.auth401Count > 0 && (
+                    <> · <span className="font-semibold text-accent-red">{health.aiHealth.auth401Count} auth 401s</span></>
+                  )}
+                </span>
+              </div>
+              {health.aiHealth.suggestedAction && (
+                <p className="mt-1 text-xs text-ink-secondary">
+                  → {health.aiHealth.suggestedAction}
+                </p>
+              )}
+              {health.aiHealth.lastErrorAgent && health.aiHealth.lastErrorMessage && (
+                <p className="mt-1 text-[11px] text-ink-tertiary">
+                  Last error · <span className="font-medium text-ink-secondary">{health.aiHealth.lastErrorAgent}</span> ·{" "}
+                  <span className="font-mono">{health.aiHealth.lastErrorMessage.slice(0, 120)}</span>
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Live config status */}
       {health && (
