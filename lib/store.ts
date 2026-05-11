@@ -577,6 +577,14 @@ export type Lead = {
     triggeredAiReply: boolean;
   }>;
   lastSubmittedAt?: string;             // ISO of most recent submission
+  // ── Lead → Buyer promotion (slice: lead-promotion) ───────────────────────
+  // Set when an operator (or auto-promote rule) one-clicks the lead into a
+  // DiscoveredBuyer record on /leads. Once set, the same lead can't be
+  // promoted again — UI shows "Promoted" instead of the button. The buyer
+  // record itself lives in `discovered-buyers` and feeds the Outreach Agent.
+  promotedToBuyerId?: string;           // DiscoveredBuyer.id
+  promotedAt?: string;                  // ISO when promotion happened
+  promotedBy?: "operator" | "auto";     // who fired the promotion
 };
 
 export type ThreadMessage = {

@@ -11,6 +11,7 @@ import {
   Search,
   Snowflake,
   ThermometerSun,
+  UserPlus,
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -68,6 +69,9 @@ type Lead = {
   aiFollowups?: AiFollowup[];
   resubmissions?: Resubmission[];
   lastSubmittedAt?: string;
+  promotedToBuyerId?: string;
+  promotedAt?: string;
+  promotedBy?: "operator" | "auto";
 };
 
 const STATUS_TONE: Record<LeadStatus, { bg: string; text: string }> = {
@@ -187,6 +191,36 @@ export default function LeadsPage() {
       toast(`Marked ${next}`);
     } catch (err) {
       toast(err instanceof Error ? err.message : "Update failed", "error");
+    }
+  }
+
+  const [promoting, setPromoting] = useState<string | null>(null);
+
+  async function promoteToBuyer(lead: Lead) {
+    if (lead.promotedToBuyerId) {
+      toast(`Already promoted (buyer ${lead.promotedToBuyerId})`, "info");
+      return;
+    }
+    setPromoting(lead.id);
+    try {
+      const r = await fetch(`/api/leads/${lead.id}/promote`, { method: "POST" });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body.error ?? `Promote failed (${r.status})`);
+      }
+      const d = await r.json();
+      setLeads((all) => (all ?? []).map((l) => (l.id === lead.id ? d.lead : l)));
+      if (selected?.id === lead.id) setSelected(d.lead);
+      toast(
+        d.alreadyPromoted
+          ? `Already promoted — opened existing buyer record`
+          : `Promoted to buyer · Outreach Agent will start drafting for ${d.buyer?.company ?? "them"}`,
+        "success",
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Promote failed", "error");
+    } finally {
+      setPromoting(null);
     }
   }
 
@@ -595,6 +629,39 @@ export default function LeadsPage() {
                   </div>
                 </div>
               )}
+
+              <div>
+                <div className="mb-1.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Promote</div>
+                {selected.promotedToBuyerId ? (
+                  <div className="flex items-center justify-between rounded-lg border border-accent-green/30 bg-accent-green/5 px-3 py-2 text-[11px]">
+                    <div>
+                      <div className="font-semibold text-accent-green">Promoted to buyer</div>
+                      <div className="text-ink-tertiary">
+                        {selected.promotedToBuyerId}
+                        {selected.promotedAt && (
+                          <span className="ml-1.5">· {relativeTime(selected.promotedAt)}</span>
+                        )}
+                      </div>
+                    </div>
+                    <a
+                      href="/buyers"
+                      className="rounded-md border border-accent-green/40 bg-accent-green/10 px-2 py-1 text-[10px] font-semibold text-accent-green hover:bg-accent-green/20"
+                    >
+                      Open buyer
+                    </a>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => promoteToBuyer(selected)}
+                    disabled={promoting === selected.id}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-2 text-[11px] font-semibold text-brand-200 transition hover:bg-brand-500/20 disabled:opacity-60"
+                    title="Mint a Buyer record so the Outreach Agent starts drafting for this company"
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    {promoting === selected.id ? "Promoting…" : "Promote to Buyer"}
+                  </button>
+                )}
+              </div>
 
               <div>
                 <div className="mb-1.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Status</div>
