@@ -35,6 +35,17 @@ export type OutreachInsights = {
   byModel: LeaderboardRow[];           // sonnet vs haiku, etc.
   byDayOfWeek: LeaderboardRow[];       // Mon..Sun, ordered by reply rate
   bestSubjects: LeaderboardRow[];      // top 5 first-3-words signatures
+  byTouchNumber: LeaderboardRow[];     // First / 2nd / 3rd+ touch reply rate
+  // Cost-per-reply economics. Only counts drafts that actually had a Claude
+  // call (estCostUsd present, usedFallback === false). Lets the operator see
+  // whether the AI personalization is paying for itself.
+  cost: {
+    totalUsd: number;                  // sum of estCostUsd across sent drafts
+    drafts: number;                    // how many drafts contributed cost
+    repliedDrafts: number;             // how many of those got a reply
+    costPerReplyUsd: number | null;    // null if no replies yet
+    costPerSendUsd: number | null;     // null if no AI sends
+  };
 };
 
 type Bucket = {
@@ -113,6 +124,14 @@ export function deriveInsights(drafts: OutreachDraft[]): OutreachInsights {
       byModel: [],
       byDayOfWeek: [],
       bestSubjects: [],
+      byTouchNumber: [],
+      cost: {
+        totalUsd: 0,
+        drafts: 0,
+        repliedDrafts: 0,
+        costPerReplyUsd: null,
+        costPerSendUsd: null,
+      },
     };
   }
 
@@ -124,6 +143,18 @@ export function deriveInsights(drafts: OutreachDraft[]): OutreachInsights {
   const modelBuckets = new Map<string, Bucket>();
   const dowBuckets = new Map<number, Bucket>();
   const subjectBuckets = new Map<string, Bucket>();
+  const touchBuckets: Record<"First" | "2nd" | "3rd+", Bucket> = {
+    "First": newBucket(),
+    "2nd": newBucket(),
+    "3rd+": newBucket(),
+  };
+
+  // Cost tally — only count drafts where we have a real Claude cost
+  // (estCostUsd present, usedFallback false). Fallback drafts are free
+  // and would distort cost-per-reply downward.
+  let costTotalUsd = 0;
+  let costDrafts = 0;
+  let costRepliedDrafts = 0;
 
   let totalReplied = 0;
 
@@ -195,6 +226,27 @@ export function deriveInsights(drafts: OutreachDraft[]): OutreachInsights {
         if (Number.isFinite(sentMs) && reply.atMs > sentMs) sb.totalReplyMs += reply.atMs - sentMs;
       }
     }
+
+    // Touch number — first touch (no parent) vs 2nd vs 3rd+. Reveals whether
+    // the auto-followup cron is paying off relative to first-touch sends.
+    const touchKey: "First" | "2nd" | "3rd+" =
+      !d.parentDraftId ? "First" : (d.followupNumber ?? 1) === 1 ? "2nd" : "3rd+";
+    const tb = touchBuckets[touchKey];
+    tb.sent += 1;
+    if (replied && reply) {
+      tb.replied += 1;
+      const baseSentForTouch = d.sentAt ?? d.smsSentAt ?? d.linkedinSentAt;
+      const sentMs = baseSentForTouch ? new Date(baseSentForTouch).getTime() : NaN;
+      if (Number.isFinite(sentMs) && reply.atMs > sentMs) tb.totalReplyMs += reply.atMs - sentMs;
+    }
+
+    // Cost — only count drafts that actually called Anthropic (i.e. have a
+    // real estCostUsd and didn't fall back to the deterministic template).
+    if (typeof d.estCostUsd === "number" && d.estCostUsd > 0 && !d.usedFallback) {
+      costTotalUsd += d.estCostUsd;
+      costDrafts += 1;
+      if (replied) costRepliedDrafts += 1;
+    }
   }
 
   const byChannel = (["Email", "SMS", "LinkedIn"] as const)
@@ -218,9 +270,21 @@ export function deriveInsights(drafts: OutreachDraft[]): OutreachInsights {
     .sort((a, b) => b.replyRatePct - a.replyRatePct || b.sent - a.sent)
     .slice(0, 5);
 
+  // Touch-number leaderboard — fixed order so the UI reads First → 2nd → 3rd+
+  // (don't sort by reply rate; the temporal narrative is the whole point)
+  const byTouchNumber = (["First", "2nd", "3rd+"] as const)
+    .map((k) => rowFromBucket(k, touchBuckets[k]))
+    .filter((r) => r.sent > 0);
+
   const totalSent = sent.length;
   const overallReplyRatePct =
     totalSent > 0 ? Math.round(((totalReplied / totalSent) * 100) * 10) / 10 : 0;
+
+  // Round cost outputs to 4 decimals (cent fractions matter for haiku usage)
+  const costPerReplyUsd =
+    costRepliedDrafts > 0 ? Math.round((costTotalUsd / costRepliedDrafts) * 10000) / 10000 : null;
+  const costPerSendUsd =
+    costDrafts > 0 ? Math.round((costTotalUsd / costDrafts) * 10000) / 10000 : null;
 
   return {
     hasAnyData: true,
@@ -231,5 +295,13 @@ export function deriveInsights(drafts: OutreachDraft[]): OutreachInsights {
     byModel,
     byDayOfWeek,
     bestSubjects,
+    byTouchNumber,
+    cost: {
+      totalUsd: Math.round(costTotalUsd * 10000) / 10000,
+      drafts: costDrafts,
+      repliedDrafts: costRepliedDrafts,
+      costPerReplyUsd,
+      costPerSendUsd,
+    },
   };
 }

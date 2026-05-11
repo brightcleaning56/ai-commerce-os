@@ -1183,6 +1183,14 @@ type LiveInsights = {
   byModel: LeaderboardRow[];
   byDayOfWeek: LeaderboardRow[];
   bestSubjects: LeaderboardRow[];
+  byTouchNumber: LeaderboardRow[];
+  cost: {
+    totalUsd: number;
+    drafts: number;
+    repliedDrafts: number;
+    costPerReplyUsd: number | null;
+    costPerSendUsd: number | null;
+  };
 };
 
 function Leaderboard({
@@ -1558,10 +1566,54 @@ export default function OutreachPage() {
               <span className="text-ink-secondary">{liveInsights.overallReplyRatePct}% overall</span>
             </span>
           </div>
-          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+          {/* Cost summary strip — only render once there's a real Anthropic cost */}
+          {liveInsights.cost.drafts > 0 && (
+            <div className="grid grid-cols-2 gap-3 border-b border-bg-border px-5 py-3 sm:grid-cols-4">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">AI sends</div>
+                <div className="text-sm font-semibold">{liveInsights.cost.drafts}</div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">AI cost</div>
+                <div className="text-sm font-semibold">${liveInsights.cost.totalUsd.toFixed(4)}</div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Cost / send</div>
+                <div className="text-sm font-semibold">
+                  {liveInsights.cost.costPerSendUsd !== null
+                    ? `$${liveInsights.cost.costPerSendUsd.toFixed(4)}`
+                    : "—"}
+                </div>
+              </div>
+              <div>
+                <div
+                  className="text-[10px] uppercase tracking-wider text-ink-tertiary"
+                  title="Total Claude cost divided by AI-personalized drafts that got a reply"
+                >
+                  Cost / reply
+                </div>
+                <div
+                  className={`text-sm font-semibold ${
+                    liveInsights.cost.costPerReplyUsd === null ? "text-ink-tertiary" : "text-accent-green"
+                  }`}
+                >
+                  {liveInsights.cost.costPerReplyUsd !== null
+                    ? `$${liveInsights.cost.costPerReplyUsd.toFixed(4)}`
+                    : "no replies yet"}
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
             <Leaderboard
               title="By channel"
               rows={liveInsights.byChannel}
+              empty="No sends yet"
+              showAvgTime
+            />
+            <Leaderboard
+              title="By touch (1st / 2nd / 3rd+)"
+              rows={liveInsights.byTouchNumber}
               empty="No sends yet"
               showAvgTime
             />
