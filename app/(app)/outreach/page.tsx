@@ -1106,11 +1106,41 @@ function ThreadBubble({
   );
 }
 
+type LiveOutreachStats = {
+  hasAnyData: boolean;
+  sent: number;
+  opened: number;
+  replied: number;
+  meetingsBooked: number;
+  closedDeals: number;
+  inFlightDrafts: number;
+  openRatePct: number;
+  replyRatePct: number;
+};
+
 export default function OutreachPage() {
   const [open, setOpen] = useState<Campaign | null>(null);
   const [drafts, setDrafts] = useState<DraftItem[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>(CAMPAIGNS);
+  const [liveStats, setLiveStats] = useState<LiveOutreachStats | null>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadStats() {
+      try {
+        const r = await fetch("/api/outreach/stats", { cache: "no-store" });
+        if (!r.ok) return;
+        const d = (await r.json()) as LiveOutreachStats;
+        if (!cancelled) setLiveStats(d);
+      } catch {
+        // Silent — page falls back to "—" placeholders below.
+      }
+    }
+    loadStats();
+    const id = setInterval(loadStats, 30_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   function handleToggleStatus(c: Campaign) {
     const next: Campaign["status"] =
@@ -1278,17 +1308,6 @@ export default function OutreachPage() {
 
   const pendingDrafts = drafts.filter((d) => d.status === "draft");
 
-  const totals = campaigns.reduce(
-    (acc, c) => ({
-      sent: acc.sent + c.sent,
-      opened: acc.opened + c.opened,
-      replied: acc.replied + c.replied,
-      meetings: acc.meetings + c.meetings,
-      deals: acc.deals + c.deals,
-    }),
-    { sent: 0, opened: 0, replied: 0, meetings: 0, deals: 0 }
-  );
-
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1299,9 +1318,9 @@ export default function OutreachPage() {
           <div>
             <h1 className="text-2xl font-bold">Outreach Automation</h1>
             <p className="text-xs text-ink-secondary">
-              {campaigns.filter((c) => c.status === "Active").length} active campaigns ·{" "}
-              {totals.sent.toLocaleString()} messages sent ·{" "}
-              {pct(totals.replied, totals.sent)} reply rate
+              {liveStats
+                ? `${liveStats.inFlightDrafts} in-flight · ${liveStats.sent.toLocaleString()} sent · ${liveStats.replyRatePct.toFixed(1)}% reply rate`
+                : "Loading live stats…"}
             </p>
           </div>
         </div>
@@ -1315,11 +1334,11 @@ export default function OutreachPage() {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
-          { l: "Total Sent", v: totals.sent.toLocaleString() },
-          { l: "Opened", v: pct(totals.opened, totals.sent) },
-          { l: "Replied", v: pct(totals.replied, totals.sent) },
-          { l: "Meetings Booked", v: totals.meetings },
-          { l: "Closed Deals", v: totals.deals },
+          { l: "Total Sent", v: liveStats ? liveStats.sent.toLocaleString() : "—" },
+          { l: "Opened", v: liveStats ? (liveStats.sent > 0 ? `${liveStats.openRatePct.toFixed(1)}%` : "—") : "—" },
+          { l: "Replied", v: liveStats ? (liveStats.sent > 0 ? `${liveStats.replyRatePct.toFixed(1)}%` : "—") : "—" },
+          { l: "Meetings Booked", v: liveStats ? liveStats.meetingsBooked : "—" },
+          { l: "Closed Deals", v: liveStats ? liveStats.closedDeals : "—" },
         ].map((s) => (
           <div key={s.l} className="rounded-xl border border-bg-border bg-bg-card p-4">
             <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">
@@ -1329,6 +1348,22 @@ export default function OutreachPage() {
           </div>
         ))}
       </div>
+
+      {liveStats && !liveStats.hasAnyData && (
+        <div className="flex items-start gap-2 rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-3 text-xs">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <Send className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1 text-ink-secondary">
+            <span className="font-semibold text-accent-amber">No outreach activity yet</span>
+            {" "}— the tiles above start populating once you send your first draft. Generate one from the{" "}
+            <a href="/pipeline" className="text-brand-300 hover:text-brand-200 underline">pipeline</a>{" "}
+            or{" "}
+            <a href="/products" className="text-brand-300 hover:text-brand-200 underline">products</a>{" "}
+            page. The campaigns table below uses sample data so the layout is visible.
+          </div>
+        </div>
+      )}
 
       {drafts.length > 0 && (
         <div className="rounded-xl border border-brand-500/30 bg-gradient-to-br from-brand-500/5 to-transparent">
@@ -1369,8 +1404,12 @@ export default function OutreachPage() {
       )}
 
       <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
-        <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
-          Campaigns
+        <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            Campaigns
+            <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
+          </div>
+          <span className="text-[11px] text-ink-tertiary">Campaign objects ship with the multi-campaign engine</span>
         </div>
         <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
