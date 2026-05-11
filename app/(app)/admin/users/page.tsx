@@ -1,45 +1,60 @@
 "use client";
 import {
+  AlertCircle,
   Check,
-  ChevronDown,
+  Loader2,
   Mail,
-  MoreHorizontal,
-  Plus,
   Search,
   Shield,
   ShieldCheck,
+  ShieldOff,
   UserPlus,
   Users,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useToast } from "@/components/Toast";
 
 type Role = "Owner" | "Admin" | "Operator" | "Viewer" | "Billing";
+type InviteRole = Exclude<Role, "Owner">;
+type InviteStatus = "pending" | "accepted" | "cancelled" | "expired";
 
-type Member = {
-  id: string;
+type Owner = {
+  id: "owner";
   name: string;
   email: string;
-  role: Role;
-  status: "Active" | "Invited" | "Suspended";
-  lastActive: string;
-  joinedAt: string;
+  role: "Owner";
+  title: string;
+  company: string;
   initials: string;
-  agents?: string[];
-  twoFactor: boolean;
+  twoFactor: boolean | null;
+  lastActive: string;
 };
 
-const MEMBERS: Member[] = [
-  { id: "u1", name: "Eric Moore", email: "Ericduolo4@gmail.com", role: "Owner", status: "Active", lastActive: "Just now", joinedAt: "Jan 18, 2024", initials: "EM", twoFactor: true },
-  { id: "u2", name: "Sarah Chen", email: "sarah@acmebrand.com", role: "Admin", status: "Active", lastActive: "12 min ago", joinedAt: "Jan 18, 2024", initials: "SC", twoFactor: true },
-  { id: "u3", name: "Marcus Brooks", email: "marcus@acmebrand.com", role: "Operator", status: "Active", lastActive: "2h ago", joinedAt: "Feb 04, 2024", initials: "MB", twoFactor: true, agents: ["Outreach", "CRM"] },
-  { id: "u4", name: "Priya Patel", email: "priya@acmebrand.com", role: "Operator", status: "Active", lastActive: "Yesterday", joinedAt: "Feb 22, 2024", initials: "PP", twoFactor: false, agents: ["Buyer Discovery"] },
-  { id: "u5", name: "Aiko Tanaka", email: "aiko@acmebrand.com", role: "Operator", status: "Active", lastActive: "5h ago", joinedAt: "Mar 11, 2024", initials: "AT", twoFactor: true, agents: ["Outreach"] },
-  { id: "u6", name: "Daniel Brooks", email: "daniel@acmebrand.com", role: "Viewer", status: "Active", lastActive: "3 days ago", joinedAt: "Apr 02, 2024", initials: "DB", twoFactor: false },
-  { id: "u7", name: "Lena Mueller", email: "lena.m@external-vendor.com", role: "Viewer", status: "Invited", lastActive: "—", joinedAt: "—", initials: "LM", twoFactor: false },
-  { id: "u8", name: "Thomas Schmidt", email: "thomas@acmebrand.com", role: "Billing", status: "Active", lastActive: "1 week ago", joinedAt: "Mar 28, 2024", initials: "TS", twoFactor: true },
-  { id: "u9", name: "Maya Singh", email: "maya@acmebrand.com", role: "Operator", status: "Suspended", lastActive: "1 month ago", joinedAt: "Feb 15, 2024", initials: "MS", twoFactor: false },
-];
+type Invite = {
+  id: string;
+  email: string;
+  role: InviteRole;
+  status: InviteStatus;
+  createdAt: string;
+  expiresAt: string;
+  invitedBy: string;
+  acceptedAt?: string;
+  cancelledAt?: string;
+};
+
+type UsersPayload = {
+  owner: Owner;
+  invites: Invite[];
+  counts: { total: number; active: number; pending: number; twoFactorOn: number };
+  capabilities: {
+    perUserAuth: boolean;
+    ssoConfigured: boolean;
+    scimConfigured: boolean;
+    twoFactorTracked: boolean;
+    acceptanceFlow: boolean;
+  };
+};
 
 const ROLE_TONE: Record<Role, string> = {
   Owner: "bg-gradient-brand text-white",
@@ -49,13 +64,20 @@ const ROLE_TONE: Record<Role, string> = {
   Billing: "bg-accent-green/15 text-accent-green",
 };
 
-const STATUS_TONE: Record<string, string> = {
+const STATUS_TONE: Record<InviteStatus | "Active", string> = {
   Active: "bg-accent-green/15 text-accent-green",
-  Invited: "bg-accent-amber/15 text-accent-amber",
-  Suspended: "bg-accent-red/15 text-accent-red",
+  pending: "bg-accent-amber/15 text-accent-amber",
+  accepted: "bg-accent-green/15 text-accent-green",
+  cancelled: "bg-bg-hover text-ink-tertiary",
+  expired: "bg-bg-hover text-ink-tertiary",
 };
 
-const ROLE_PERMISSIONS: Record<Role, { area: string; level: "All" | "Read" | "Own" | "None" }[]> = {
+// Today's actual permission story. Honest: only the owner has any
+// privileges because per-user auth isn't wired yet. Other roles are
+// "planned" — the operator can plan the team and create invites, but
+// the next slice is what actually enforces these.
+type Level = "All" | "Read" | "Own" | "None" | "Planned";
+const ROLE_PERMISSIONS: Record<Role, { area: string; level: Level }[]> = {
   Owner: [
     { area: "Workspace", level: "All" },
     { area: "Billing", level: "All" },
@@ -64,69 +86,174 @@ const ROLE_PERMISSIONS: Record<Role, { area: string; level: "All" | "Read" | "Ow
     { area: "Marketplace", level: "All" },
   ],
   Admin: [
-    { area: "Workspace", level: "All" },
-    { area: "Billing", level: "Read" },
-    { area: "Agents", level: "All" },
-    { area: "CRM Pipeline", level: "All" },
-    { area: "Marketplace", level: "All" },
+    { area: "Workspace", level: "Planned" },
+    { area: "Billing", level: "Planned" },
+    { area: "Agents", level: "Planned" },
+    { area: "CRM Pipeline", level: "Planned" },
+    { area: "Marketplace", level: "Planned" },
   ],
   Operator: [
-    { area: "Workspace", level: "Read" },
-    { area: "Billing", level: "None" },
-    { area: "Agents", level: "Own" },
-    { area: "CRM Pipeline", level: "Own" },
-    { area: "Marketplace", level: "Read" },
+    { area: "Workspace", level: "Planned" },
+    { area: "Billing", level: "Planned" },
+    { area: "Agents", level: "Planned" },
+    { area: "CRM Pipeline", level: "Planned" },
+    { area: "Marketplace", level: "Planned" },
   ],
   Viewer: [
-    { area: "Workspace", level: "Read" },
-    { area: "Billing", level: "None" },
-    { area: "Agents", level: "Read" },
-    { area: "CRM Pipeline", level: "Read" },
-    { area: "Marketplace", level: "Read" },
+    { area: "Workspace", level: "Planned" },
+    { area: "Billing", level: "Planned" },
+    { area: "Agents", level: "Planned" },
+    { area: "CRM Pipeline", level: "Planned" },
+    { area: "Marketplace", level: "Planned" },
   ],
   Billing: [
-    { area: "Workspace", level: "None" },
-    { area: "Billing", level: "All" },
-    { area: "Agents", level: "None" },
-    { area: "CRM Pipeline", level: "None" },
-    { area: "Marketplace", level: "None" },
+    { area: "Workspace", level: "Planned" },
+    { area: "Billing", level: "Planned" },
+    { area: "Agents", level: "Planned" },
+    { area: "CRM Pipeline", level: "Planned" },
+    { area: "Marketplace", level: "Planned" },
   ],
 };
 
-const LEVEL_TONE: Record<string, string> = {
+const LEVEL_TONE: Record<Level, string> = {
   All: "text-accent-green",
   Read: "text-accent-blue",
   Own: "text-accent-amber",
   None: "text-ink-tertiary",
+  Planned: "text-ink-tertiary italic",
 };
 
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
+  return `${Math.floor(ms / 86_400_000)}d ago`;
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  });
+}
+
 export default function UsersPage() {
-  const [list, setList] = useState(MEMBERS);
+  const [data, setData] = useState<UsersPayload | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [filterRole, setFilterRole] = useState<Role | "All">("All");
   const [openInvite, setOpenInvite] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<Role>("Operator");
+  const [inviteRole, setInviteRole] = useState<InviteRole>("Operator");
+  const [submitting, setSubmitting] = useState(false);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const r = await fetch("/api/admin/users", { cache: "no-store" });
+      if (r.status === 401) {
+        setLoadError("Not signed in — visit /signin and try again.");
+        setData(null);
+        return;
+      }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        setLoadError(`API returned ${r.status}: ${body.error ?? r.statusText}`);
+        return;
+      }
+      const d = (await r.json()) as UsersPayload;
+      setData(d);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Build the unified members list: owner + invites (each invite is a row)
+  type Row =
+    | { kind: "owner"; owner: Owner }
+    | { kind: "invite"; invite: Invite };
+  const rows: Row[] = useMemo(() => {
+    if (!data) return [];
+    const out: Row[] = [{ kind: "owner", owner: data.owner }];
+    for (const inv of data.invites) out.push({ kind: "invite", invite: inv });
+    return out;
+  }, [data]);
 
   const filtered = useMemo(() => {
-    return list.filter((m) => {
-      if (filterRole !== "All" && m.role !== filterRole) return false;
-      if (
-        query &&
-        !m.name.toLowerCase().includes(query.toLowerCase()) &&
-        !m.email.toLowerCase().includes(query.toLowerCase())
-      )
-        return false;
+    return rows.filter((r) => {
+      const role: Role = r.kind === "owner" ? "Owner" : r.invite.role;
+      if (filterRole !== "All" && role !== filterRole) return false;
+      if (query) {
+        const q = query.toLowerCase();
+        const email = r.kind === "owner" ? r.owner.email : r.invite.email;
+        const name = r.kind === "owner" ? r.owner.name : r.invite.email;
+        if (!email.toLowerCase().includes(q) && !name.toLowerCase().includes(q)) return false;
+      }
       return true;
     });
-  }, [list, query, filterRole]);
+  }, [rows, query, filterRole]);
 
-  const counts = {
-    Total: list.length,
-    Active: list.filter((m) => m.status === "Active").length,
-    Invited: list.filter((m) => m.status === "Invited").length,
-    "2FA on": list.filter((m) => m.twoFactor).length,
-  };
+  async function submitInvite() {
+    if (!inviteEmail) return;
+    setSubmitting(true);
+    try {
+      const r = await fetch("/api/admin/invites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Invite failed (${r.status})`);
+      toast(`Invited ${inviteEmail} as ${inviteRole}`, "success");
+      setInviteEmail("");
+      setOpenInvite(false);
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Invite failed", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function cancelInvite(inv: Invite) {
+    if (!confirm(`Cancel invite for ${inv.email}?`)) return;
+    setCancellingId(inv.id);
+    try {
+      const r = await fetch(`/api/admin/invites/${inv.id}`, { method: "DELETE" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Cancel failed (${r.status})`);
+      toast(`Cancelled invite for ${inv.email}`, "success");
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Cancel failed", "error");
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
+  const counts = data?.counts ?? { total: 0, active: 0, pending: 0, twoFactorOn: 0 };
+  const tilesData: { k: string; v: string | number; hint?: string }[] = [
+    { k: "Total seats", v: counts.total },
+    { k: "Active", v: counts.active, hint: "owner today" },
+    { k: "Pending invites", v: counts.pending },
+    {
+      k: "2FA tracked",
+      v: data?.capabilities.twoFactorTracked ? counts.twoFactorOn : "—",
+      hint: data?.capabilities.twoFactorTracked ? undefined : "not tracked yet",
+    },
+  ];
 
   return (
     <div className="space-y-5">
@@ -138,40 +265,59 @@ export default function UsersPage() {
           <div>
             <h1 className="text-2xl font-bold">Users &amp; Roles</h1>
             <p className="text-xs text-ink-secondary">
-              {counts.Active} active · {counts.Invited} pending invites · {counts["2FA on"]} of {counts.Total} have 2FA
+              {counts.active} active · {counts.pending} pending invite{counts.pending === 1 ? "" : "s"}
+              {data && (
+                <>
+                  {" · "}
+                  <span className="text-ink-tertiary">
+                    workspace identity from{" "}
+                    <code className="rounded bg-bg-hover px-1 text-[10px]">OPERATOR_*</code> env vars
+                  </span>
+                </>
+              )}
             </p>
           </div>
         </div>
         <button
-          onClick={() => setOpenInvite(true)}
+          onClick={() => setOpenInvite((v) => !v)}
           className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
         >
-          <UserPlus className="h-4 w-4" /> Invite member
+          <UserPlus className="h-4 w-4" /> {openInvite ? "Close" : "Invite member"}
         </button>
       </div>
 
-      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
-        <div className="flex items-start gap-3 text-[12px]">
-          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
-            <Users className="h-3.5 w-3.5 text-accent-amber" />
-          </div>
-          <div className="flex-1 text-ink-secondary">
-            <span className="font-semibold text-accent-amber">Multi-user preview</span>
-            {" "}
-            — AVYN currently runs in single-operator mode (you, owner). Inviting members and
-            multi-role workflows ship in a follow-up. Today the workspace identity is driven by{" "}
-            <code className="rounded bg-bg-hover px-1 text-[10px]">OPERATOR_NAME</code> /{" "}
-            <code className="rounded bg-bg-hover px-1 text-[10px]">OPERATOR_EMAIL</code> env vars
-            (managed at Settings).
+      {/* Honest capability banner — only render once we know what's wired. */}
+      {data && !data.capabilities.acceptanceFlow && (
+        <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+          <div className="flex items-start gap-3 text-[12px]">
+            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+              <AlertCircle className="h-3.5 w-3.5 text-accent-amber" />
+            </div>
+            <div className="flex-1 text-ink-secondary">
+              <span className="font-semibold text-accent-amber">Single-operator mode</span>
+              {" "}
+              — invites you create here are <strong>real</strong> (persisted, emailed, cancellable),
+              but the per-user sign-in flow that lets invitees actually accept ships in a follow-up.
+              Today the workspace has one privileged identity: the owner email above.
+              Roles you assign are stored so the next slice can enforce them.
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {loadError && (
+        <div className="rounded-xl border border-accent-red/40 bg-accent-red/5 px-4 py-3 text-xs text-accent-red">
+          <strong className="font-semibold">Couldn&apos;t load users:</strong> {loadError}
+          <span className="ml-2 text-ink-tertiary">— click Refresh, or sign in at <a className="underline" href="/signin">/signin</a></span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {Object.entries(counts).map(([k, v]) => (
-          <div key={k} className="rounded-xl border border-bg-border bg-bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{k}</div>
-            <div className="mt-1 text-2xl font-bold">{v}</div>
+        {tilesData.map((t) => (
+          <div key={t.k} className="rounded-xl border border-bg-border bg-bg-card p-4">
+            <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{t.k}</div>
+            <div className="mt-1 text-2xl font-bold">{t.v}</div>
+            {t.hint && <div className="text-[10px] text-ink-tertiary">{t.hint}</div>}
           </div>
         ))}
       </div>
@@ -179,52 +325,48 @@ export default function UsersPage() {
       {openInvite && (
         <div className="rounded-xl border border-brand-500/40 bg-gradient-to-br from-brand-500/5 to-transparent p-5">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold">Invite a new member</div>
-            <button onClick={() => setOpenInvite(false)} className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary">
+            <div className="text-sm font-semibold">Invite a teammate</div>
+            <button
+              onClick={() => setOpenInvite(false)}
+              className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+              aria-label="Close invite form"
+            >
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr_200px_auto]">
+          <p className="mt-1 text-[11px] text-ink-tertiary">
+            Sends a notification email and saves a pending invite. They can&apos;t sign in until the
+            acceptance flow ships, but the role you assign here will be honored once it does.
+          </p>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr_180px_auto]">
             <div className="relative">
               <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-tertiary" />
               <input
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submitInvite();
+                }}
+                type="email"
                 placeholder="email@yourcompany.com"
                 className="h-10 w-full rounded-lg border border-bg-border bg-bg-card pl-10 pr-3 text-sm focus:border-brand-500 focus:outline-none"
               />
             </div>
             <select
               value={inviteRole}
-              onChange={(e) => setInviteRole(e.target.value as Role)}
+              onChange={(e) => setInviteRole(e.target.value as InviteRole)}
               className="h-10 rounded-lg border border-bg-border bg-bg-card px-3 text-sm"
             >
-              {(["Admin", "Operator", "Viewer", "Billing"] as Role[]).map((r) => (
-                <option key={r}>{r}</option>
+              {(["Admin", "Operator", "Viewer", "Billing"] as InviteRole[]).map((r) => (
+                <option key={r} value={r}>{r}</option>
               ))}
             </select>
             <button
-              onClick={() => {
-                if (!inviteEmail) return;
-                setList([
-                  {
-                    id: `u${list.length + 1}`,
-                    name: inviteEmail.split("@")[0].replace(/[\.\-_]/g, " "),
-                    email: inviteEmail,
-                    role: inviteRole,
-                    status: "Invited",
-                    lastActive: "—",
-                    joinedAt: "—",
-                    initials: inviteEmail.slice(0, 2).toUpperCase(),
-                    twoFactor: false,
-                  },
-                  ...list,
-                ]);
-                setInviteEmail("");
-                setOpenInvite(false);
-              }}
-              className="rounded-lg bg-gradient-brand px-4 py-2 text-sm font-semibold shadow-glow"
+              onClick={submitInvite}
+              disabled={submitting || !inviteEmail}
+              className="flex items-center gap-2 rounded-lg bg-gradient-brand px-4 py-2 text-sm font-semibold shadow-glow disabled:opacity-60"
             >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               Send invite
             </button>
           </div>
@@ -239,7 +381,7 @@ export default function UsersPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by name or email…"
+                placeholder="Search by email…"
                 className="h-9 w-full rounded-lg border border-bg-border bg-bg-card pl-9 pr-3 text-sm placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
               />
             </div>
@@ -258,79 +400,140 @@ export default function UsersPage() {
                 </button>
               ))}
             </div>
+            <button
+              onClick={load}
+              disabled={loading}
+              className="flex h-9 items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 text-xs hover:bg-bg-hover disabled:opacity-60"
+            >
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              Refresh
+            </button>
           </div>
 
           <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
-            <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
-                <tr className="border-b border-bg-border">
-                  <th className="px-5 py-2.5 text-left font-medium">Member</th>
-                  <th className="px-3 py-2.5 text-left font-medium">Role</th>
-                  <th className="px-3 py-2.5 text-left font-medium">Agents</th>
-                  <th className="px-3 py-2.5 text-left font-medium">2FA</th>
-                  <th className="px-3 py-2.5 text-left font-medium">Last active</th>
-                  <th className="px-5 py-2.5 text-left font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((m) => (
-                  <tr key={m.id} className="border-t border-bg-border hover:bg-bg-hover/30">
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-3">
-                        <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-brand text-xs font-bold">
-                          {m.initials}
-                        </div>
-                        <div>
-                          <div className="font-medium">{m.name}</div>
-                          <div className="text-[11px] text-ink-tertiary">{m.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${ROLE_TONE[m.role]}`}>
-                        {m.role}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      {m.agents ? (
-                        <div className="flex flex-wrap gap-1">
-                          {m.agents.map((a) => (
-                            <span
-                              key={a}
-                              className="rounded-md bg-bg-hover/60 px-1.5 py-0.5 text-[10px] text-ink-secondary"
-                            >
-                              {a}
+            {data === null && !loadError ? (
+              <div className="px-5 py-12 text-center text-xs text-ink-tertiary">Loading…</div>
+            ) : filtered.length === 0 ? (
+              <div className="px-5 py-12 text-center text-xs text-ink-tertiary">
+                No matches — adjust filters or invite a teammate.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
+                    <tr className="border-b border-bg-border">
+                      <th className="px-5 py-2.5 text-left font-medium">Member</th>
+                      <th className="px-3 py-2.5 text-left font-medium">Role</th>
+                      <th className="px-3 py-2.5 text-left font-medium">2FA</th>
+                      <th className="px-3 py-2.5 text-left font-medium">Last active / Sent</th>
+                      <th className="px-5 py-2.5 text-left font-medium">Status</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((row) => {
+                      if (row.kind === "owner") {
+                        const m = row.owner;
+                        return (
+                          <tr key="owner" className="border-t border-bg-border hover:bg-bg-hover/30">
+                            <td className="px-5 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-brand text-xs font-bold">
+                                  {m.initials}
+                                </div>
+                                <div>
+                                  <div className="font-medium">{m.name}</div>
+                                  <div className="text-[11px] text-ink-tertiary">{m.email}</div>
+                                  <div className="text-[10px] text-ink-tertiary">{m.title} · {m.company}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-3 py-3">
+                              <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${ROLE_TONE.Owner}`}>
+                                Owner
+                              </span>
+                            </td>
+                            <td className="px-3 py-3">
+                              {m.twoFactor === null ? (
+                                <span title="Per-user 2FA tracking ships with multi-user auth" className="text-ink-tertiary">
+                                  <ShieldOff className="h-4 w-4" />
+                                </span>
+                              ) : m.twoFactor ? (
+                                <ShieldCheck className="h-4 w-4 text-accent-green" />
+                              ) : (
+                                <Shield className="h-4 w-4 text-ink-tertiary" />
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-ink-secondary">
+                              {relativeTime(m.lastActive)}
+                            </td>
+                            <td className="px-5 py-3">
+                              <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE.Active}`}>
+                                Active
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-right text-[11px] text-ink-tertiary">
+                              <span title="Owner is set via OPERATOR_* env vars">env-managed</span>
+                            </td>
+                          </tr>
+                        );
+                      }
+                      const inv = row.invite;
+                      const initials = inv.email.slice(0, 2).toUpperCase();
+                      return (
+                        <tr key={inv.id} className="border-t border-bg-border hover:bg-bg-hover/30">
+                          <td className="px-5 py-3">
+                            <div className="flex items-center gap-3">
+                              <div className="grid h-9 w-9 place-items-center rounded-full bg-bg-hover text-xs font-bold text-ink-secondary">
+                                {initials}
+                              </div>
+                              <div>
+                                <div className="font-medium text-ink-secondary">{inv.email}</div>
+                                <div className="text-[10px] text-ink-tertiary">
+                                  Invited by {inv.invitedBy}
+                                  {inv.status === "pending" && (
+                                    <> · expires {formatDate(inv.expiresAt)}</>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${ROLE_TONE[inv.role]}`}>
+                              {inv.role}
                             </span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-[11px] text-ink-tertiary">All</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3">
-                      {m.twoFactor ? (
-                        <ShieldCheck className="h-4 w-4 text-accent-green" />
-                      ) : (
-                        <Shield className="h-4 w-4 text-ink-tertiary" />
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-ink-secondary">{m.lastActive}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[m.status]}`}>
-                          {m.status}
-                        </span>
-                        <button className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary">
-                          <MoreHorizontal className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className="text-ink-tertiary"><ShieldOff className="h-4 w-4" /></span>
+                          </td>
+                          <td className="px-3 py-3 text-ink-secondary">
+                            Sent {relativeTime(inv.createdAt)}
+                          </td>
+                          <td className="px-5 py-3">
+                            <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[inv.status]}`}>
+                              {inv.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3 text-right">
+                            {inv.status === "pending" ? (
+                              <button
+                                onClick={() => cancelInvite(inv)}
+                                disabled={cancellingId === inv.id}
+                                className="text-[11px] text-ink-tertiary hover:text-accent-red disabled:opacity-60"
+                              >
+                                {cancellingId === inv.id ? "Cancelling…" : "Cancel"}
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-ink-tertiary">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
 
@@ -340,36 +543,66 @@ export default function UsersPage() {
               Role permissions
             </div>
             <div className="space-y-3 p-4">
-              {(Object.keys(ROLE_PERMISSIONS) as Role[]).map((r) => (
-                <div key={r} className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
-                  <div className="flex items-center justify-between">
-                    <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${ROLE_TONE[r]}`}>
-                      {r}
-                    </span>
-                    <span className="text-[10px] text-ink-tertiary">
-                      {list.filter((m) => m.role === r).length} member{list.filter((m) => m.role === r).length === 1 ? "" : "s"}
-                    </span>
+              {(Object.keys(ROLE_PERMISSIONS) as Role[]).map((r) => {
+                const memberCount = r === "Owner"
+                  ? 1
+                  : data?.invites.filter((i) => i.role === r && i.status === "pending").length ?? 0;
+                return (
+                  <div key={r} className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${ROLE_TONE[r]}`}>
+                        {r}
+                      </span>
+                      <span className="text-[10px] text-ink-tertiary">
+                        {memberCount} {r === "Owner" ? "member" : `pending invite${memberCount === 1 ? "" : "s"}`}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                      {ROLE_PERMISSIONS[r].map((p) => (
+                        <div key={p.area} className="flex items-center justify-between">
+                          <span className="text-ink-secondary">{p.area}</span>
+                          <span className={LEVEL_TONE[p.level]}>{p.level}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
-                    {ROLE_PERMISSIONS[r].map((p) => (
-                      <div key={p.area} className="flex items-center justify-between">
-                        <span className="text-ink-secondary">{p.area}</span>
-                        <span className={LEVEL_TONE[p.level]}>{p.level}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
           <div className="rounded-xl border border-bg-border bg-bg-card p-4">
             <div className="text-sm font-semibold">Security</div>
+            <p className="mt-1 text-[11px] text-ink-tertiary">
+              Honest snapshot — nothing here is faked. Each row reflects what&apos;s
+              actually wired today.
+            </p>
             <div className="mt-3 space-y-2 text-xs">
-              <Row k="Require 2FA for Admins" v="On" tone="text-accent-green" />
-              <Row k="SSO (Okta SAML)" v="Connected" tone="text-accent-green" />
-              <Row k="SCIM provisioning" v="Connected" tone="text-accent-green" />
-              <Row k="IP allowlist" v="3 ranges" />
+              <Row
+                k="Per-user authentication"
+                v={data?.capabilities.perUserAuth ? "On" : "Single-operator"}
+                tone={data?.capabilities.perUserAuth ? "text-accent-green" : "text-ink-tertiary"}
+              />
+              <Row
+                k="2FA tracking"
+                v={data?.capabilities.twoFactorTracked ? "On" : "Not yet"}
+                tone={data?.capabilities.twoFactorTracked ? "text-accent-green" : "text-ink-tertiary"}
+              />
+              <Row
+                k="SSO (SAML / OIDC)"
+                v={data?.capabilities.ssoConfigured ? "Connected" : "Not configured"}
+                tone={data?.capabilities.ssoConfigured ? "text-accent-green" : "text-ink-tertiary"}
+              />
+              <Row
+                k="SCIM provisioning"
+                v={data?.capabilities.scimConfigured ? "Connected" : "Not configured"}
+                tone={data?.capabilities.scimConfigured ? "text-accent-green" : "text-ink-tertiary"}
+              />
+              <Row
+                k="Invite acceptance flow"
+                v={data?.capabilities.acceptanceFlow ? "Live" : "Coming next"}
+                tone={data?.capabilities.acceptanceFlow ? "text-accent-green" : "text-ink-tertiary"}
+              />
             </div>
           </div>
         </aside>

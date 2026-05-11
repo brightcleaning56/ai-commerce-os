@@ -25,6 +25,7 @@ const SPEND_LEDGER_FILE = "spend-ledger.json";
 const TRANSACTIONS_FILE = "transactions.json";
 const REVENUE_LEDGER_FILE = "revenue-ledger.json";
 const LEADS_FILE = "leads.json";
+const INVITES_FILE = "invites.json";
 
 // ─── Backend selection ─────────────────────────────────────────────────────
 // STORE_BACKEND=blobs → Netlify Blobs (recommended for Netlify deploys)
@@ -587,6 +588,38 @@ export type Lead = {
   promotedBy?: "operator" | "auto";     // who fired the promotion
 };
 
+/**
+ * Workspace invite — operator invites a teammate via email + role. Stored
+ * in invites.json. Status starts as "pending"; flips to "cancelled" when
+ * the operator revokes, "expired" when older than INVITE_EXPIRY_DAYS, and
+ * "accepted" once the invitee onboards (acceptance flow ships in a
+ * follow-up; for now invites are visible + cancellable but not yet
+ * acceptable — operator can see who's been asked).
+ *
+ * SECURITY NOTE: this slice does NOT yet enforce roles in middleware.
+ * Today's auth model is single ADMIN_TOKEN/cookie — every authenticated
+ * caller has owner privileges. Roles are stored so the operator can plan
+ * the team, and so the next slice (per-user identity + role enforcement)
+ * has data to work with.
+ */
+export type InviteRole = "Admin" | "Operator" | "Viewer" | "Billing";
+export type InviteStatus = "pending" | "accepted" | "cancelled" | "expired";
+
+export type Invite = {
+  id: string;                       // inv_<random>
+  email: string;                    // recipient (lowercased on write)
+  role: InviteRole;
+  status: InviteStatus;
+  createdAt: string;                // ISO
+  expiresAt: string;                // ISO (createdAt + INVITE_EXPIRY_DAYS)
+  invitedBy: string;                // operator name/email at create time
+  acceptedAt?: string;              // ISO if accepted
+  cancelledAt?: string;             // ISO if cancelled
+  // Single-use token for the future acceptance flow. Not surfaced to the
+  // operator UI today; held so the next slice can wire /invites/[token].
+  token: string;
+};
+
 export type ThreadMessage = {
   id: string;
   role: "agent" | "buyer";
@@ -789,6 +822,42 @@ export const store = {
     if (idx === -1) return null;
     existing[idx] = { ...existing[idx], ...patch, id: existing[idx].id, updatedAt: new Date().toISOString() };
     await getBackend().write(LEADS_FILE, existing);
+    return existing[idx];
+  },
+
+  // Workspace invites (Users & Roles page)
+  async getInvites(): Promise<Invite[]> {
+    const all = await getBackend().read<Invite[]>(INVITES_FILE, []);
+    // Lazy-expire on read so the operator never sees a stale "pending" past
+    // its expiry. The store-level write happens on the next mutation.
+    const now = Date.now();
+    return all.map((inv) =>
+      inv.status === "pending" && new Date(inv.expiresAt).getTime() < now
+        ? { ...inv, status: "expired" as InviteStatus }
+        : inv,
+    );
+  },
+  async getInvite(id: string): Promise<Invite | null> {
+    const all = await store.getInvites();
+    return all.find((i) => i.id === id) ?? null;
+  },
+  async getInviteByEmail(email: string): Promise<Invite | null> {
+    const norm = email.trim().toLowerCase();
+    if (!norm) return null;
+    const all = await store.getInvites();
+    return all.find((i) => i.email === norm && i.status === "pending") ?? null;
+  },
+  async addInvite(invite: Invite): Promise<void> {
+    const existing = await getBackend().read<Invite[]>(INVITES_FILE, []);
+    const all = [invite, ...existing].slice(0, 500);
+    await getBackend().write(INVITES_FILE, all);
+  },
+  async updateInvite(id: string, patch: Partial<Invite>): Promise<Invite | null> {
+    const existing = await getBackend().read<Invite[]>(INVITES_FILE, []);
+    const idx = existing.findIndex((i) => i.id === id);
+    if (idx === -1) return null;
+    existing[idx] = { ...existing[idx], ...patch, id: existing[idx].id };
+    await getBackend().write(INVITES_FILE, existing);
     return existing[idx];
   },
 
