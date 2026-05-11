@@ -549,6 +549,21 @@ export type Lead = {
     estCostUsd?: number;
     errorMessage?: string;
   };
+  // Auto-followup history. Each entry is one additional AI touch fired by the
+  // /api/cron/lead-followups job after N days of buyer silence. The first
+  // entry is the day-3 follow-up; subsequent are added if/when more cadences
+  // ship. Operator-side "contacted" status manually marked by the operator
+  // SUPPRESSES auto-followup to avoid stepping on a real conversation.
+  aiFollowups?: Array<{
+    at: string;
+    daysSinceCreated: number;
+    status: "sent" | "skipped" | "error";
+    subject?: string;
+    body?: string;
+    model?: string;
+    estCostUsd?: number;
+    errorMessage?: string;
+  }>;
 };
 
 export type ThreadMessage = {

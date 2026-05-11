@@ -30,6 +30,16 @@ type AiReply = {
   estCostUsd?: number;
   errorMessage?: string;
 };
+type AiFollowup = {
+  at: string;
+  daysSinceCreated: number;
+  status: "sent" | "skipped" | "error";
+  subject?: string;
+  body?: string;
+  model?: string;
+  estCostUsd?: number;
+  errorMessage?: string;
+};
 type Lead = {
   id: string;
   createdAt: string;
@@ -48,6 +58,7 @@ type Lead = {
   status: LeadStatus;
   notes?: string;
   aiReply?: AiReply;
+  aiFollowups?: AiFollowup[];
 };
 
 const STATUS_TONE: Record<LeadStatus, { bg: string; text: string }> = {
@@ -494,6 +505,46 @@ export default function LeadsPage() {
                       Error: {selected.aiReply.errorMessage}
                     </div>
                   )}
+                </div>
+              )}
+
+              {selected.aiFollowups && selected.aiFollowups.length > 0 && (
+                <div>
+                  <div className="mb-1.5 flex items-center gap-2 text-[10px] uppercase tracking-wider text-ink-tertiary">
+                    Auto-Followups
+                    <span className="rounded-md bg-bg-hover px-1.5 py-0.5 text-[10px] font-semibold text-ink-secondary">
+                      {selected.aiFollowups.length}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {selected.aiFollowups.map((f, i) => (
+                      <div key={i} className="rounded-md border border-bg-border bg-bg-hover/20 p-3 text-xs">
+                        <div className="mb-1 flex items-center gap-2">
+                          <span className="text-[10px] font-semibold text-ink-tertiary">#{i + 2} · day {f.daysSinceCreated}</span>
+                          <span
+                            className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+                              f.status === "sent"
+                                ? "bg-accent-green/15 text-accent-green"
+                                : f.status === "skipped"
+                                  ? "bg-accent-amber/15 text-accent-amber"
+                                  : "bg-accent-red/15 text-accent-red"
+                            }`}
+                          >
+                            {f.status}
+                          </span>
+                          <span className="ml-auto text-[10px] text-ink-tertiary">{relativeTime(f.at)}</span>
+                        </div>
+                        {f.subject && <div className="font-semibold text-ink-primary">Subject: {f.subject}</div>}
+                        {f.body && (
+                          <div className="mt-1 whitespace-pre-wrap text-ink-secondary">{f.body}</div>
+                        )}
+                        {f.errorMessage && <div className="mt-1 text-[11px] text-accent-red">Error: {f.errorMessage}</div>}
+                        <div className="mt-1 text-[10px] text-ink-tertiary">
+                          {f.model}{f.estCostUsd != null && <> · ${f.estCostUsd.toFixed(4)}</>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

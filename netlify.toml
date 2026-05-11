@@ -46,6 +46,12 @@
 [functions."cron-followups"]
   schedule = "30 9 * * *"
 
+# Daily at 10:00 UTC: scan inbound leads where the AI auto-reply was sent
+# 3+ days ago and the buyer hasn't responded. Generates a shorter second
+# AI touch + sends via Postmark.
+[functions."cron-lead-followups"]
+  schedule = "0 10 * * *"
+
 # Every 6 hours (offset by 2h from the pipeline cron so they don't overlap):
 # auto-release escrow on delivered transactions that have aged past the
 # AUTO_RELEASE_HOURS window (default 168h = 7 days) without a dispute.
