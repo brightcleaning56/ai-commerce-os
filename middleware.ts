@@ -79,11 +79,20 @@ function isPublic(pathname: string): boolean {
  * authenticated users could see stale snapshots from earlier requests.
  * private + no-store + must-revalidate keeps every authenticated render
  * fresh and never reusable across users.
+ *
+ * Also sends Clear-Site-Data: "cache" once per request — this tells the
+ * BROWSER to purge any locally-cached HTTP responses for this origin
+ * before processing the new one. Without it, an existing browser cache
+ * from before this fix shipped would keep serving stale /leads HTML
+ * (with the old buggy JS bundle that silently failed cookie auth) for
+ * up to its original TTL. Clear-Site-Data forces a clean slate per
+ * authenticated request, at the small cost of an extra cache miss.
  */
 function withNoCDNCache(res: NextResponse): NextResponse {
   res.headers.set("Cache-Control", "private, no-store, no-cache, must-revalidate, max-age=0");
   res.headers.set("CDN-Cache-Control", "no-store");
   res.headers.set("Netlify-CDN-Cache-Control", "no-store");
+  res.headers.set("Clear-Site-Data", '"cache"');
   return res;
 }
 
