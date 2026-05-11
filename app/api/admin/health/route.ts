@@ -60,6 +60,14 @@ export async function GET(req: Request) {
       firstViewWebhookSigned: !!process.env.SHARE_FIRSTVIEW_WEBHOOK_SECRET,
       sentryConfigured: !!process.env.SENTRY_DSN,
       storeBackend: backend.name,
+      // ── Setup-status surface (consumed by /admin Setup panel) ────────
+      stripeConfigured: !!process.env.STRIPE_SECRET_KEY,
+      stripeLive:
+        !!process.env.STRIPE_SECRET_KEY &&
+        process.env.STRIPE_SECRET_KEY.startsWith("sk_live_") &&
+        process.env.STRIPE_LIVE === "true",
+      bookingUrl: !!(process.env.BOOKING_URL ?? "").trim(),
+      operatorEmail: !!process.env.OPERATOR_EMAIL,
     },
     counts: {
       drafts: drafts.length,

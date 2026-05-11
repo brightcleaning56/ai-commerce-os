@@ -35,11 +35,18 @@ type Health = {
   config: {
     anthropic: boolean;
     cronEnabled: boolean;
+    cronSecretEnabled?: boolean;
+    adminTokenEnabled?: boolean;
     emailLive: boolean;
     emailProvider: string;
     smsLive: boolean;
+    smsConfigured?: boolean;
     sentryConfigured: boolean;
     storeBackend: string;
+    stripeConfigured?: boolean;
+    stripeLive?: boolean;
+    bookingUrl?: boolean;
+    operatorEmail?: boolean;
   };
   counts: {
     drafts: number;
@@ -180,6 +187,9 @@ export default function AdminPage() {
           hint={health ? `${health.counts.cronRuns} cron runs total` : "Loading…"}
         />
       </div>
+
+      {/* Setup status — checklist of what's wired vs missing */}
+      {health && <SetupStatus health={health} />}
 
       {/* AI health — surfaces when agents are silently falling back */}
       {health?.aiHealth && health.aiHealth.status !== "ok" && (
@@ -495,6 +505,205 @@ function ConfigRow({ label, enabled, hint }: { label: string; enabled: boolean; 
       <div className="flex-1 min-w-0">
         <div className="text-xs font-semibold">{label}</div>
         <div className="truncate text-[11px] text-ink-tertiary">{hint}</div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Setup status panel — checklist of required + optional integrations with
+ * action links. Surfaces what's live, what's degraded (e.g. configured but
+ * test-mode), and what's missing entirely. The goal is one glance to know
+ * "what's left to make this fully production-grade".
+ */
+type SetupItem = {
+  label: string;
+  status: "ok" | "pending" | "missing";
+  detail: string;
+  action?: { label: string; href: string };
+  required: boolean;
+};
+
+function SetupStatus({ health }: { health: Health }) {
+  const c = health.config;
+  const items: SetupItem[] = [
+    {
+      label: "Persistent storage",
+      status: c.storeBackend === "blobs" || c.storeBackend === "kv" ? "ok" : "pending",
+      detail:
+        c.storeBackend === "blobs"
+          ? "Netlify Blobs — survives deploys"
+          : c.storeBackend === "kv"
+            ? "KV — survives deploys"
+            : "File backend — data resets on every deploy",
+      action: c.storeBackend === "file"
+        ? { label: "Switch to Blobs", href: "https://app.netlify.com/projects/ai-commerce-os/configuration/env" }
+        : undefined,
+      required: true,
+    },
+    {
+      label: "Admin auth (ADMIN_TOKEN)",
+      status: c.adminTokenEnabled ? "ok" : "missing",
+      detail: c.adminTokenEnabled ? "Token-gated admin + APIs" : "ALL admin routes are open — set ADMIN_TOKEN immediately",
+      required: true,
+    },
+    {
+      label: "Anthropic API",
+      status: c.anthropic ? "ok" : "missing",
+      detail: c.anthropic ? "Live agents firing" : "Falls back to deterministic stubs without ANTHROPIC_API_KEY",
+      action: c.anthropic ? undefined : { label: "Get key", href: "https://platform.claude.com/settings/keys" },
+      required: true,
+    },
+    {
+      label: "Email delivery",
+      status: c.emailLive ? "ok" : c.emailProvider !== "simulated" ? "pending" : "missing",
+      detail: c.emailLive
+        ? `Live via ${c.emailProvider}`
+        : c.emailProvider !== "simulated"
+          ? `${c.emailProvider} configured but EMAIL_LIVE=false — flip to true to actually send`
+          : "Simulated only — set POSTMARK_TOKEN or RESEND_TOKEN + EMAIL_LIVE=true",
+      action: c.emailProvider === "simulated"
+        ? { label: "Set up Postmark", href: "https://account.postmarkapp.com/sign_up" }
+        : undefined,
+      required: true,
+    },
+    {
+      label: "Operator notifications (OPERATOR_EMAIL)",
+      status: c.operatorEmail ? "ok" : "missing",
+      detail: c.operatorEmail ? "Lead alerts + daily digest sent here" : "No email set — you won't get lead alerts",
+      required: true,
+    },
+    {
+      label: "Stripe Connect",
+      status: c.stripeLive ? "ok" : c.stripeConfigured ? "pending" : "missing",
+      detail: c.stripeLive
+        ? "Live mode — destination charges enabled"
+        : c.stripeConfigured
+          ? "Sandbox/test mode — set STRIPE_SECRET_KEY to sk_live_... + STRIPE_LIVE=true to enable real money"
+          : "Not configured — buyers can't actually pay",
+      action: c.stripeConfigured ? undefined : { label: "Get Stripe keys", href: "https://dashboard.stripe.com/test/apikeys" },
+      required: false,
+    },
+    {
+      label: "SMS (Twilio)",
+      status: c.smsLive ? "ok" : c.smsConfigured ? "pending" : "missing",
+      detail: c.smsLive
+        ? "Live — leads with phone get an SMS too"
+        : c.smsConfigured
+          ? "Twilio configured but SMS_LIVE!=true — flip to enable"
+          : "Not configured — SMS path skips cleanly",
+      action: c.smsConfigured ? undefined : { label: "Get Twilio creds", href: "https://www.twilio.com/console" },
+      required: false,
+    },
+    {
+      label: "Cron secret",
+      status: c.cronSecretEnabled ? "ok" : "pending",
+      detail: c.cronSecretEnabled
+        ? "Cron endpoints gated by Bearer token"
+        : "Cron endpoints publicly hittable — set CRON_SECRET to lock down",
+      required: false,
+    },
+    {
+      label: "Booking link",
+      status: c.bookingUrl ? "ok" : "missing",
+      detail: c.bookingUrl
+        ? "AI replies include your Calendly/Cal.com link"
+        : "AI asks leads for two times instead of linking — add BOOKING_URL to insert a real link",
+      required: false,
+    },
+    {
+      label: "Error tracking (Sentry)",
+      status: c.sentryConfigured ? "ok" : "missing",
+      detail: c.sentryConfigured ? "Errors auto-captured" : "Production errors only logged to Netlify — add SENTRY_DSN for alerts",
+      required: false,
+    },
+  ];
+
+  const required = items.filter((i) => i.required);
+  const optional = items.filter((i) => !i.required);
+  const requiredOk = required.filter((i) => i.status === "ok").length;
+  const optionalOk = optional.filter((i) => i.status === "ok").length;
+  const allRequired = requiredOk === required.length;
+  const pct = Math.round((requiredOk / required.length) * 100);
+
+  return (
+    <div
+      className={`rounded-xl border p-5 ${
+        allRequired
+          ? "border-accent-green/30 bg-gradient-to-br from-accent-green/5 to-transparent"
+          : "border-accent-amber/30 bg-gradient-to-br from-accent-amber/5 to-transparent"
+      }`}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div
+            className={`grid h-10 w-10 place-items-center rounded-lg ${
+              allRequired ? "bg-accent-green/15" : "bg-accent-amber/15"
+            }`}
+          >
+            <ShieldCheck className={`h-5 w-5 ${allRequired ? "text-accent-green" : "text-accent-amber"}`} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold">
+              Setup: {requiredOk}/{required.length} required wired{" "}
+              <span className="text-ink-tertiary font-normal">· {optionalOk}/{optional.length} optional</span>
+            </div>
+            <div className="text-[11px] text-ink-tertiary">
+              {allRequired
+                ? "All required systems live. Optional integrations below add features but aren't blockers."
+                : "Finish the required items below to make the platform fully production-grade."}
+            </div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className={`text-2xl font-bold ${allRequired ? "text-accent-green" : "text-accent-amber"}`}>{pct}%</div>
+          <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">required ready</div>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+        {items.map((item) => {
+          const tone =
+            item.status === "ok"
+              ? "border-accent-green/20 bg-accent-green/5"
+              : item.status === "pending"
+                ? "border-accent-amber/20 bg-accent-amber/5"
+                : item.required
+                  ? "border-accent-red/20 bg-accent-red/5"
+                  : "border-bg-border bg-bg-hover/20";
+          const dot =
+            item.status === "ok"
+              ? "bg-accent-green"
+              : item.status === "pending"
+                ? "bg-accent-amber"
+                : item.required
+                  ? "bg-accent-red"
+                  : "bg-ink-tertiary";
+          return (
+            <div key={item.label} className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${tone}`}>
+              <div className={`mt-1 h-2 w-2 shrink-0 rounded-full ${dot}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold">{item.label}</span>
+                  {!item.required && (
+                    <span className="text-[9px] uppercase tracking-wider text-ink-tertiary">optional</span>
+                  )}
+                </div>
+                <div className="text-[11px] text-ink-tertiary">{item.detail}</div>
+                {item.action && (
+                  <a
+                    href={item.action.href}
+                    target={item.action.href.startsWith("http") ? "_blank" : undefined}
+                    rel={item.action.href.startsWith("http") ? "noopener noreferrer" : undefined}
+                    className="mt-1 inline-block text-[11px] font-semibold text-brand-300 hover:text-brand-200"
+                  >
+                    {item.action.label} →
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
