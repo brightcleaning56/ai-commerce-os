@@ -1,3 +1,4 @@
+import { getStore as getNetlifyStore } from "@netlify/blobs";
 import type { StoreBackend } from "./types";
 
 /**
@@ -51,14 +52,9 @@ export class BlobsBackend implements StoreBackend {
     if (this.storePromise) return this.storePromise;
     this.storePromise = (async () => {
       try {
-        const mod = (await import(/* webpackIgnore: true */ "@netlify/blobs")) as unknown as {
-          getStore?: (name: string) => RawStore;
-        };
-        if (!mod.getStore) {
-          throw new Error("[store/blobs] @netlify/blobs is installed but does not export getStore");
-        }
-        const raw = mod.getStore("avyn-data");
-        // Wrap so set/delete return Promise<void> regardless of internal richness.
+        // Cast through unknown so the strict @netlify/blobs Store signature
+        // narrows to our minimal RawStore (we only use get/set/delete).
+        const raw = getNetlifyStore("avyn-data") as unknown as RawStore;
         return {
           get: (k) => raw.get(k),
           set: async (k, v) => { await raw.set(k, v); },
