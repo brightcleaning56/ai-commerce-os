@@ -44,16 +44,29 @@ export function requireAdmin(req: { headers: Headers } | Request): AuthResult {
     return { ok: true, mode: "dev" };
   }
 
+  // 1. Authorization header (programmatic API access)
   const auth = req.headers.get("authorization") ?? "";
-  // Support both "Bearer X" and bare "X" forms
-  const presented = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : auth;
-  if (!presented) {
-    return { ok: false, status: 401, reason: "Missing Authorization header" };
-  }
-  if (!constantTimeEquals(presented, expected)) {
+  const headerToken = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : auth;
+  if (headerToken) {
+    if (constantTimeEquals(headerToken, expected)) return { ok: true, mode: "production" };
     return { ok: false, status: 401, reason: "Invalid admin token" };
   }
-  return { ok: true, mode: "production" };
+
+  // 2. Fall back to the session cookie (browser fetch from an authenticated page).
+  // Middleware already validated this cookie at the edge to route the request
+  // here, but route handlers re-validate as defense-in-depth — this also makes
+  // it work in environments where middleware is bypassed (e.g. local tests).
+  // Without this branch, cookie-authenticated browsers got 401 from every
+  // route that called requireAdmin (leads, admin/health, transactions/stats…)
+  // and pages would silently render as if the data were empty.
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const match = /(?:^|;\s*)aicos_admin=([^;]+)/.exec(cookieHeader);
+  const cookieToken = match ? decodeURIComponent(match[1]) : "";
+  if (cookieToken && constantTimeEquals(cookieToken, expected)) {
+    return { ok: true, mode: "production" };
+  }
+
+  return { ok: false, status: 401, reason: "Missing Authorization header or session cookie" };
 }
 
 /**
