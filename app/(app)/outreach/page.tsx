@@ -1165,11 +1165,92 @@ type LiveCampaign = {
   ownerAgent: "Outreach Agent";
 };
 
+type LeaderboardRow = {
+  label: string;
+  sent: number;
+  replied: number;
+  replyRatePct: number;
+  avgHoursToReply: number | null;
+  confident: boolean;
+};
+
+type LiveInsights = {
+  hasAnyData: boolean;
+  totalSent: number;
+  totalReplied: number;
+  overallReplyRatePct: number;
+  byChannel: LeaderboardRow[];
+  byModel: LeaderboardRow[];
+  byDayOfWeek: LeaderboardRow[];
+  bestSubjects: LeaderboardRow[];
+};
+
+function Leaderboard({
+  title,
+  rows,
+  empty,
+  showAvgTime,
+}: {
+  title: string;
+  rows: LeaderboardRow[];
+  empty: string;
+  showAvgTime?: boolean;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg border border-bg-border bg-bg-app/40 p-3">
+        <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{title}</div>
+        <div className="mt-2 text-[11px] text-ink-tertiary">{empty}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-bg-border bg-bg-app/40 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{title}</div>
+      <div className="mt-2 space-y-1.5">
+        {rows.map((r) => (
+          <div
+            key={r.label}
+            className={`flex items-center justify-between gap-2 text-xs ${
+              r.confident ? "text-ink-primary" : "text-ink-tertiary"
+            }`}
+            title={
+              r.confident
+                ? `${r.replied}/${r.sent} replied`
+                : `Only ${r.sent} sent — need 5+ for confidence`
+            }
+          >
+            <span className="truncate font-medium">{r.label}</span>
+            <span className="flex items-center gap-2 text-[11px]">
+              {showAvgTime && r.avgHoursToReply !== null && (
+                <span className="text-ink-tertiary">~{r.avgHoursToReply}h</span>
+              )}
+              <span
+                className={
+                  r.confident && r.replyRatePct >= 20
+                    ? "font-semibold text-accent-green"
+                    : r.confident && r.replyRatePct >= 10
+                      ? "font-semibold text-accent-cyan"
+                      : "font-semibold"
+                }
+              >
+                {r.replyRatePct}%
+              </span>
+              <span className="text-ink-tertiary">({r.replied}/{r.sent})</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function OutreachPage() {
   const [open, setOpen] = useState<Campaign | null>(null);
   const [drafts, setDrafts] = useState<DraftItem[]>([]);
   const [liveStats, setLiveStats] = useState<LiveOutreachStats | null>(null);
   const [liveCampaigns, setLiveCampaigns] = useState<LiveCampaign[] | null>(null);
+  const [liveInsights, setLiveInsights] = useState<LiveInsights | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -1194,9 +1275,20 @@ export default function OutreachPage() {
         if (!cancelled) setLiveCampaigns([]);
       }
     }
+    async function loadInsights() {
+      try {
+        const r = await fetch("/api/outreach/insights", { cache: "no-store" });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!cancelled) setLiveInsights(d.insights ?? null);
+      } catch {
+        if (!cancelled) setLiveInsights(null);
+      }
+    }
     loadStats();
     loadCampaigns();
-    const id = setInterval(() => { loadStats(); loadCampaigns(); }, 30_000);
+    loadInsights();
+    const id = setInterval(() => { loadStats(); loadCampaigns(); loadInsights(); }, 30_000);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
@@ -1445,6 +1537,50 @@ export default function OutreachPage() {
                 + {drafts.length - 5} more drafts
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Outreach Insights — what's actually working, derived from real sends */}
+      {liveInsights && liveInsights.hasAnyData && (
+        <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Sparkles className="h-3.5 w-3.5 text-brand-300" />
+              What&apos;s working
+              <span className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-accent-green">
+                Live
+              </span>
+            </div>
+            <span className="text-[11px] text-ink-tertiary">
+              {liveInsights.totalReplied} replies on {liveInsights.totalSent} sends
+              {" · "}
+              <span className="text-ink-secondary">{liveInsights.overallReplyRatePct}% overall</span>
+            </span>
+          </div>
+          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+            <Leaderboard
+              title="By channel"
+              rows={liveInsights.byChannel}
+              empty="No sends yet"
+              showAvgTime
+            />
+            <Leaderboard
+              title="By model"
+              rows={liveInsights.byModel}
+              empty="No sends yet"
+            />
+            <Leaderboard
+              title="By day of week"
+              rows={liveInsights.byDayOfWeek}
+              empty="No sends yet"
+            />
+            <Leaderboard
+              title="Best subjects (3+ sends)"
+              rows={liveInsights.bestSubjects}
+              empty="Need 3+ sends per subject pattern to rank"
+              showAvgTime
+            />
           </div>
         </div>
       )}
