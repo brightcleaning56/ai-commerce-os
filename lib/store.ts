@@ -23,6 +23,7 @@ const QUOTES_FILE = "quotes.json";
 const SPEND_LEDGER_FILE = "spend-ledger.json";
 const TRANSACTIONS_FILE = "transactions.json";
 const REVENUE_LEDGER_FILE = "revenue-ledger.json";
+const LEADS_FILE = "leads.json";
 
 // ─── Backend selection ─────────────────────────────────────────────────────
 // STORE_BACKEND=kv  →  Vercel KV / Upstash (production)
@@ -54,6 +55,7 @@ const all_keys = [
   PRODUCTS_FILE, RUNS_FILE, SIGNALS_FILE, BUYERS_FILE, DRAFTS_FILE,
   SUPPLIERS_FILE, CRON_RUNS_FILE, RISK_FLAGS_FILE, PIPELINE_RUNS_FILE,
   QUOTES_FILE, SPEND_LEDGER_FILE, TRANSACTIONS_FILE, REVENUE_LEDGER_FILE,
+  LEADS_FILE,
 ];
 
 /**
@@ -499,6 +501,34 @@ export type CronRun = {
   errorMessage?: string;
 };
 
+export type LeadStatus = "new" | "contacted" | "qualified" | "won" | "lost";
+
+export type Lead = {
+  id: string;
+  createdAt: string;        // ISO
+  updatedAt: string;        // ISO
+  // Step 0 — Business Details
+  name: string;
+  email: string;
+  company: string;
+  phone?: string;
+  companySize?: string;     // e.g. "11–50"
+  industry?: string;        // e.g. "Wholesale / B2B"
+  // Step 1 — Requirements
+  useCases: string[];       // ids from USE_CASES on /contact
+  timeline?: string;        // e.g. "Within 1 month"
+  budget?: string;
+  // Step 2 — Solutions
+  message?: string;
+  // Operator-side
+  source: "contact-form";   // future: "demo-page", "share-link", etc.
+  status: LeadStatus;
+  notes?: string;           // internal operator notes
+  // Light fingerprint for spam triage
+  ipHash?: string;
+  userAgent?: string;
+};
+
 export type ThreadMessage = {
   id: string;
   role: "agent" | "buyer";
@@ -674,6 +704,28 @@ export const store = {
     const existing = await store.getRiskFlags();
     const all = [...flags, ...existing].slice(0, 200);
     await getBackend().write(RISK_FLAGS_FILE, all);
+  },
+
+  // Inbound leads from /contact
+  async getLeads(): Promise<Lead[]> {
+    return getBackend().read<Lead[]>(LEADS_FILE, []);
+  },
+  async getLead(id: string): Promise<Lead | null> {
+    const all = await store.getLeads();
+    return all.find((l) => l.id === id) ?? null;
+  },
+  async addLead(lead: Lead): Promise<void> {
+    const existing = await store.getLeads();
+    const all = [lead, ...existing].slice(0, 1000);
+    await getBackend().write(LEADS_FILE, all);
+  },
+  async updateLead(id: string, patch: Partial<Lead>): Promise<Lead | null> {
+    const existing = await store.getLeads();
+    const idx = existing.findIndex((l) => l.id === id);
+    if (idx === -1) return null;
+    existing[idx] = { ...existing[idx], ...patch, id: existing[idx].id, updatedAt: new Date().toISOString() };
+    await getBackend().write(LEADS_FILE, existing);
+    return existing[idx];
   },
 
   // Pipeline runs (snapshots for /share/[id])

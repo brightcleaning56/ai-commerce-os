@@ -1,0 +1,328 @@
+"use client";
+import {
+  Building2,
+  CheckCircle2,
+  Clock,
+  Inbox,
+  Mail,
+  Phone,
+  RefreshCw,
+  Search,
+  XCircle,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useToast } from "@/components/Toast";
+
+type LeadStatus = "new" | "contacted" | "qualified" | "won" | "lost";
+type Lead = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  name: string;
+  email: string;
+  company: string;
+  phone?: string;
+  companySize?: string;
+  industry?: string;
+  useCases: string[];
+  timeline?: string;
+  budget?: string;
+  message?: string;
+  source: "contact-form";
+  status: LeadStatus;
+  notes?: string;
+};
+
+const STATUS_TONE: Record<LeadStatus, { bg: string; text: string }> = {
+  new:        { bg: "bg-brand-500/15",       text: "text-brand-200" },
+  contacted:  { bg: "bg-accent-blue/15",     text: "text-accent-blue" },
+  qualified:  { bg: "bg-accent-amber/15",    text: "text-accent-amber" },
+  won:        { bg: "bg-accent-green/15",    text: "text-accent-green" },
+  lost:       { bg: "bg-bg-hover",           text: "text-ink-tertiary" },
+};
+
+const STATUS_ORDER: LeadStatus[] = ["new", "contacted", "qualified", "won", "lost"];
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+export default function LeadsPage() {
+  const [leads, setLeads] = useState<Lead[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState<"all" | LeadStatus>("all");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Lead | null>(null);
+  const { toast } = useToast();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch("/api/leads", { cache: "no-store" });
+      if (r.ok) {
+        const d = await r.json();
+        setLeads(d.leads ?? []);
+      } else {
+        setLeads((p) => p ?? []);
+      }
+    } catch {
+      setLeads((p) => p ?? []);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const counts = useMemo(() => {
+    const c: Record<LeadStatus, number> & { all: number } = {
+      all: 0, new: 0, contacted: 0, qualified: 0, won: 0, lost: 0,
+    };
+    for (const l of leads ?? []) { c.all += 1; c[l.status] += 1; }
+    return c;
+  }, [leads]);
+
+  const visible = useMemo(() => {
+    if (!leads) return [];
+    return leads.filter((l) => {
+      if (filter !== "all" && l.status !== filter) return false;
+      if (query) {
+        const q = query.toLowerCase();
+        if (
+          !l.name.toLowerCase().includes(q) &&
+          !l.email.toLowerCase().includes(q) &&
+          !l.company.toLowerCase().includes(q)
+        ) return false;
+      }
+      return true;
+    });
+  }, [leads, filter, query]);
+
+  async function setStatus(lead: Lead, next: LeadStatus) {
+    try {
+      const r = await fetch(`/api/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: next }),
+      });
+      if (!r.ok) throw new Error(`PATCH failed (${r.status})`);
+      const d = await r.json();
+      setLeads((all) => (all ?? []).map((l) => (l.id === lead.id ? d.lead : l)));
+      if (selected?.id === lead.id) setSelected(d.lead);
+      toast(`Marked ${next}`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Update failed", "error");
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-brand shadow-glow">
+            <Inbox className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold">Leads</h1>
+            <p className="text-xs text-ink-secondary">
+              {counts.all} total · {counts.new} new · {counts.contacted} contacted · {counts.qualified} qualified · {counts.won} won · captured from /contact
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-tertiary" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name, email, or company…"
+            className="h-9 w-full rounded-lg border border-bg-border bg-bg-card pl-9 pr-3 text-sm placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs">
+          {(["all", ...STATUS_ORDER] as const).map((k) => {
+            const n = k === "all" ? counts.all : counts[k];
+            return (
+              <button
+                key={k}
+                onClick={() => setFilter(k)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 ${
+                  filter === k ? "bg-brand-500/15 text-brand-200" : "text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+                }`}
+              >
+                {k === "all" ? "All" : k.charAt(0).toUpperCase() + k.slice(1)}
+                <span className={`rounded ${filter === k ? "bg-brand-500/20" : "bg-bg-hover"} px-1.5 text-[10px]`}>
+                  {n}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+        <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+          {leads === null ? (
+            <div className="px-5 py-12 text-center text-xs text-ink-tertiary">Loading…</div>
+          ) : leads.length === 0 ? (
+            <div className="px-5 py-12 text-center">
+              <Inbox className="mx-auto h-8 w-8 text-ink-tertiary" />
+              <div className="mt-3 text-base font-semibold">No leads yet</div>
+              <p className="mt-1 text-xs text-ink-tertiary">
+                Submissions from <code className="rounded bg-bg-hover px-1">/contact</code> will appear here.
+              </p>
+            </div>
+          ) : visible.length === 0 ? (
+            <div className="px-5 py-12 text-center text-xs text-ink-tertiary">No leads match your filters.</div>
+          ) : (
+            <ul className="divide-y divide-bg-border">
+              {visible.map((l) => {
+                const tone = STATUS_TONE[l.status];
+                const active = selected?.id === l.id;
+                return (
+                  <li key={l.id}>
+                    <button
+                      onClick={() => setSelected(l)}
+                      className={`w-full px-5 py-3 text-left transition hover:bg-bg-hover/40 ${active ? "bg-bg-hover/40" : ""}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate text-sm font-semibold">{l.name}</span>
+                            <span className="text-[11px] text-ink-tertiary">·</span>
+                            <span className="truncate text-[12px] text-ink-secondary">{l.company}</span>
+                          </div>
+                          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-ink-tertiary">
+                            <Mail className="h-3 w-3" /> {l.email}
+                            {l.phone && (<><span>·</span><Phone className="h-3 w-3" /> {l.phone}</>)}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${tone.bg} ${tone.text}`}>
+                            {l.status}
+                          </span>
+                          <span className="text-[10px] text-ink-tertiary">{relativeTime(l.createdAt)}</span>
+                        </div>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        <aside className="rounded-xl border border-bg-border bg-bg-card p-5">
+          {selected ? (
+            <div className="space-y-4">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Lead</div>
+                <div className="text-lg font-bold">{selected.name}</div>
+                <div className="text-xs text-ink-secondary">
+                  <Building2 className="mr-1 inline h-3 w-3" /> {selected.company}
+                  {selected.industry && <span className="text-ink-tertiary"> · {selected.industry}</span>}
+                  {selected.companySize && <span className="text-ink-tertiary"> · {selected.companySize}</span>}
+                </div>
+              </div>
+
+              <div className="space-y-1.5 rounded-lg border border-bg-border bg-bg-hover/30 p-3 text-xs">
+                <a href={`mailto:${selected.email}`} className="flex items-center gap-2 text-brand-300 hover:text-brand-200">
+                  <Mail className="h-3 w-3" /> {selected.email}
+                </a>
+                {selected.phone && (
+                  <a href={`tel:${selected.phone}`} className="flex items-center gap-2 text-brand-300 hover:text-brand-200">
+                    <Phone className="h-3 w-3" /> {selected.phone}
+                  </a>
+                )}
+                <div className="flex items-center gap-2 text-ink-tertiary">
+                  <Clock className="h-3 w-3" /> received {relativeTime(selected.createdAt)}
+                </div>
+              </div>
+
+              {selected.useCases.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Interested in</div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {selected.useCases.map((u) => (
+                      <span key={u} className="rounded-md bg-bg-hover px-2 py-0.5 text-[11px] text-ink-secondary">
+                        {u}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(selected.timeline || selected.budget) && (
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {selected.timeline && (
+                    <div className="rounded-md border border-bg-border bg-bg-hover/30 p-2">
+                      <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Timeline</div>
+                      <div className="mt-0.5 font-medium">{selected.timeline}</div>
+                    </div>
+                  )}
+                  {selected.budget && (
+                    <div className="rounded-md border border-bg-border bg-bg-hover/30 p-2">
+                      <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Budget</div>
+                      <div className="mt-0.5 font-medium">{selected.budget}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selected.message && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Message</div>
+                  <div className="mt-1 whitespace-pre-wrap rounded-md border border-bg-border bg-bg-hover/20 p-3 text-xs text-ink-secondary">
+                    {selected.message}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <div className="mb-1.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Status</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {STATUS_ORDER.map((s) => {
+                    const tone = STATUS_TONE[s];
+                    const active = selected.status === s;
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => setStatus(selected, s)}
+                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                          active ? `${tone.bg} ${tone.text}` : "border border-bg-border bg-bg-hover/40 text-ink-secondary hover:bg-bg-hover"
+                        }`}
+                      >
+                        {s === "won" && <CheckCircle2 className="mr-1 inline h-3 w-3" />}
+                        {s === "lost" && <XCircle className="mr-1 inline h-3 w-3" />}
+                        {s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid h-full place-items-center px-3 py-12 text-center text-xs text-ink-tertiary">
+              Select a lead to see the full intake and update status.
+            </div>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+}

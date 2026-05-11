@@ -289,6 +289,10 @@ export default function ContactPage() {
   // Step 2 — Solutions
   const [message, setMessage]   = useState("");
 
+  // Submission state
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
   const toggleUseCase = (id: string) =>
     setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
 
@@ -298,6 +302,33 @@ export default function ContactPage() {
     if (step === 2) return true;
     return true;
   })();
+
+  async function submitLead() {
+    if (submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name, email, company, phone,
+          companySize: size, industry,
+          useCases: selected, timeline, budget,
+          message,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${res.status})`);
+      }
+      setDone(true);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Failed to submit. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   // ── Success screen ────────────────────────────────────────────────────────────
   if (done) {
@@ -584,18 +615,26 @@ export default function ContactPage() {
               <button
                 onClick={() => {
                   if (step < STEPS.length - 1) setStep((s) => s + 1);
-                  else setDone(true);
+                  else void submitLead();
                 }}
-                disabled={!canNext}
+                disabled={!canNext || submitting}
                 className="inline-flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white transition-all disabled:opacity-30"
                 style={{
                   background: "linear-gradient(135deg, #7c3aed, #4f46e5)",
-                  boxShadow: canNext ? "0 0 28px rgba(124,58,237,0.45)" : "none",
+                  boxShadow: canNext && !submitting ? "0 0 28px rgba(124,58,237,0.45)" : "none",
                 }}>
-                {step === STEPS.length - 1 ? "Submit Request" : `Next Step: ${STEPS[step + 1]?.label}`}
+                {step === STEPS.length - 1
+                  ? (submitting ? "Submitting…" : "Submit Request")
+                  : `Next Step: ${STEPS[step + 1]?.label}`}
                 <ArrowRight className="h-4 w-4" />
               </button>
             </div>
+            {submitError && (
+              <div className="mt-3 rounded-lg border px-3 py-2 text-[12px]"
+                style={{ borderColor: "rgba(239,68,68,0.4)", background: "rgba(239,68,68,0.08)", color: "#fca5a5" }}>
+                {submitError}
+              </div>
+            )}
             <p className="mt-3 text-[11px]" style={{ color: "rgba(255,255,255,0.25)" }}>
               <Lock className="mr-1 inline h-3 w-3" /> Your data is secure and encrypted
             </p>
