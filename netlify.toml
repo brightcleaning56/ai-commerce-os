@@ -64,6 +64,13 @@
 [functions."cron-daily-digest"]
   schedule = "0 9 * * *"
 
+# Hourly at :15 — sweep for any unpromoted leads scoring at/above
+# AUTO_PROMOTE_LEAD_SCORE (default 70). Belt-and-suspenders for the
+# synchronous auto-promote path on /api/leads. Bounded scan: last 30 days,
+# excludes won/lost/already-promoted leads.
+[functions."cron-auto-promote-sweep"]
+  schedule = "15 * * * *"
+
 # ─── Headers ───────────────────────────────────────────────────────────────
 # Defense-in-depth: deny framing of the operator dashboard, declare strict
 # content security on the marketing landing.
