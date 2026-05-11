@@ -110,17 +110,20 @@ export async function POST(req: NextRequest) {
 
   await store.addLead(lead);
 
-  // Fire-and-forget operator notification — don't block the response on email.
-  void notifyOperator(lead).catch((err) => {
-    console.error("[leads] operator notification failed", err);
-  });
-
-  // Fire-and-forget AI auto-reply to the lead. Doesn't block the form submit
-  // response so the user sees "Request received" instantly while we generate
-  // + send the personalized first-touch in the background.
-  void autoReplyToLead(lead).catch((err) => {
-    console.error("[leads] auto-reply failed", err);
-  });
+  // CRITICAL: do NOT fire-and-forget on Netlify. Lambdas terminate as soon
+  // as the response is returned — any in-flight `void promise` is killed
+  // before the work completes, so the AI reply never sends and the lead
+  // stays stuck at aiReply.status = "pending". Awaiting both in parallel
+  // keeps total latency ~3-5s (Anthropic dominates) and well under the
+  // 10s function timeout. If either fails the lead is still saved.
+  await Promise.allSettled([
+    notifyOperator(lead).catch((err) => {
+      console.error("[leads] operator notification failed", err);
+    }),
+    autoReplyToLead(lead).catch((err) => {
+      console.error("[leads] auto-reply failed", err);
+    }),
+  ]);
 
   return NextResponse.json({ ok: true, id: lead.id });
 }
