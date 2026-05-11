@@ -2,6 +2,7 @@ import type { Buyer } from "@/lib/buyers";
 import type { Product } from "@/lib/products";
 import type { ScrapeResult } from "@/lib/scrapers";
 import type { Supplier } from "@/lib/suppliers";
+import { BlobsBackend } from "@/lib/store-backends/blobs";
 import { FileBackend } from "@/lib/store-backends/file";
 import { KvBackend } from "@/lib/store-backends/kv";
 import type { StoreBackend } from "@/lib/store-backends/types";
@@ -26,8 +27,10 @@ const REVENUE_LEDGER_FILE = "revenue-ledger.json";
 const LEADS_FILE = "leads.json";
 
 // ─── Backend selection ─────────────────────────────────────────────────────
-// STORE_BACKEND=kv  →  Vercel KV / Upstash (production)
-// STORE_BACKEND=file (default) → JSON files in ./data or /tmp on Vercel
+// STORE_BACKEND=blobs → Netlify Blobs (recommended for Netlify deploys)
+// STORE_BACKEND=kv    → Vercel KV / Upstash Redis
+// STORE_BACKEND=file (default) → JSON files in ./data or /tmp on Vercel/Netlify
+//   ⚠️ /tmp is ephemeral on serverless — do NOT use file in production.
 //
 // Once chosen, the backend is a singleton for the lifetime of the lambda.
 // Switching at runtime is not supported — restart with new env vars.
@@ -36,7 +39,9 @@ let _backend: StoreBackend | null = null;
 export function getBackend(): StoreBackend {
   if (_backend) return _backend;
   const choice = (process.env.STORE_BACKEND ?? "file").toLowerCase();
-  if (choice === "kv" || choice === "vercel-kv" || choice === "upstash") {
+  if (choice === "blobs" || choice === "netlify-blobs") {
+    _backend = new BlobsBackend();
+  } else if (choice === "kv" || choice === "vercel-kv" || choice === "upstash") {
     _backend = new KvBackend();
   } else {
     _backend = new FileBackend();
