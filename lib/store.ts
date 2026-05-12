@@ -1651,6 +1651,19 @@ export const store = {
     await getBackend().write(EMAIL_SUPPRESSIONS_FILE, next);
     return created;
   },
+  /**
+   * Manually remove an email from the suppression list. Use SPARINGLY —
+   * only when the operator has explicit re-opt-in consent (e.g. the
+   * recipient replied saying "add me back"). Removing without consent
+   * is a CAN-SPAM violation.
+   */
+  async removeEmailSuppression(id: string): Promise<boolean> {
+    const all = await store.getEmailSuppressions();
+    const next = all.filter((s) => s.id !== id);
+    if (next.length === all.length) return false;
+    await getBackend().write(EMAIL_SUPPRESSIONS_FILE, next);
+    return true;
+  },
 
   // ─── Outreach Jobs (bulk-draft queue) ──────────────────────────────────
   async getOutreachJobs(): Promise<OutreachJob[]> {
