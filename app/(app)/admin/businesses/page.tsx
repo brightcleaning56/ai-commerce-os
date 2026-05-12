@@ -7,6 +7,7 @@ import {
   Loader2,
   MapPin,
   Search,
+  Send,
   Trash2,
   Upload,
   X,
@@ -141,7 +142,13 @@ export default function BusinessesPage() {
   const [importResult, setImportResult] = useState<ImportResponse | null>(null);
 
   const [selected, setSelected] = useState<BusinessRecord | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [draftingOutreach, setDraftingOutreach] = useState(false);
   const { toast } = useToast();
+
+  // Max batch size matches the endpoint's MAX_BUSINESSES_PER_BATCH.
+  // Operator can run the action multiple times for larger campaigns.
+  const MAX_BATCH = 25;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -226,6 +233,62 @@ export default function BusinessesPage() {
       await load();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Update failed", "error");
+    }
+  }
+
+  function toggleChecked(id: string) {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else if (next.size < MAX_BATCH) next.add(id);
+      else toast(`Batch capped at ${MAX_BATCH} — run the action and select more after.`, "info");
+      return next;
+    });
+  }
+
+  function selectAllVisible() {
+    if (!data) return;
+    setChecked((prev) => {
+      const next = new Set(prev);
+      for (const b of data.businesses) {
+        if (next.size >= MAX_BATCH) break;
+        // Don't auto-pick suppressed rows — they'd just be skipped server-side.
+        if (b.status === "do_not_contact" || b.doNotContact) continue;
+        next.add(b.id);
+      }
+      return next;
+    });
+  }
+
+  function clearChecked() {
+    setChecked(new Set());
+  }
+
+  async function draftOutreachForChecked() {
+    const ids = Array.from(checked);
+    if (ids.length === 0) return;
+    setDraftingOutreach(true);
+    try {
+      const r = await fetch("/api/admin/businesses/draft-outreach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ businessIds: ids }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Draft outreach failed (${r.status})`);
+      const drafted = d.drafted ?? 0;
+      const skipped = d.skipped ?? 0;
+      const errored = d.errored ?? 0;
+      toast(
+        `Drafted ${drafted}${skipped ? ` · skipped ${skipped}` : ""}${errored ? ` · errored ${errored}` : ""} — review in /outreach`,
+        drafted > 0 ? "success" : "info",
+      );
+      setChecked(new Set());
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Draft outreach failed", "error");
+    } finally {
+      setDraftingOutreach(false);
     }
   }
 
@@ -417,6 +480,41 @@ export default function BusinessesPage() {
         </select>
       </div>
 
+      {/* Bulk action bar — only renders when at least one row is checked */}
+      {checked.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-500/40 bg-gradient-to-r from-brand-500/10 to-transparent px-4 py-3">
+          <div className="text-[12px]">
+            <span className="font-semibold text-brand-200">{checked.size}</span>
+            <span className="text-ink-secondary"> selected</span>
+            <span className="text-ink-tertiary"> · batch cap {MAX_BATCH}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={selectAllVisible}
+              disabled={!data || data.businesses.length === 0}
+              className="rounded-lg border border-bg-border bg-bg-card px-3 py-1.5 text-[11px] hover:bg-bg-hover disabled:opacity-60"
+            >
+              Select all visible
+            </button>
+            <button
+              onClick={clearChecked}
+              className="rounded-lg border border-bg-border bg-bg-card px-3 py-1.5 text-[11px] hover:bg-bg-hover"
+            >
+              Clear
+            </button>
+            <button
+              onClick={draftOutreachForChecked}
+              disabled={draftingOutreach || checked.size === 0}
+              title="Generate a personalized AVYN-onboarding draft per business. Suppressed (DNC) rows are skipped server-side. Drafts land in /outreach for review before send."
+              className="flex items-center gap-2 rounded-lg bg-gradient-brand px-4 py-1.5 text-[12px] font-semibold shadow-glow disabled:opacity-60"
+            >
+              {draftingOutreach ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              Draft outreach for {checked.size}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
         {/* Table */}
         <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
@@ -443,6 +541,9 @@ export default function BusinessesPage() {
               <table className="min-w-full text-sm">
                 <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
                   <tr className="border-b border-bg-border">
+                    <th className="w-8 px-3 py-2.5 text-left font-medium">
+                      <span className="sr-only">Select</span>
+                    </th>
                     <th className="px-4 py-2.5 text-left font-medium">Business</th>
                     <th className="px-3 py-2.5 text-left font-medium">Location</th>
                     <th className="px-3 py-2.5 text-left font-medium">Industry</th>
@@ -453,12 +554,25 @@ export default function BusinessesPage() {
                 <tbody>
                   {(data?.businesses ?? []).map((b) => {
                     const active = selected?.id === b.id;
+                    const isChecked = checked.has(b.id);
+                    const suppressed = b.status === "do_not_contact" || b.doNotContact;
                     return (
                       <tr
                         key={b.id}
                         onClick={() => setSelected(b)}
                         className={`cursor-pointer border-t border-bg-border hover:bg-bg-hover/30 ${active ? "bg-bg-hover/40" : ""}`}
                       >
+                        <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            disabled={suppressed}
+                            onChange={() => toggleChecked(b.id)}
+                            className="h-3.5 w-3.5 cursor-pointer accent-brand-500 disabled:cursor-not-allowed disabled:opacity-40"
+                            title={suppressed ? "Suppressed (DNC) — can't include in outreach" : "Select for bulk action"}
+                            aria-label={`Select ${b.name}`}
+                          />
+                        </td>
                         <td className="px-4 py-3">
                           <div className="font-medium">{b.name}</div>
                           {b.email && (
