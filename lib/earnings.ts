@@ -1,5 +1,11 @@
 import { DEALS, type Deal } from "@/lib/deals";
-import { PLANS, CURRENT_PLAN_ID } from "@/lib/billing";
+import { PLANS } from "@/lib/billing";
+
+// Display-only default for the SAMPLE earnings page. The page itself
+// admits its rows are sample deals — when it's rebuilt to derive from
+// real transactions, this constant gets replaced by the operator's
+// actual subscription plan from /api/admin/billing.
+const SAMPLE_DEFAULT_PLAN_ID: (typeof PLANS)[number]["id"] = "growth";
 
 export const COMMISSION_TIERS = [
   { dealMin: 0, dealMax: 9_999, rate: 0.1, label: "Small (<$10K)" },
@@ -93,6 +99,6 @@ export function totals() {
     pending,
     inFlight,
     forecast: +forecast.toFixed(0),
-    plan: PLANS.find((p) => p.id === CURRENT_PLAN_ID)!,
+    plan: PLANS.find((p) => p.id === SAMPLE_DEFAULT_PLAN_ID)!,
   };
 }

@@ -1,40 +1,46 @@
 "use client";
 import {
+  AlertCircle,
   ArrowUpRight,
   Check,
   CreditCard,
-  Download,
+  ExternalLink,
   FileText,
-  Sparkles,
+  Loader2,
   X,
-  Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
-import { downloadCSV } from "@/lib/csv";
-import {
-  CURRENT_PLAN_ID,
-  INVOICES,
-  PLANS,
-  USAGE,
-  type Plan,
-} from "@/lib/billing";
+import { PLANS, type Plan } from "@/lib/billing";
 
-const STATUS_TONE: Record<string, string> = {
-  Paid: "bg-accent-green/15 text-accent-green",
-  Pending: "bg-accent-amber/15 text-accent-amber",
-  Failed: "bg-accent-red/15 text-accent-red",
+type SubscriptionState = {
+  configured: boolean;
+  mode: "none" | "test" | "live";
+  status: string;
+  planId: string | null;
+  currentPeriodEnd: string | null;
+  message: string;
 };
 
-function formatCap(c: number | null | string) {
-  if (c === null) return "Unlimited";
-  if (typeof c === "string") return c;
-  if (c >= 1_000_000) return `${(c / 1_000_000).toFixed(1)}M`;
-  if (c >= 1000) return `${(c / 1000).toFixed(0)}K`;
-  return c.toLocaleString();
-}
+type UsageItem = {
+  label: string;
+  used: number;
+  cap: number | null;
+  hint?: string;
+  unit?: string;       // e.g. "$" — prefix on display
+};
 
-function formatNum(n: number) {
+type BillingPayload = {
+  subscription: SubscriptionState;
+  usage: { monthLabel: string; items: UsageItem[] };
+  invoices: { id: string; date: string; amount: number; status: string; description: string }[];
+  invoicesNote: string;
+};
+
+function formatNum(n: number, unit?: string) {
+  if (unit === "$") {
+    return `$${n.toFixed(n < 1 ? 4 : 2)}`;
+  }
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
   return n.toLocaleString();
@@ -43,12 +49,10 @@ function formatNum(n: number) {
 function PlanCard({
   p,
   cycle,
-  current,
   onSelect,
 }: {
   p: Plan;
   cycle: "monthly" | "annual";
-  current: boolean;
   onSelect: (p: Plan) => void;
 }) {
   const price = cycle === "monthly" ? p.monthly : Math.round(p.annual / 12);
@@ -63,26 +67,16 @@ function PlanCard({
       {p.badge && (
         <span
           className={`absolute -top-3 left-6 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider ${
-            p.highlight
-              ? "bg-gradient-brand text-white"
-              : "bg-bg-hover text-ink-secondary"
+            p.highlight ? "bg-gradient-brand text-white" : "bg-bg-hover text-ink-secondary"
           }`}
         >
           {p.badge}
         </span>
       )}
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-base font-bold">{p.name}</div>
-          <div className="text-[11px] text-ink-tertiary">{p.tagline}</div>
-        </div>
-        {current && (
-          <span className="rounded-md bg-accent-green/15 px-2 py-0.5 text-[10px] font-semibold text-accent-green">
-            Current
-          </span>
-        )}
+      <div>
+        <div className="text-base font-bold">{p.name}</div>
+        <div className="text-[11px] text-ink-tertiary">{p.tagline}</div>
       </div>
-
       <div className="mt-5">
         <span className="text-3xl font-bold">${price.toLocaleString()}</span>
         <span className="text-xs text-ink-tertiary">
@@ -90,53 +84,25 @@ function PlanCard({
           {cycle === "annual" && p.id !== "enterprise" && ", billed annually"}
         </span>
       </div>
-
-      <div className="mt-1 text-[11px] text-ink-tertiary">
-        Platform commission: <span className="text-brand-300">{(p.commissionRate * 100).toFixed(0)}%</span> per AI-closed deal
-      </div>
-
       <button
         onClick={() => onSelect(p)}
-        className={`mt-5 w-full rounded-lg py-2.5 text-sm font-semibold ${
+        className={`mt-4 w-full rounded-lg py-2 text-sm font-semibold ${
           p.highlight
             ? "bg-gradient-brand shadow-glow"
-            : current
-            ? "border border-bg-border bg-bg-hover text-ink-secondary"
-            : "border border-bg-border bg-bg-hover/40 hover:bg-bg-hover"
+            : "border border-bg-border bg-bg-card hover:bg-bg-hover"
         }`}
-        disabled={current}
       >
-        {current ? "Active plan" : p.cta}
+        {p.cta}
       </button>
-
-      <div className="my-5 border-t border-bg-border" />
-
-      <div className="space-y-2">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
-          Caps
-        </div>
-        <CapRow label="Products" value={formatCap(p.caps.products)} />
-        <CapRow label="Buyers" value={formatCap(p.caps.buyers)} />
-        <CapRow label="Suppliers" value={formatCap(p.caps.suppliers)} />
-        <CapRow label="Outreach sends" value={formatCap(p.caps.outreachSends)} />
-        <CapRow label="AI tokens" value={formatCap(p.caps.aiTokens)} />
-        <CapRow label="Seats" value={formatCap(p.caps.seats)} />
-        <CapRow label="API calls" value={formatCap(p.caps.apiCalls)} />
-      </div>
-
-      <div className="my-5 border-t border-bg-border" />
-
-      <div className="space-y-1.5 text-xs">
+      <div className="mt-5 space-y-1.5 text-xs">
         {p.features.map((f) => (
-          <div key={f.label} className="flex items-center gap-2">
+          <div key={f.label} className="flex items-start gap-2">
             {f.included ? (
-              <Check className="h-3.5 w-3.5 text-accent-green" />
+              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-green" />
             ) : (
-              <X className="h-3.5 w-3.5 text-ink-tertiary" />
+              <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-tertiary" />
             )}
-            <span
-              className={f.included ? "text-ink-secondary" : "text-ink-tertiary line-through"}
-            >
+            <span className={f.included ? "text-ink-secondary" : "text-ink-tertiary line-through"}>
               {f.label}
             </span>
           </div>
@@ -146,25 +112,46 @@ function PlanCard({
   );
 }
 
-function CapRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between text-xs">
-      <span className="text-ink-secondary">{label}</span>
-      <span className="font-medium">{value}</span>
-    </div>
-  );
-}
-
 export default function BillingPage() {
+  const [data, setData] = useState<BillingPayload | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const [cycle, setCycle] = useState<"monthly" | "annual">("monthly");
-  const currentPlan = PLANS.find((p) => p.id === CURRENT_PLAN_ID)!;
-  const nextPlan = PLANS.find((p) => p.id === "enterprise")!;
-  const { toast } = useToast();
   const [confirmPlan, setConfirmPlan] = useState<Plan | null>(null);
-  const [tokenBoosted, setTokenBoosted] = useState(false);
+  const { toast } = useToast();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const r = await fetch("/api/admin/billing", { cache: "no-store" });
+      if (r.status === 401) {
+        setLoadError("Not signed in — visit /signin and try again.");
+        return;
+      }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        setLoadError(`API returned ${r.status}: ${body.error ?? r.statusText}`);
+        return;
+      }
+      setData(await r.json());
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   function handlePlanSelect(p: Plan) {
-    if (p.id === CURRENT_PLAN_ID) return;
+    if (!data?.subscription.configured) {
+      toast(
+        "Stripe billing isn't configured yet — set STRIPE_SECRET_KEY in Netlify env first. Plan selection here will become real once that ships.",
+        "info",
+      );
+      return;
+    }
     setConfirmPlan(p);
   }
 
@@ -172,37 +159,19 @@ export default function BillingPage() {
     if (!confirmPlan) return;
     const p = confirmPlan;
     setConfirmPlan(null);
-    if (p.id === "enterprise") {
-      toast(`Sales contact request sent for ${p.name} · we'll reach out within 1 business day`);
-    } else {
-      toast(`Switched to ${p.name} · prorated charge of $${p.monthly} on next invoice`);
-    }
+    toast(
+      `Plan switch flow ships once Stripe Subscription is wired. For now this would switch to ${p.name}.`,
+      "info",
+    );
   }
 
-  function handleUpdateCard() {
-    toast("Update card flow opens Stripe billing portal · use the test card 4242 4242 4242 4242", "info");
-  }
-
-  function handleTopUp() {
-    if (tokenBoosted) {
-      toast("You already topped up this month — wait until next cycle", "info");
-      return;
-    }
-    setTokenBoosted(true);
-    toast(`Token boost applied · 5M Sonnet tokens added · $250 charged to •••• 4242`);
-  }
-
-  function handleDownloadInvoices() {
-    const rows = INVOICES.map((i) => ({
-      invoice: i.id,
-      date: i.date,
-      description: i.description,
-      amount_usd: i.amount,
-      status: i.status,
-    }));
-    downloadCSV(`invoices-${new Date().toISOString().slice(0, 10)}.csv`, rows);
-    toast(`Exported ${rows.length} invoices`);
-  }
+  const subscriptionLabel = useMemo(() => {
+    if (!data) return "—";
+    const s = data.subscription;
+    if (!s.configured) return "Not configured";
+    if (s.mode === "live") return "Stripe LIVE · subscription not yet fetched";
+    return "Stripe TEST · subscription not yet fetched";
+  }, [data]);
 
   return (
     <div className="space-y-6">
@@ -214,100 +183,97 @@ export default function BillingPage() {
           <div>
             <h1 className="text-2xl font-bold">Billing &amp; Plans</h1>
             <p className="text-xs text-ink-secondary">
-              On <span className="text-brand-300">{currentPlan.name}</span> · next invoice $
-              {currentPlan.monthly} on Jun 1, 2024
+              {subscriptionLabel}
+              {data?.usage && (
+                <>
+                  {" · "}
+                  <span className="text-ink-tertiary">usage for {data.usage.monthLabel}</span>
+                </>
+              )}
             </p>
           </div>
         </div>
         <button
-          onClick={handleDownloadInvoices}
-          className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
+          onClick={load}
+          disabled={loading}
+          className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover disabled:opacity-60"
         >
-          <Download className="h-4 w-4" /> Download all invoices
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          Refresh
         </button>
       </div>
 
-      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
-        <div className="flex items-start gap-3 text-[12px]">
-          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
-            <CreditCard className="h-3.5 w-3.5 text-accent-amber" />
-          </div>
-          <div className="flex-1 text-ink-secondary">
-            <span className="font-semibold text-accent-amber">Plans preview</span>
-            {" "}
-            — Plan switching + invoice download UI is functional locally; the live billing
-            backend (Stripe Subscription + tax) ships in a follow-up. For real revenue and
-            platform fees collected, see{" "}
-            <a href="/earnings" className="text-brand-300 hover:text-brand-200 underline">/earnings</a>{" "}
-            and{" "}
-            <a href="/reports" className="text-brand-300 hover:text-brand-200 underline">/reports</a>.
+      {/* Honest subscription banner */}
+      {data && !data.subscription.configured && (
+        <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+          <div className="flex items-start gap-3 text-[12px]">
+            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+              <AlertCircle className="h-3.5 w-3.5 text-accent-amber" />
+            </div>
+            <div className="flex-1 text-ink-secondary">
+              <span className="font-semibold text-accent-amber">No subscription active</span>
+              {" "}— {data.subscription.message}
+              {" "}Plans below are real product tiers, but selecting one here is informational
+              until the Stripe wiring lands.
+            </div>
           </div>
         </div>
-      </div>
-
-      <div className="rounded-xl border border-bg-border bg-gradient-to-br from-brand-500/10 to-transparent p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="rounded-md bg-brand-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-200">
-                Current Plan
+      )}
+      {data && data.subscription.configured && (
+        <div className="rounded-xl border border-accent-green/30 bg-accent-green/5 px-4 py-3">
+          <div className="flex items-start gap-3 text-[12px]">
+            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-green/15">
+              <Check className="h-3.5 w-3.5 text-accent-green" />
+            </div>
+            <div className="flex-1 text-ink-secondary">
+              <span className="font-semibold text-accent-green">
+                Stripe {data.subscription.mode.toUpperCase()} key detected
               </span>
-              <span className="text-base font-bold">{currentPlan.name}</span>
-            </div>
-            <div className="mt-1 text-xs text-ink-secondary">
-              {currentPlan.tagline} · ${currentPlan.monthly}/mo · {(currentPlan.commissionRate * 100).toFixed(0)}% deal commission
+              {" "}— {data.subscription.message}
             </div>
           </div>
-          <button
-            onClick={() => handlePlanSelect(nextPlan)}
-            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow"
-          >
-            <ArrowUpRight className="h-4 w-4" /> Upgrade to {nextPlan.name}
-          </button>
         </div>
+      )}
 
-        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {USAGE.map((u) => {
-            const pct = u.cap ? Math.min(100, (u.used / u.cap) * 100) : 0;
-            const isNear = pct >= 80;
-            return (
-              <div
-                key={u.label}
-                className="rounded-lg border border-bg-border bg-bg-card p-3"
-              >
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-ink-secondary">{u.label}</span>
-                  <span className={`font-semibold ${isNear ? "text-accent-amber" : ""}`}>
-                    {formatNum(u.used)} / {u.cap ? formatNum(u.cap) : "∞"}
-                  </span>
-                </div>
-                {u.cap ? (
-                  <>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-bg-hover">
-                      <div
-                        className={`h-full ${isNear ? "bg-accent-amber" : "bg-gradient-brand"}`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <div className="mt-1 text-[10px] text-ink-tertiary">
-                      {pct.toFixed(0)}% used{u.hint ? ` · ${u.hint}` : ""}
-                    </div>
-                  </>
-                ) : (
-                  <div className="mt-2 text-[10px] text-ink-tertiary">{u.hint}</div>
-                )}
-              </div>
-            );
-          })}
+      {loadError && (
+        <div className="rounded-xl border border-accent-red/40 bg-accent-red/5 px-4 py-3 text-xs text-accent-red">
+          <strong className="font-semibold">Couldn&apos;t load billing:</strong> {loadError}
         </div>
+      )}
+
+      {/* Real usage */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Usage · {data?.usage.monthLabel ?? "this month"}</h2>
+          <a href="/admin/api-keys" className="text-[11px] text-ink-tertiary hover:text-ink-primary">
+            Manage API keys →
+          </a>
+        </div>
+        {data === null && !loadError ? (
+          <div className="rounded-xl border border-bg-border bg-bg-card p-8 text-center text-xs text-ink-tertiary">
+            <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {(data?.usage.items ?? []).map((u) => (
+              <div key={u.label} className="rounded-lg border border-bg-border bg-bg-card p-3">
+                <div className="text-[11px] text-ink-secondary">{u.label}</div>
+                <div className="mt-1 text-2xl font-bold">{formatNum(u.used, u.unit)}</div>
+                {u.hint && <div className="mt-0.5 text-[10px] text-ink-tertiary">{u.hint}</div>}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* Plans — real product tiers */}
       <div>
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <h2 className="text-base font-bold">Choose a plan</h2>
+            <h2 className="text-base font-bold">Plans</h2>
             <p className="text-xs text-ink-tertiary">
-              Save 17% on annual billing
+              Real tiers · save 17% on annual{" "}
+              {!data?.subscription.configured && "· (informational until Stripe wires up)"}
             </p>
           </div>
           <div className="flex overflow-hidden rounded-lg border border-bg-border bg-bg-card text-xs">
@@ -329,120 +295,69 @@ export default function BillingPage() {
             </button>
           </div>
         </div>
-
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {PLANS.map((p) => (
-            <PlanCard
-              key={p.id}
-              p={p}
-              cycle={cycle}
-              current={p.id === CURRENT_PLAN_ID}
-              onSelect={handlePlanSelect}
-            />
+            <PlanCard key={p.id} p={p} cycle={cycle} onSelect={handlePlanSelect} />
           ))}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 overflow-hidden rounded-xl border border-bg-border bg-bg-card">
-          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <FileText className="h-4 w-4 text-brand-300" /> Invoices
-            </div>
-            <button className="text-xs text-brand-300 hover:text-brand-200">
-              View all →
-            </button>
-          </div>
-          <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
-              <tr>
-                <th className="px-5 py-2.5 text-left font-medium">Invoice</th>
-                <th className="px-3 py-2.5 text-left font-medium">Date</th>
-                <th className="px-3 py-2.5 text-left font-medium">Description</th>
-                <th className="px-3 py-2.5 text-right font-medium">Amount</th>
-                <th className="px-5 py-2.5 text-left font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {INVOICES.map((inv) => (
-                <tr key={inv.id} className="border-t border-bg-border">
-                  <td className="px-5 py-3 font-medium">{inv.id}</td>
-                  <td className="px-3 py-3 text-ink-secondary">{inv.date}</td>
-                  <td className="px-3 py-3 text-ink-secondary">{inv.description}</td>
-                  <td className="px-3 py-3 text-right font-semibold">
-                    ${inv.amount.toLocaleString()}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span
-                      className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[inv.status]}`}
-                    >
-                      {inv.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-bg-border bg-bg-card p-5">
+      {/* Invoices — empty by design until Stripe is wired */}
+      <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+        <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
           <div className="flex items-center gap-2 text-sm font-semibold">
-            <CreditCard className="h-4 w-4 text-brand-300" /> Payment Method
+            <FileText className="h-4 w-4 text-brand-300" /> Invoices
           </div>
-          <div className="mt-3 rounded-lg border border-bg-border bg-bg-hover/40 p-3">
-            <div className="flex items-center gap-3">
-              <div className="grid h-9 w-12 place-items-center rounded-md bg-gradient-brand text-[10px] font-bold">
-                VISA
-              </div>
-              <div className="text-sm">
-                <div className="font-medium">•••• 4242</div>
-                <div className="text-[11px] text-ink-tertiary">Expires 09/27</div>
-              </div>
-            </div>
-            <button
-              onClick={handleUpdateCard}
-              className="mt-3 w-full rounded-md border border-bg-border bg-bg-card py-1.5 text-xs hover:bg-bg-hover"
-            >
-              Update card
-            </button>
-          </div>
-
-          <div className="mt-4 rounded-lg border border-brand-500/30 bg-brand-500/5 p-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-brand-200">
-              <Sparkles className="h-3.5 w-3.5" /> Save with annual
-            </div>
-            <p className="mt-1 text-[11px] text-ink-secondary">
-              Switch to annual billing and save $1,019 over 12 months on your current plan.
-            </p>
-            <button
-              onClick={() => {
-                setCycle("annual");
-                toast("Switched preview to annual billing — save $1,019/yr");
-              }}
-              className="mt-2 w-full rounded-md bg-gradient-brand py-1.5 text-xs font-semibold shadow-glow"
-            >
-              Preview annual
-            </button>
-          </div>
-
-          <div className="mt-3 rounded-lg border border-bg-border bg-bg-hover/40 p-3">
-            <div className="flex items-center gap-2 text-xs font-semibold">
-              <Zap className="h-3.5 w-3.5 text-accent-amber" /> Add token boost
-            </div>
-            <p className="mt-1 text-[11px] text-ink-tertiary">
-              Need more AI? Top up 5M Sonnet tokens for $250.
-            </p>
-            <button
-              onClick={handleTopUp}
-              disabled={tokenBoosted}
-              className="mt-2 w-full rounded-md border border-bg-border bg-bg-card py-1.5 text-xs hover:bg-bg-hover disabled:opacity-50"
-            >
-              {tokenBoosted ? "Topped up this cycle" : "Top up"}
-            </button>
-          </div>
+          <span className="text-[11px] text-ink-tertiary">
+            {data?.invoices.length ?? 0} on file
+          </span>
         </div>
+        {data && data.invoices.length === 0 ? (
+          <div className="px-5 py-8 text-center text-[12px] text-ink-tertiary">
+            <FileText className="mx-auto mb-2 h-5 w-5" />
+            <div className="text-ink-secondary font-medium">No invoices yet</div>
+            <p className="mt-1 max-w-md mx-auto">
+              {data.invoicesNote}
+            </p>
+            {data.subscription.configured && (
+              <a
+                href="https://dashboard.stripe.com/invoices"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-flex items-center gap-1 text-brand-300 hover:underline"
+              >
+                Open Stripe dashboard <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
+                <tr>
+                  <th className="px-5 py-2.5 text-left font-medium">Invoice</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Date</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Description</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Amount</th>
+                  <th className="px-5 py-2.5 text-left font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.invoices ?? []).map((inv) => (
+                  <tr key={inv.id} className="border-t border-bg-border">
+                    <td className="px-5 py-3 font-medium">{inv.id}</td>
+                    <td className="px-3 py-3 text-ink-secondary">{inv.date}</td>
+                    <td className="px-3 py-3 text-ink-secondary">{inv.description}</td>
+                    <td className="px-3 py-3 text-right font-semibold">
+                      ${inv.amount.toLocaleString()}
+                    </td>
+                    <td className="px-5 py-3">{inv.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {confirmPlan && (
@@ -466,32 +381,11 @@ export default function BillingPage() {
               </button>
             </div>
             <div className="space-y-3 px-5 py-4 text-xs">
-              {confirmPlan.id === "enterprise" ? (
-                <>
-                  <p className="text-ink-secondary">
-                    Enterprise pricing is custom. We&apos;ll reach out within 1 business day to discuss volume,
-                    SLAs, and white-label options.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-ink-secondary">From</span>
-                    <span className="font-medium">{currentPlan.name} · ${currentPlan.monthly}/mo</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-ink-secondary">To</span>
-                    <span className="font-medium">{confirmPlan.name} · ${confirmPlan.monthly}/mo</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-ink-secondary">Commission rate</span>
-                    <span className="font-medium">{(confirmPlan.commissionRate * 100).toFixed(0)}% per AI-closed deal</span>
-                  </div>
-                  <p className="border-t border-bg-border pt-3 text-[11px] text-ink-tertiary">
-                    Prorated charge applied on next invoice. Plan caps update immediately.
-                  </p>
-                </>
-              )}
+              <p className="text-ink-secondary">
+                Subscription switching ships once Stripe Subscription is wired. For now this would
+                queue a switch to <strong>{confirmPlan.name}</strong> at ${confirmPlan.monthly}/mo
+                with a {(confirmPlan.commissionRate * 100).toFixed(1)}% deal commission rate.
+              </p>
             </div>
             <div className="flex items-center justify-end gap-2 border-t border-bg-border px-5 py-3">
               <button
@@ -504,7 +398,7 @@ export default function BillingPage() {
                 onClick={confirmPlanChange}
                 className="rounded-lg bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow"
               >
-                {confirmPlan.id === "enterprise" ? "Send sales request" : "Confirm switch"}
+                <ArrowUpRight className="mr-1 inline h-3.5 w-3.5" /> OK, queue this
               </button>
             </div>
           </div>

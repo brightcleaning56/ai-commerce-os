@@ -113,37 +113,18 @@ export const PLANS: Plan[] = [
   },
 ];
 
-export type UsageBucket = {
-  label: string;
-  used: number;
-  cap: number | null;
-  hint?: string;
-  tone?: string;
-};
-
-export const CURRENT_PLAN_ID: Plan["id"] = "growth";
-
-export const USAGE: UsageBucket[] = [
-  { label: "Products scanned this month", used: 1283, cap: null, hint: "Unlimited" },
-  { label: "Buyers contacted", used: 2451, cap: 5000 },
-  { label: "Suppliers tracked", used: 142, cap: 500 },
-  { label: "Outreach sends", used: 9_812, cap: 25_000 },
-  { label: "AI tokens", used: 4_120_000, cap: 10_000_000, hint: "Sonnet 4.6 + Haiku 4.5" },
-  { label: "API calls", used: 38_400, cap: 100_000 },
-];
-
-export type Invoice = {
-  id: string;
-  date: string;
-  amount: number;
-  status: "Paid" | "Pending" | "Failed";
-  description: string;
-};
-
-export const INVOICES: Invoice[] = [
-  { id: "INV-2024-05", date: "May 01, 2024", amount: 499, status: "Paid", description: "Growth · monthly" },
-  { id: "INV-2024-04", date: "Apr 01, 2024", amount: 499, status: "Paid", description: "Growth · monthly" },
-  { id: "INV-2024-03", date: "Mar 01, 2024", amount: 499, status: "Paid", description: "Growth · monthly" },
-  { id: "INV-2024-02", date: "Feb 01, 2024", amount: 79, status: "Paid", description: "Starter · monthly" },
-  { id: "INV-2024-01", date: "Jan 01, 2024", amount: 79, status: "Paid", description: "Starter · monthly" },
-];
+// Removed in the billing-real slice:
+//   - CURRENT_PLAN_ID: hardcoded "growth" lied that the operator was on
+//     a paid plan when no Stripe subscription exists.
+//   - USAGE: hardcoded "9,812 outreach sends · 4.12M AI tokens"
+//     numbers that had no relationship to the real spend ledger or
+//     drafts table.
+//   - INVOICES: 5 hardcoded "Jan-May 2024" rows that pretended past
+//     billing happened.
+//
+// Real usage is now derived per-request in /api/admin/billing from
+// the live stores (drafts, buyers, suppliers, products, spend
+// ledger, api-keys usageWindow). Real invoices ship when Stripe
+// Subscription is wired — until then /api/admin/billing returns [].
+//
+// Do NOT re-add hardcoded usage / invoice arrays here.
