@@ -9,6 +9,7 @@ import {
   Loader2,
   Mail,
   RefreshCw,
+  Send,
   ShieldCheck,
   Smartphone,
   Stethoscope,
@@ -16,6 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useToast } from "@/components/Toast";
 
 type CheckResult = {
   ok: boolean;
@@ -23,6 +25,15 @@ type CheckResult = {
   affects: string[];
   // detail is an opaque map — we render it as a key/value list.
   detail: Record<string, unknown>;
+};
+
+type TestResult = {
+  channel: "email" | "sms";
+  ok: boolean;
+  sentTo?: string;
+  suppressed?: boolean;
+  errorMessage?: string;
+  provider?: string;
 };
 
 type HealthResponse = {
@@ -61,6 +72,57 @@ export default function SystemHealthPage() {
   const [data, setData] = useState<HealthResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testEmailTo, setTestEmailTo] = useState("");
+  const [testSmsTo, setTestSmsTo] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [sendingSms, setSendingSms] = useState(false);
+  const [lastEmailResult, setLastEmailResult] = useState<TestResult | null>(null);
+  const [lastSmsResult, setLastSmsResult] = useState<TestResult | null>(null);
+  const { toast } = useToast();
+
+  /**
+   * Pre-fill test recipient inputs once the health data lands. Operator email
+   * is the natural target -- they want to verify the transport actually lands
+   * something in their inbox.
+   */
+  useEffect(() => {
+    if (!data) return;
+    const opEmail = (data.checks.compliance.detail.operatorEmail as string) ?? "";
+    if (opEmail && opEmail !== "MISSING" && !testEmailTo) setTestEmailTo(opEmail);
+  }, [data, testEmailTo]);
+
+  async function sendTest(channel: "email" | "sms") {
+    const to = channel === "email" ? testEmailTo.trim() : testSmsTo.trim();
+    if (!to) {
+      toast(`Enter a ${channel === "email" ? "recipient email" : "phone number"} first`, "error");
+      return;
+    }
+    const setSending = channel === "email" ? setSendingEmail : setSendingSms;
+    const setResult = channel === "email" ? setLastEmailResult : setLastSmsResult;
+    setSending(true);
+    setResult(null);
+    try {
+      const r = await fetch("/api/admin/test-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ channel, to }),
+      });
+      const d = await r.json().catch(() => ({}));
+      setResult(d);
+      if (d.ok) {
+        toast(`Test ${channel} sent to ${d.sentTo ?? to}`, "success");
+      } else if (d.suppressed) {
+        toast(`${to} is on the suppression list — un-suppress at /admin/suppressions`, "error");
+      } else {
+        toast(`Test ${channel} failed${d.errorMessage ? ` — ${d.errorMessage}` : ""}`, "error");
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Network error", "error");
+    } finally {
+      setSending(false);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -172,6 +234,73 @@ export default function SystemHealthPage() {
               return <CheckRow key={k} label={meta.label} Icon={meta.Icon} check={c} />;
             })}
           </div>
+
+          {/* Test-send actions — verify transport actually works before any
+              real lead lands. The Postmark approval flow is a long-tail issue
+              where the configured provider returns 422 for un-approved senders;
+              this gives the operator the exact provider message instead of
+              waiting for a real lead to fail silently. */}
+          <div className="rounded-xl border border-bg-border bg-bg-card p-5">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Send className="h-4 w-4 text-brand-300" /> Test the transport
+            </div>
+            <p className="mt-1 text-[11px] text-ink-tertiary">
+              Sends a real email / SMS via the configured provider. Useful for verifying Postmark approval, Twilio
+              From-number, and the EMAIL_LIVE flag before a real lead submits.
+            </p>
+
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
+              {/* Email test */}
+              <div className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-secondary">
+                  <Mail className="h-3 w-3 text-brand-300" /> Test email
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={testEmailTo}
+                    onChange={(e) => setTestEmailTo(e.target.value)}
+                    placeholder="you@example.com"
+                    className="h-8 flex-1 rounded-md border border-bg-border bg-bg-card px-2 text-xs placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => sendTest("email")}
+                    disabled={sendingEmail || !data.checks.email.ok}
+                    title={data.checks.email.ok ? "Send a test email through the configured provider" : "Email provider not configured — set POSTMARK_TOKEN or RESEND_TOKEN"}
+                    className="flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 text-[11px] font-semibold shadow-glow disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {sendingEmail ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                    Send test
+                  </button>
+                </div>
+                {lastEmailResult && <TestResultLine result={lastEmailResult} />}
+              </div>
+
+              {/* SMS test */}
+              <div className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-secondary">
+                  <Smartphone className="h-3 w-3 text-brand-300" /> Test SMS
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={testSmsTo}
+                    onChange={(e) => setTestSmsTo(e.target.value)}
+                    placeholder="+1 555 555 0123"
+                    className="h-8 flex-1 rounded-md border border-bg-border bg-bg-card px-2 text-xs placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => sendTest("sms")}
+                    disabled={sendingSms || !data.checks.sms.ok}
+                    title={data.checks.sms.ok ? "Send a test SMS through Twilio" : "Twilio not configured — set TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM"}
+                    className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-card px-3 text-[11px] font-semibold hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {sendingSms ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                    Send test
+                  </button>
+                </div>
+                {lastSmsResult && <TestResultLine result={lastSmsResult} />}
+              </div>
+            </div>
+          </div>
         </>
       )}
 
@@ -179,6 +308,36 @@ export default function SystemHealthPage() {
         <div className="grid place-items-center rounded-xl border border-dashed border-bg-border py-12 text-ink-tertiary">
           <Loader2 className="h-6 w-6 animate-spin" />
         </div>
+      )}
+    </div>
+  );
+}
+
+function TestResultLine({ result }: { result: TestResult }) {
+  const tone = result.ok
+    ? "border-accent-green/30 bg-accent-green/5 text-accent-green"
+    : result.suppressed
+      ? "border-accent-amber/30 bg-accent-amber/5 text-accent-amber"
+      : "border-accent-red/30 bg-accent-red/5 text-accent-red";
+  return (
+    <div className={`mt-2 rounded-md border ${tone} px-2 py-1.5 text-[10px]`}>
+      {result.ok ? (
+        <>
+          <CheckCircle2 className="mr-1 inline h-3 w-3" />
+          Sent
+          {result.sentTo && result.sentTo !== "" && <> · delivered to {result.sentTo}</>}
+          {result.provider && <span className="opacity-70"> · via {result.provider}</span>}
+        </>
+      ) : result.suppressed ? (
+        <>
+          <AlertTriangle className="mr-1 inline h-3 w-3" />
+          Suppressed — recipient is on the suppression list. Un-suppress at <a href="/admin/suppressions" className="underline">/admin/suppressions</a>.
+        </>
+      ) : (
+        <>
+          <XCircle className="mr-1 inline h-3 w-3" />
+          Failed{result.errorMessage ? `: ${result.errorMessage}` : ""}
+        </>
       )}
     </div>
   );

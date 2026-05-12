@@ -238,6 +238,57 @@ export default function LeadsPage() {
     }
   }
 
+  const [bulkRetrying, setBulkRetrying] = useState(false);
+
+  /**
+   * Drain the "stuck" queue — every lead in "new" status whose aiReply is
+   * missing / errored / skipped / pending. Server processes 20 per click
+   * to stay inside the platform function timeout; operator clicks again
+   * to keep draining. Useful right after Postmark approval lands.
+   */
+  async function bulkRetryStuck() {
+    setBulkRetrying(true);
+    try {
+      const r = await fetch("/api/leads/retry-stuck", { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        throw new Error(d.error ?? `Retry failed (${r.status})`);
+      }
+      // Refresh the list so updated aiReply states show
+      await load();
+      const parts: string[] = [];
+      if (d.sent > 0) parts.push(`${d.sent} sent`);
+      if (d.skipped > 0) parts.push(`${d.skipped} skipped`);
+      if (d.errored > 0) parts.push(`${d.errored} errored`);
+      const summary = parts.length > 0 ? parts.join(" · ") : "no candidates";
+      if (d.processed === 0) {
+        toast("No stuck leads to retry", "info");
+      } else if (d.remaining > 0) {
+        toast(`${summary} · ${d.remaining} still queued — click again to drain`, "info");
+      } else {
+        toast(summary, "success");
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Bulk retry failed", "error");
+    } finally {
+      setBulkRetrying(false);
+    }
+  }
+
+  /**
+   * Count of leads that would be processed by bulkRetryStuck. Drives the
+   * button label so the operator knows what they're about to do.
+   */
+  const stuckCount = useMemo(() => {
+    if (!leads) return 0;
+    return leads.filter((l) => {
+      if (l.status !== "new") return false;
+      if (!l.aiReply) return true;
+      const s = l.aiReply.status;
+      return s === "error" || s === "skipped" || s === "pending";
+    }).length;
+  }, [leads]);
+
   async function promoteToBuyer(lead: Lead) {
     if (lead.promotedToBuyerId) {
       toast(`Already promoted (buyer ${lead.promotedToBuyerId})`, "info");
@@ -280,13 +331,29 @@ export default function LeadsPage() {
             </p>
           </div>
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover disabled:opacity-60"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {stuckCount > 0 && (
+            <button
+              onClick={bulkRetryStuck}
+              disabled={bulkRetrying}
+              title="Drain the queue of leads whose AI auto-reply never landed (missing / errored / skipped / pending). Processes 20 per click — re-click to drain."
+              className="flex items-center gap-2 rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-2 text-sm font-semibold text-brand-200 hover:bg-brand-500/20 disabled:opacity-60"
+            >
+              {bulkRetrying ? (
+                <><Sparkles className="h-4 w-4 animate-pulse" /> Retrying…</>
+              ) : (
+                <><Sparkles className="h-4 w-4" /> Retry AI for {stuckCount} stuck</>
+              )}
+            </button>
+          )}
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover disabled:opacity-60"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* How AI outreach to leads works — explainer banner. Operators land
