@@ -50,9 +50,11 @@ const PUBLIC_PREFIXES = [
   "/share/",
   "/quote/",
   "/invite/",                // /invite/[token] — token IS the auth
+  "/reply/",                 // /reply/[token] — buyer-facing public reply page
   "/api/share/",
   "/api/quotes/",
   "/api/invites/",           // /api/invites/[token] + /accept — token-gated
+  "/api/drafts/reply/",      // /api/drafts/reply/[token] — token-gated
   "/api/webhooks/",
   "/api/cron/",
   "/api/v1/",                // /api/v1/* — Bearer API-key auth via lib/apiAuth

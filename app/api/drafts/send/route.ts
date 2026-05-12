@@ -81,6 +81,19 @@ export async function POST(req: NextRequest) {
   let shareLinkUrl: string | undefined = draft.shareLinkUrl;
   let shareLinkError: string | undefined;
 
+  // ─── Auto-mint a public reply token ──────────────────────────────────────────
+  // Idempotent on the draft. Token is the auth for the public reply page at
+  // /reply/<token> — buyer can respond via web instead of email. Replies
+  // append a ThreadMessage with role: "buyer" to this draft. Doesn't depend
+  // on pipelineId, so every draft (including legacy) gets a reply path.
+  let replyToken: string | undefined = draft.replyToken;
+  let replyUrl: string | undefined = draft.replyUrl;
+  if (!replyToken) {
+    replyToken = genShareToken();
+    const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || req.nextUrl.origin || "";
+    replyUrl = origin ? `${origin}/reply/${replyToken}` : `/reply/${replyToken}`;
+  }
+
   if (draft.pipelineId && !shareLinkToken) {
     try {
       const run = await store.getPipelineRun(draft.pipelineId);
@@ -118,10 +131,13 @@ export async function POST(req: NextRequest) {
   }
 
   // Build the body that actually goes out: original Claude-generated content
-  // PLUS a clean footer with the tracked link, if we have one. The email body
-  // shown in the review UI (draft.email.body) is left untouched for audit.
-  const enrichedBody = shareLinkUrl
-    ? `${draft.email.body}\n\n— View the full proposal: ${shareLinkUrl}`
+  // PLUS a clean footer with the tracked links. The email body shown in the
+  // review UI (draft.email.body) is left untouched for audit.
+  const footerLines: string[] = [];
+  if (shareLinkUrl) footerLines.push(`— View the full proposal: ${shareLinkUrl}`);
+  if (replyUrl) footerLines.push(`— Or reply directly via web: ${replyUrl}`);
+  const enrichedBody = footerLines.length > 0
+    ? `${draft.email.body}\n\n${footerLines.join("\n")}`
     : draft.email.body;
 
   const result = await sendEmail({
@@ -146,6 +162,9 @@ export async function POST(req: NextRequest) {
       // see a different link if they retry. The minted link is harmless on its own.
       shareLinkToken,
       shareLinkUrl,
+      // Same for reply token — keep it sticky across retries.
+      replyToken,
+      replyUrl,
     });
     return NextResponse.json(
       {
@@ -170,6 +189,8 @@ export async function POST(req: NextRequest) {
     sentBody: enrichedBody,
     shareLinkToken,
     shareLinkUrl,
+    replyToken,
+    replyUrl,
   });
 
   return NextResponse.json({

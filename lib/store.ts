@@ -719,6 +719,19 @@ export type OutreachDraft = {
   shareLinkToken?: string;
   shareLinkUrl?: string;
   /**
+   * Public web-reply token. Buyers receive a /reply/<replyToken> link in the
+   * outreach email body — clicking it opens a branded reply page where they
+   * can respond without touching email. Submissions append a ThreadMessage
+   * with role: "buyer" to this draft's thread.
+   *
+   * The token IS the auth (high-entropy 24 random bytes base64url) and is
+   * only sent to the buyer's resolved email address. NEVER include it in
+   * any operator-facing surface — operator sees the resulting ThreadMessages,
+   * not the token.
+   */
+  replyToken?: string;
+  replyUrl?: string;
+  /**
    * Per-channel send state (slice 36). The email-only fields above stay for
    * back-compat. Each channel gets its own tracked share link variant so opens
    * can be attributed to the channel that drove them.
@@ -1103,6 +1116,12 @@ export const store = {
   async getDraft(id: string): Promise<OutreachDraft | null> {
     const drafts = await store.getDrafts();
     return drafts.find((d) => d.id === id) ?? null;
+  },
+  async getDraftByReplyToken(token: string): Promise<OutreachDraft | null> {
+    const trimmed = (token ?? "").trim();
+    if (!trimmed || trimmed.length < 16) return null;
+    const drafts = await store.getDrafts();
+    return drafts.find((d) => d.replyToken === trimmed) ?? null;
   },
 
   // Quotes
