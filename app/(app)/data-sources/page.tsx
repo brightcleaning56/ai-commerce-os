@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Sparkles,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 type Source = {
@@ -122,9 +123,12 @@ export default function DataSourcesPage() {
             </p>
           </div>
         </div>
-        <button className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow">
+        <Link
+          href="/integrations"
+          className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
+        >
           <Plus className="h-4 w-4" /> Connect new source
-        </button>
+        </Link>
       </div>
 
       <div className="flex items-start gap-2 rounded-xl border border-bg-border bg-bg-card p-3 text-xs text-ink-secondary">

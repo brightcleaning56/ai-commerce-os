@@ -11,6 +11,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 
@@ -329,10 +330,10 @@ export default function EdgesPage() {
 
   const tilesData = useMemo(() => {
     return [
-      { k: "Edges in graph", v: (data?.totalEdges ?? 0).toLocaleString() },
-      { k: "Unique brands", v: (data?.totalBrands ?? 0).toLocaleString() },
-      { k: "Businesses in graph", v: (data?.totalBusinesses ?? 0).toLocaleString() },
-      { k: "Filtered results", v: (data?.brands.length ?? 0).toLocaleString() },
+      { k: "Edges in graph", v: (data?.totalEdges ?? 0).toLocaleString(), href: undefined as string | undefined },
+      { k: "Unique brands", v: (data?.totalBrands ?? 0).toLocaleString(), href: undefined as string | undefined },
+      { k: "Businesses in graph", v: (data?.totalBusinesses ?? 0).toLocaleString(), href: "/admin/businesses" as string | undefined },
+      { k: "Filtered results", v: (data?.brands.length ?? 0).toLocaleString(), href: undefined as string | undefined },
     ];
   }, [data]);
 
@@ -384,12 +385,23 @@ export default function EdgesPage() {
       )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {tilesData.map((t) => (
-          <div key={t.k} className="rounded-xl border border-bg-border bg-bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{t.k}</div>
-            <div className="mt-1 text-2xl font-bold">{t.v}</div>
-          </div>
-        ))}
+        {tilesData.map((t) =>
+          t.href ? (
+            <Link
+              key={t.k}
+              href={t.href}
+              className="group block rounded-xl border border-bg-border bg-bg-card p-4 ring-1 ring-transparent transition-all hover:bg-bg-hover hover:ring-brand-500/40"
+            >
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{t.k}</div>
+              <div className="mt-1 text-2xl font-bold">{t.v}</div>
+            </Link>
+          ) : (
+            <div key={t.k} className="rounded-xl border border-bg-border bg-bg-card p-4">
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{t.k}</div>
+              <div className="mt-1 text-2xl font-bold">{t.v}</div>
+            </div>
+          ),
+        )}
       </div>
 
       {/* Filters */}

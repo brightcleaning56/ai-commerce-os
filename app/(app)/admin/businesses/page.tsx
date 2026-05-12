@@ -15,6 +15,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 
@@ -445,10 +446,10 @@ export default function BusinessesPage() {
     const total = data?.total ?? 0;
     const byStatus = data?.counts.byStatus ?? {};
     return [
-      { k: "Total businesses", v: total },
-      { k: "Active", v: byStatus.active ?? 0, hint: "eligible for outreach" },
-      { k: "Contacted", v: (byStatus.contacted ?? 0) + (byStatus.responded ?? 0), hint: "in flight" },
-      { k: "DNC", v: byStatus.do_not_contact ?? 0, hint: "suppressed" },
+      { k: "Total businesses", v: total, hint: undefined as string | undefined, statusKey: "" as BusinessStatus | "", href: undefined as string | undefined },
+      { k: "Active", v: byStatus.active ?? 0, hint: "eligible for outreach", statusKey: "active" as BusinessStatus | "", href: undefined as string | undefined },
+      { k: "Contacted", v: (byStatus.contacted ?? 0) + (byStatus.responded ?? 0), hint: "in flight", statusKey: "contacted" as BusinessStatus | "", href: undefined as string | undefined },
+      { k: "DNC", v: byStatus.do_not_contact ?? 0, hint: "suppressed", statusKey: "do_not_contact" as BusinessStatus | "", href: "/admin/suppressions" as string | undefined },
     ];
   }, [data]);
 
@@ -513,13 +514,44 @@ export default function BusinessesPage() {
 
       {/* Tiles */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {tilesData.map((t) => (
-          <div key={t.k} className="rounded-xl border border-bg-border bg-bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{t.k}</div>
-            <div className="mt-1 text-2xl font-bold">{t.v.toLocaleString()}</div>
-            {t.hint && <div className="text-[10px] text-ink-tertiary">{t.hint}</div>}
-          </div>
-        ))}
+        {tilesData.map((t) => {
+          const body = (
+            <>
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{t.k}</div>
+              <div className="mt-1 text-2xl font-bold">{t.v.toLocaleString()}</div>
+              {t.hint && <div className="text-[10px] text-ink-tertiary">{t.hint}</div>}
+            </>
+          );
+          if (t.href) {
+            return (
+              <Link
+                key={t.k}
+                href={t.href}
+                className="group block rounded-xl border border-bg-border bg-bg-card p-4 ring-1 ring-transparent transition-all hover:bg-bg-hover hover:ring-brand-500/40"
+              >
+                {body}
+              </Link>
+            );
+          }
+          if (t.statusKey !== undefined) {
+            const active = statusFilter === t.statusKey;
+            return (
+              <button
+                key={t.k}
+                type="button"
+                onClick={() => setStatusFilter(t.statusKey)}
+                className={`group block w-full rounded-xl border border-bg-border bg-bg-card p-4 text-left ring-1 transition-all hover:bg-bg-hover hover:ring-brand-500/40 ${active ? "ring-brand-500/60" : "ring-transparent"}`}
+              >
+                {body}
+              </button>
+            );
+          }
+          return (
+            <div key={t.k} className="rounded-xl border border-bg-border bg-bg-card p-4">
+              {body}
+            </div>
+          );
+        })}
       </div>
 
       {/* Import drawer */}

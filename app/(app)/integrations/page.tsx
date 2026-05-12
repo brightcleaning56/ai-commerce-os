@@ -104,9 +104,12 @@ export default function IntegrationsPage() {
             </p>
           </div>
         </div>
-        <button className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm">
+        <a
+          href="mailto:hello@avyncommerce.com?subject=Integration%20request"
+          className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
+        >
           <Plus className="h-4 w-4" /> Request integration
-        </button>
+        </a>
       </div>
 
       <div className="flex items-start gap-2 rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-3 text-xs">
