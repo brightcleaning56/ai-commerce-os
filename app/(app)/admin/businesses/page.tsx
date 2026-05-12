@@ -1,0 +1,616 @@
+"use client";
+import {
+  AlertCircle,
+  Building2,
+  CheckCircle2,
+  Database,
+  Loader2,
+  MapPin,
+  Search,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useToast } from "@/components/Toast";
+
+type BusinessStatus =
+  | "active"
+  | "queued"
+  | "contacted"
+  | "responded"
+  | "won"
+  | "lost"
+  | "do_not_contact";
+
+type BusinessSource =
+  | "manual"
+  | "csv_import"
+  | "lead_promote"
+  | "agent_discover"
+  | "data_axle"
+  | "google_places"
+  | "census";
+
+type BusinessRecord = {
+  id: string;
+  name: string;
+  legalName?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address1?: string;
+  city?: string;
+  county?: string;
+  state?: string;
+  zip?: string;
+  country: string;
+  industry?: string;
+  naicsCode?: string;
+  employeesBand?: string;
+  revenueBand?: string;
+  contactName?: string;
+  contactTitle?: string;
+  status: BusinessStatus;
+  source: BusinessSource;
+  notes?: string;
+  tags?: string[];
+  createdAt: string;
+  updatedAt: string;
+  lastContactedAt?: string;
+  outreachCount?: number;
+  doNotContact?: boolean;
+};
+
+type Counts = {
+  byStatus: Record<string, number>;
+  byState: Record<string, number>;
+};
+
+type ListResponse = {
+  businesses: BusinessRecord[];
+  total: number;
+  filteredTotal: number;
+  counts: Counts;
+};
+
+type ImportResponse = {
+  ok: boolean;
+  totalRows: number;
+  parsed: number;
+  rejected: number;
+  inserted: number;
+  updated: number;
+  skipped: number;
+  errors: { lineNumber: number; error: string }[];
+  errorTruncated?: boolean;
+};
+
+const STATUS_TONE: Record<BusinessStatus, string> = {
+  active: "bg-bg-hover text-ink-secondary",
+  queued: "bg-accent-blue/15 text-accent-blue",
+  contacted: "bg-brand-500/15 text-brand-200",
+  responded: "bg-accent-cyan/15 text-accent-cyan",
+  won: "bg-accent-green/15 text-accent-green",
+  lost: "bg-bg-hover text-ink-tertiary",
+  do_not_contact: "bg-accent-red/15 text-accent-red",
+};
+
+const STATUSES: BusinessStatus[] = [
+  "active",
+  "queued",
+  "contacted",
+  "responded",
+  "won",
+  "lost",
+  "do_not_contact",
+];
+
+const SOURCE_LABEL: Record<BusinessSource, string> = {
+  manual: "Manual",
+  csv_import: "CSV import",
+  lead_promote: "Lead → Buyer",
+  agent_discover: "Agent",
+  data_axle: "Data Axle",
+  google_places: "Google Places",
+  census: "Census",
+};
+
+function relTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
+  if (ms < 30 * 86_400_000) return `${Math.floor(ms / 86_400_000)}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+export default function BusinessesPage() {
+  const [data, setData] = useState<ListResponse | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const [q, setQ] = useState("");
+  const [stateFilter, setStateFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<BusinessStatus | "">("");
+  const [zipFilter, setZipFilter] = useState("");
+
+  const [importOpen, setImportOpen] = useState(false);
+  const [importCsv, setImportCsv] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResponse | null>(null);
+
+  const [selected, setSelected] = useState<BusinessRecord | null>(null);
+  const { toast } = useToast();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (stateFilter) params.set("state", stateFilter);
+      if (statusFilter) params.set("status", statusFilter);
+      if (zipFilter) params.set("zip", zipFilter);
+      const r = await fetch(`/api/admin/businesses?${params}`, { cache: "no-store" });
+      if (r.status === 401) {
+        setLoadError("Not signed in — visit /signin and try again.");
+        return;
+      }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        setLoadError(`API returned ${r.status}: ${body.error ?? r.statusText}`);
+        return;
+      }
+      setData(await r.json());
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, [q, stateFilter, statusFilter, zipFilter]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function submitImport() {
+    if (!importCsv.trim() || importing) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const r = await fetch("/api/admin/businesses/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv: importCsv }),
+      });
+      const d = (await r.json()) as ImportResponse | { error: string };
+      if (!r.ok) throw new Error(("error" in d && d.error) || `Import failed (${r.status})`);
+      setImportResult(d as ImportResponse);
+      toast(
+        `Imported ${(d as ImportResponse).inserted} new + ${(d as ImportResponse).updated} updated`,
+        "success",
+      );
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Import failed", "error");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function deleteOne(b: BusinessRecord) {
+    if (!confirm(`Delete "${b.name}"? Use Status: do_not_contact to keep audit trail instead.`)) return;
+    try {
+      const r = await fetch(`/api/admin/businesses/${b.id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error(`Delete failed (${r.status})`);
+      toast(`Deleted ${b.name}`, "success");
+      if (selected?.id === b.id) setSelected(null);
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Delete failed", "error");
+    }
+  }
+
+  async function setStatus(b: BusinessRecord, next: BusinessStatus) {
+    try {
+      const r = await fetch(`/api/admin/businesses/${b.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: next }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Update failed (${r.status})`);
+      toast(`Marked ${next}`);
+      if (selected?.id === b.id) setSelected(d.business);
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Update failed", "error");
+    }
+  }
+
+  const tilesData = useMemo(() => {
+    const total = data?.total ?? 0;
+    const byStatus = data?.counts.byStatus ?? {};
+    return [
+      { k: "Total businesses", v: total },
+      { k: "Active", v: byStatus.active ?? 0, hint: "eligible for outreach" },
+      { k: "Contacted", v: (byStatus.contacted ?? 0) + (byStatus.responded ?? 0), hint: "in flight" },
+      { k: "DNC", v: byStatus.do_not_contact ?? 0, hint: "suppressed" },
+    ];
+  }, [data]);
+
+  const stateOptions = useMemo(() => {
+    const states = Object.keys(data?.counts.byState ?? {}).sort();
+    return states;
+  }, [data]);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-brand shadow-glow">
+            <Building2 className="h-5 w-5" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold">Business Directory</h1>
+            <p className="text-xs text-ink-secondary">
+              {data?.total === 0
+                ? "No businesses yet — import a CSV or add one to get started"
+                : `${data?.filteredTotal ?? 0} of ${data?.total ?? 0} businesses · grouped by state, ZIP, industry`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setImportOpen((v) => !v)}
+            className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
+          >
+            <Upload className="h-4 w-4" /> Import CSV
+          </button>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow disabled:opacity-60"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+        <div className="flex items-start gap-3 text-[12px]">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+            <AlertCircle className="h-3.5 w-3.5 text-accent-amber" />
+          </div>
+          <div className="flex-1 text-ink-secondary">
+            <span className="font-semibold text-accent-amber">Slice 1 of the Business Network Intelligence build</span>
+            {" "}— this directory is the foundation. Today: store + import. Coming next: AI profile scan,
+            geo-targeted outreach gated by suppression checks, supply-edge graph from real transactions,
+            then optional Data Axle / Google Places / Census ingestion.
+          </div>
+        </div>
+      </div>
+
+      {loadError && (
+        <div className="rounded-xl border border-accent-red/40 bg-accent-red/5 px-4 py-3 text-xs text-accent-red">
+          <strong className="font-semibold">Couldn&apos;t load directory:</strong> {loadError}
+        </div>
+      )}
+
+      {/* Tiles */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {tilesData.map((t) => (
+          <div key={t.k} className="rounded-xl border border-bg-border bg-bg-card p-4">
+            <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{t.k}</div>
+            <div className="mt-1 text-2xl font-bold">{t.v.toLocaleString()}</div>
+            {t.hint && <div className="text-[10px] text-ink-tertiary">{t.hint}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* Import drawer */}
+      {importOpen && (
+        <div className="rounded-xl border border-brand-500/40 bg-gradient-to-br from-brand-500/5 to-transparent p-5">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold">Import CSV</div>
+            <button
+              onClick={() => { setImportOpen(false); setImportResult(null); setImportCsv(""); }}
+              className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+              aria-label="Close import"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <p className="mt-1 text-[11px] text-ink-tertiary">
+            Paste raw CSV (header row required). The importer maps common synonyms automatically:
+            {" "}<code className="rounded bg-bg-hover px-1">name|company|business</code>,
+            {" "}<code className="rounded bg-bg-hover px-1">email|contact_email</code>,
+            {" "}<code className="rounded bg-bg-hover px-1">phone|tel</code>,
+            {" "}<code className="rounded bg-bg-hover px-1">zip|postal_code</code>,
+            {" "}<code className="rounded bg-bg-hover px-1">state|province</code>, and many more.
+            Only <code className="rounded bg-bg-hover px-1">name</code> is required.
+            Dedups on email, then (name+zip), then (name+city).
+          </p>
+          <textarea
+            value={importCsv}
+            onChange={(e) => setImportCsv(e.target.value)}
+            placeholder="name,email,city,state,zip,industry&#10;Acme Roofing,sales@acmeroofing.com,Dallas,TX,75201,Roofing"
+            rows={8}
+            className="mt-3 w-full rounded-lg border border-bg-border bg-bg-app p-3 font-mono text-[11px] placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+          />
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={submitImport}
+              disabled={importing || !importCsv.trim()}
+              className="flex items-center gap-2 rounded-lg bg-gradient-brand px-4 py-2 text-sm font-semibold shadow-glow disabled:opacity-60"
+            >
+              {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              Import
+            </button>
+            <span className="text-[10px] text-ink-tertiary">
+              {importCsv ? `${(importCsv.length / 1024).toFixed(1)} KB · ${(importCsv.match(/\n/g)?.length ?? 0) + 1} lines` : "0 lines"}
+            </span>
+          </div>
+          {importResult && (
+            <div className="mt-3 rounded-lg border border-accent-green/30 bg-accent-green/5 p-3 text-[12px]">
+              <div className="font-semibold text-accent-green">
+                Done · {importResult.inserted} inserted · {importResult.updated} updated · {importResult.skipped} skipped · {importResult.rejected} rejected
+              </div>
+              {importResult.errors.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <div className="text-[11px] font-semibold text-ink-secondary">Rejected rows:</div>
+                  {importResult.errors.map((err, i) => (
+                    <div key={i} className="font-mono text-[11px] text-ink-tertiary">
+                      Line {err.lineNumber}: {err.error}
+                    </div>
+                  ))}
+                  {importResult.errorTruncated && (
+                    <div className="text-[10px] italic text-ink-tertiary">
+                      (more errors hidden — fix these and re-import)
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-tertiary" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search name, email, website, notes…"
+            className="h-9 w-full rounded-lg border border-bg-border bg-bg-card pl-9 pr-3 text-sm placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+          />
+        </div>
+        <select
+          value={stateFilter}
+          onChange={(e) => setStateFilter(e.target.value)}
+          className="h-9 rounded-lg border border-bg-border bg-bg-card px-3 text-sm"
+        >
+          <option value="">All states</option>
+          {stateOptions.map((s) => (
+            <option key={s} value={s}>{s} ({data?.counts.byState[s]})</option>
+          ))}
+        </select>
+        <input
+          value={zipFilter}
+          onChange={(e) => setZipFilter(e.target.value)}
+          placeholder="ZIP prefix"
+          className="h-9 w-32 rounded-lg border border-bg-border bg-bg-card px-3 text-sm placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+        />
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as BusinessStatus | "")}
+          className="h-9 rounded-lg border border-bg-border bg-bg-card px-3 text-sm"
+        >
+          <option value="">All statuses</option>
+          {STATUSES.map((s) => (
+            <option key={s} value={s}>{s} ({data?.counts.byStatus[s] ?? 0})</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+        {/* Table */}
+        <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+          {data === null && !loadError ? (
+            <div className="flex items-center gap-2 px-5 py-8 text-[12px] text-ink-tertiary">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading…
+            </div>
+          ) : data && data.businesses.length === 0 ? (
+            <div className="px-5 py-12 text-center">
+              <Database className="mx-auto h-8 w-8 text-ink-tertiary" />
+              <div className="mt-3 text-base font-semibold">
+                {data.total === 0 ? "No businesses yet" : "No matches"}
+              </div>
+              <p className="mt-1 text-xs text-ink-tertiary">
+                {data.total === 0
+                  ? <>Click <strong>Import CSV</strong> above to seed the directory from a spreadsheet, or POST a single record to <code className="rounded bg-bg-hover px-1">/api/admin/businesses</code>.</>
+                  : "Adjust filters or clear them to see more."
+                }
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
+                  <tr className="border-b border-bg-border">
+                    <th className="px-4 py-2.5 text-left font-medium">Business</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Location</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Industry</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Status</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data?.businesses ?? []).map((b) => {
+                    const active = selected?.id === b.id;
+                    return (
+                      <tr
+                        key={b.id}
+                        onClick={() => setSelected(b)}
+                        className={`cursor-pointer border-t border-bg-border hover:bg-bg-hover/30 ${active ? "bg-bg-hover/40" : ""}`}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="font-medium">{b.name}</div>
+                          {b.email && (
+                            <div className="text-[11px] text-ink-tertiary">{b.email}</div>
+                          )}
+                          {!b.email && b.website && (
+                            <div className="text-[11px] text-ink-tertiary">{b.website}</div>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-ink-secondary">
+                          <div className="flex items-center gap-1 text-[12px]">
+                            {b.state || b.city ? (
+                              <>
+                                <MapPin className="h-3 w-3 text-ink-tertiary" />
+                                {b.city ? `${b.city}, ` : ""}{b.state ?? ""}
+                                {b.zip && <span className="ml-1 text-[10px] text-ink-tertiary">{b.zip}</span>}
+                              </>
+                            ) : (
+                              <span className="text-ink-tertiary">—</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 text-ink-secondary text-[12px]">
+                          {b.industry ?? <span className="text-ink-tertiary">—</span>}
+                        </td>
+                        <td className="px-3 py-3">
+                          <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[b.status]}`}>
+                            {b.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-[11px] text-ink-tertiary">
+                          {SOURCE_LABEL[b.source]}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {data && data.filteredTotal > data.businesses.length && (
+                <div className="border-t border-bg-border px-4 py-2 text-center text-[10px] text-ink-tertiary">
+                  Showing first {data.businesses.length} of {data.filteredTotal} matching · refine filters or paginate
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Detail panel */}
+        <aside className="rounded-xl border border-bg-border bg-bg-card p-5">
+          {selected ? (
+            <div className="space-y-4">
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Business</div>
+                <div className="text-lg font-bold">{selected.name}</div>
+                {selected.legalName && (
+                  <div className="text-[11px] text-ink-tertiary">Legal: {selected.legalName}</div>
+                )}
+              </div>
+
+              <div className="space-y-1.5 text-[12px]">
+                {selected.email && <Field k="Email" v={selected.email} />}
+                {selected.phone && <Field k="Phone" v={selected.phone} />}
+                {selected.website && (
+                  <Field k="Website" v={
+                    <a href={`https://${selected.website.replace(/^https?:\/\//, "")}`} target="_blank" rel="noopener noreferrer" className="text-brand-300 hover:underline">
+                      {selected.website}
+                    </a>
+                  } />
+                )}
+                {(selected.address1 || selected.city) && (
+                  <Field k="Address" v={[selected.address1, selected.city, selected.state, selected.zip].filter(Boolean).join(", ")} />
+                )}
+                {selected.industry && <Field k="Industry" v={selected.industry} />}
+                {selected.naicsCode && <Field k="NAICS" v={selected.naicsCode} />}
+                {selected.employeesBand && <Field k="Employees" v={selected.employeesBand} />}
+                {selected.revenueBand && <Field k="Revenue" v={selected.revenueBand} />}
+                {selected.contactName && (
+                  <Field k="Contact" v={`${selected.contactName}${selected.contactTitle ? ` · ${selected.contactTitle}` : ""}`} />
+                )}
+                <Field k="Source" v={SOURCE_LABEL[selected.source]} />
+                <Field k="Created" v={relTime(selected.createdAt)} />
+                {selected.lastContactedAt && (
+                  <Field k="Last contacted" v={relTime(selected.lastContactedAt)} />
+                )}
+                {selected.outreachCount && selected.outreachCount > 0 && (
+                  <Field k="Outreach attempts" v={String(selected.outreachCount)} />
+                )}
+              </div>
+
+              {selected.notes && (
+                <div className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
+                  <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Notes</div>
+                  <p className="mt-1 whitespace-pre-wrap text-[12px] text-ink-secondary">{selected.notes}</p>
+                </div>
+              )}
+
+              {selected.tags && selected.tags.length > 0 && (
+                <div>
+                  <div className="mb-1 text-[10px] uppercase tracking-wider text-ink-tertiary">Tags</div>
+                  <div className="flex flex-wrap gap-1">
+                    {selected.tags.map((t) => (
+                      <span key={t} className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] text-ink-secondary">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <div className="mb-1.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Status</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {STATUSES.map((s) => {
+                    const active = selected.status === s;
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => setStatus(selected, s)}
+                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                          active ? STATUS_TONE[s] : "border border-bg-border bg-bg-hover/40 text-ink-secondary hover:bg-bg-hover"
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <button
+                onClick={() => deleteOne(selected)}
+                className="flex items-center gap-2 rounded-md border border-accent-red/30 bg-accent-red/5 px-3 py-1.5 text-[11px] text-accent-red hover:bg-accent-red/10"
+              >
+                <Trash2 className="h-3 w-3" /> Delete record
+              </button>
+            </div>
+          ) : (
+            <div className="grid h-full place-items-center px-3 py-12 text-center text-xs text-ink-tertiary">
+              Select a business to see the full record and update status.
+            </div>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function Field({ k, v }: { k: string; v: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-[10px] uppercase tracking-wider text-ink-tertiary">{k}</span>
+      <span className="text-right text-[12px] text-ink-secondary">{v}</span>
+    </div>
+  );
+}

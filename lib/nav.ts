@@ -1,5 +1,6 @@
 import {
   Activity,
+  Building2,
   Lightbulb,
   LayoutDashboard,
   Package,
@@ -57,6 +58,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Insights & Forecasts", href: "/insights", icon: Telescope, badge: "PRO" },
       { label: "Buyer Discovery", href: "/buyers", icon: Users },
       { label: "Supplier Finder", href: "/suppliers", icon: Factory },
+      { label: "Business Directory", href: "/admin/businesses", icon: Building2, badge: "NEW" },
     ],
   },
   {

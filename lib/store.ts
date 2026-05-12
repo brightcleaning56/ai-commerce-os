@@ -27,6 +27,7 @@ const REVENUE_LEDGER_FILE = "revenue-ledger.json";
 const LEADS_FILE = "leads.json";
 const INVITES_FILE = "invites.json";
 const API_KEYS_FILE = "api-keys.json";
+const BUSINESSES_FILE = "businesses.json";
 
 // ─── Backend selection ─────────────────────────────────────────────────────
 // STORE_BACKEND=blobs → Netlify Blobs (recommended for Netlify deploys)
@@ -663,6 +664,96 @@ export type ApiKey = {
   usageWindow: string[];
 };
 
+/**
+ * Business Directory — the universe of businesses we know about, from any
+ * source: operator CSV uploads, lead → buyer promotions, future Data Axle
+ * pulls, future Census imports. Distinct from `DiscoveredBuyer` because:
+ *   - DiscoveredBuyer is pipeline-derived (per-product, agent-imagined)
+ *   - BusinessRecord is the canonical, deduped, queryable directory
+ *
+ * Geography is structured (state/zip/lat/lng) so we can query "all
+ * roofers in Dallas zip 75201" without scanning. Industry uses both a
+ * free-text label AND optional NAICS so we can map to standard codes.
+ *
+ * Suppression: status="do_not_contact" OR doNotContact=true OR optedOutAt
+ * present → never include in outreach. Helpers below enforce this.
+ */
+export type BusinessStatus =
+  | "active"           // never contacted; eligible for outreach
+  | "queued"           // selected for upcoming outreach
+  | "contacted"        // outreach sent, no reply yet
+  | "responded"        // buyer replied (web or email)
+  | "won"              // closed/onboarded
+  | "lost"             // dead deal (operator marked)
+  | "do_not_contact";  // operator-marked or auto-suppressed
+
+export type BusinessSource =
+  | "manual"           // operator added one-by-one
+  | "csv_import"       // bulk imported via CSV
+  | "lead_promote"     // promoted from /leads
+  | "agent_discover"   // surfaced by buyer-discovery agent
+  | "data_axle"        // future: Data Axle bulk
+  | "google_places"    // future: Google Places adapter
+  | "census";          // future: Census Business Patterns
+
+export type BusinessRecord = {
+  id: string;                       // biz_<random>
+  // ── Identity ──────────────────────────────────────────────────────────
+  name: string;                     // company / DBA name (required)
+  legalName?: string;               // legal entity if different
+  ein?: string;                     // tax ID (optional, often unknown)
+  // ── Contact ───────────────────────────────────────────────────────────
+  email?: string;                   // lowercased on write
+  phone?: string;                   // E.164 preferred but free-text OK
+  website?: string;                 // bare domain or full URL
+  // ── Geographic — structured for query ─────────────────────────────────
+  address1?: string;
+  address2?: string;
+  city?: string;
+  county?: string;
+  state?: string;                   // 2-letter US state code preferred
+  zip?: string;                     // 5 or 9 digit
+  country: string;                  // ISO-3166 alpha-2; defaults to "US"
+  lat?: number;
+  lng?: number;
+  // ── Classification ────────────────────────────────────────────────────
+  industry?: string;                // free-text: "Roofing", "Pet Supplies"
+  naicsCode?: string;               // 2-6 digit NAICS
+  sicCode?: string;                 // legacy SIC
+  employeesBand?: string;           // "1-10" / "11-50" / "51-200" / etc.
+  revenueBand?: string;             // "$0-1M" / "$1-5M" / etc.
+  yearFounded?: number;
+  // ── Decision-maker (when known) ───────────────────────────────────────
+  contactName?: string;
+  contactTitle?: string;
+  // ── Status + lifecycle ────────────────────────────────────────────────
+  status: BusinessStatus;
+  source: BusinessSource;
+  notes?: string;                   // operator-only free-text
+  tags?: string[];                  // arbitrary segmentation labels
+  createdAt: string;                // ISO
+  updatedAt: string;                // ISO
+  // ── Outreach tracking ─────────────────────────────────────────────────
+  lastContactedAt?: string;         // ISO of last outreach send
+  outreachCount?: number;           // total outreach attempts
+  lastDraftId?: string;             // most recent OutreachDraft.id
+  // ── Suppression ───────────────────────────────────────────────────────
+  doNotContact?: boolean;           // explicit operator flag
+  optedOutAt?: string;              // ISO when buyer opted out
+  optedOutReason?: string;          // "unsubscribe-link" / "complaint" / etc.
+};
+
+/**
+ * Returns true when a business should NEVER receive outreach. Caller MUST
+ * check this before sending to any business — it's the suppression gate.
+ */
+export function isBusinessSuppressed(b: BusinessRecord): boolean {
+  if (b.status === "do_not_contact") return true;
+  if (b.doNotContact) return true;
+  if (b.optedOutAt) return true;
+  return false;
+}
+
 export type ThreadMessage = {
   id: string;
   role: "agent" | "buyer";
@@ -972,6 +1063,135 @@ export const store = {
       lastUsedAt: new Date(now).toISOString(),
     };
     await getBackend().write(API_KEYS_FILE, existing);
+  },
+
+  // ─── Business Directory ────────────────────────────────────────────────
+  async getBusinesses(): Promise<BusinessRecord[]> {
+    return getBackend().read<BusinessRecord[]>(BUSINESSES_FILE, []);
+  },
+  async getBusiness(id: string): Promise<BusinessRecord | null> {
+    const all = await store.getBusinesses();
+    return all.find((b) => b.id === id) ?? null;
+  },
+  async getBusinessByEmail(email: string): Promise<BusinessRecord | null> {
+    const norm = (email ?? "").trim().toLowerCase();
+    if (!norm) return null;
+    const all = await store.getBusinesses();
+    return all.find((b) => (b.email ?? "").trim().toLowerCase() === norm) ?? null;
+  },
+  /**
+   * Lookup by (name + zip) composite — fallback dedup key when an email
+   * isn't on the record. Case-insensitive on name; exact match on zip.
+   */
+  async getBusinessByNameZip(name: string, zip: string): Promise<BusinessRecord | null> {
+    const n = (name ?? "").trim().toLowerCase();
+    const z = (zip ?? "").trim();
+    if (!n || !z) return null;
+    const all = await store.getBusinesses();
+    return all.find((b) => b.name.trim().toLowerCase() === n && (b.zip ?? "").trim() === z) ?? null;
+  },
+  async addBusiness(b: BusinessRecord): Promise<void> {
+    const existing = await store.getBusinesses();
+    // Cap at 100k to keep the file readable. Real ingestion at scale
+    // should chunk into multiple files (slice 4+).
+    const all = [b, ...existing].slice(0, 100_000);
+    await getBackend().write(BUSINESSES_FILE, all);
+  },
+  async updateBusiness(id: string, patch: Partial<BusinessRecord>): Promise<BusinessRecord | null> {
+    const existing = await store.getBusinesses();
+    const idx = existing.findIndex((b) => b.id === id);
+    if (idx === -1) return null;
+    existing[idx] = {
+      ...existing[idx],
+      ...patch,
+      id: existing[idx].id,            // never overwrite id
+      createdAt: existing[idx].createdAt, // never overwrite created
+      updatedAt: new Date().toISOString(),
+    };
+    await getBackend().write(BUSINESSES_FILE, existing);
+    return existing[idx];
+  },
+  async deleteBusiness(id: string): Promise<boolean> {
+    const existing = await store.getBusinesses();
+    const next = existing.filter((b) => b.id !== id);
+    if (next.length === existing.length) return false;
+    await getBackend().write(BUSINESSES_FILE, next);
+    return true;
+  },
+  /**
+   * Bulk upsert from an importer. Dedupe key:
+   *   - email if present
+   *   - else (name + zip) composite
+   *   - else (name + city) composite
+   *   - else create new (with a fresh id)
+   * Merges incoming non-empty fields into existing records (never
+   * overwrites a non-empty value with empty). Returns counts.
+   */
+  async bulkUpsertBusinesses(rows: Omit<BusinessRecord, "id" | "createdAt" | "updatedAt">[]): Promise<{
+    inserted: number;
+    updated: number;
+    skipped: number;
+  }> {
+    const existing = await store.getBusinesses();
+    let inserted = 0;
+    let updated = 0;
+    let skipped = 0;
+    const now = new Date().toISOString();
+
+    for (const row of rows) {
+      if (!row.name || !row.name.trim()) {
+        skipped += 1;
+        continue;
+      }
+      // Find dedup match
+      let matchIdx = -1;
+      const email = (row.email ?? "").trim().toLowerCase();
+      if (email) {
+        matchIdx = existing.findIndex((b) => (b.email ?? "").trim().toLowerCase() === email);
+      }
+      if (matchIdx === -1 && row.zip) {
+        const n = row.name.trim().toLowerCase();
+        const z = row.zip.trim();
+        matchIdx = existing.findIndex(
+          (b) => b.name.trim().toLowerCase() === n && (b.zip ?? "").trim() === z,
+        );
+      }
+      if (matchIdx === -1 && row.city) {
+        const n = row.name.trim().toLowerCase();
+        const c = row.city.trim().toLowerCase();
+        matchIdx = existing.findIndex(
+          (b) => b.name.trim().toLowerCase() === n && (b.city ?? "").trim().toLowerCase() === c,
+        );
+      }
+
+      if (matchIdx === -1) {
+        existing.unshift({
+          ...row,
+          id: `biz_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`,
+          createdAt: now,
+          updatedAt: now,
+        });
+        inserted += 1;
+      } else {
+        // Merge: only fill missing fields, never overwrite non-empty existing values
+        const cur = existing[matchIdx];
+        const merged: BusinessRecord = { ...cur };
+        for (const k of Object.keys(row) as (keyof typeof row)[]) {
+          const incoming = row[k];
+          if (incoming === undefined || incoming === null || incoming === "") continue;
+          const curVal = (cur as Record<string, unknown>)[k as string];
+          if (curVal === undefined || curVal === null || curVal === "") {
+            (merged as Record<string, unknown>)[k as string] = incoming;
+          }
+        }
+        merged.updatedAt = now;
+        existing[matchIdx] = merged;
+        updated += 1;
+      }
+    }
+
+    await getBackend().write(BUSINESSES_FILE, existing.slice(0, 100_000));
+    return { inserted, updated, skipped };
   },
 
   // Pipeline runs (snapshots for /share/[id])
