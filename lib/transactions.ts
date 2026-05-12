@@ -202,6 +202,22 @@ export async function transitionTransaction(args: {
       );
     });
 
+  // Observe a transaction-settled supply edge. Only fires for released/
+  // completed states (Commercial Intelligence Graph slice 5). Same
+  // fire-and-forget contract as the email side effect — graph writes
+  // must never brick the state machine. Dynamic import so non-business
+  // code paths don't pull in the resolver.
+  if (args.to === "released" || args.to === "completed") {
+    import("@/lib/businessFromTransaction")
+      .then((m) => m.observeTransactionEdge(updated))
+      .catch((e) => {
+        console.warn(
+          `[transitionTransaction] supply-edge side-effect failed for ${args.id} → ${args.to}:`,
+          e instanceof Error ? e.message : e,
+        );
+      });
+  }
+
   return updated;
 }
 
