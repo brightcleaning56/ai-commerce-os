@@ -181,6 +181,112 @@ export async function GET() {
     .filter((t) => activeDealStates.includes(t.state))
     .reduce((s, t) => s + t.productTotalCents, 0);
 
+  // ── 14-day series for KPI sparklines ─────────────────────────────────
+  // Each series is oldest→newest. Empty arrays render as a flat line
+  // (intentional — better than a fake curve when there's no data yet).
+  const DAYS = 14;
+  const now = new Date();
+  // Anchor to UTC midnight of "today" so day-binning is consistent
+  // regardless of server time zone.
+  const todayMidUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+
+  function binByDay(timestamps: (string | undefined | null)[]): number[] {
+    const series = new Array<number>(DAYS).fill(0);
+    for (const ts of timestamps) {
+      if (!ts) continue;
+      const ms = new Date(ts).getTime();
+      if (!Number.isFinite(ms)) continue;
+      const dayOffset = Math.floor((todayMidUtc - ms) / 86_400_000);
+      // dayOffset=0 → today; older → larger
+      if (dayOffset >= 0 && dayOffset < DAYS) {
+        series[DAYS - 1 - dayOffset]++;
+      }
+    }
+    return series;
+  }
+
+  // For "deals in pipeline" we want a daily SNAPSHOT, not a daily-new
+  // count. For each day in the window, count transactions that were
+  // (a) created on/before that day AND (b) in an active state on that
+  // day. Approximation: a transaction was active from createdAt until
+  // its first non-active stateHistory event (or still active if none).
+  function buildDealsInPipelineSeries(): number[] {
+    const series = new Array<number>(DAYS).fill(0);
+    for (const t of transactions) {
+      const created = new Date(t.createdAt).getTime();
+      if (!Number.isFinite(created)) continue;
+      // Find first non-active state ts (if any)
+      const exitEvent = (t.stateHistory ?? []).find(
+        (e) => !activeDealStates.includes(e.state),
+      );
+      const exitTs = exitEvent ? new Date(exitEvent.ts).getTime() : Infinity;
+
+      for (let i = 0; i < DAYS; i++) {
+        // Day i represents the UTC day ending at (todayMid - (DAYS-1-i)*day) + 1 day
+        const dayEnd = todayMidUtc - (DAYS - 1 - i) * 86_400_000 + 86_400_000 - 1;
+        if (created <= dayEnd && exitTs > dayEnd) series[i]++;
+      }
+    }
+    return series;
+  }
+
+  // Pull revenue-ledger entries for the cents-per-day curve. Lazy access
+  // — only fetched when we'll actually use it.
+  const ledgerEntries = await store.getRevenueLedger();
+  function buildRevenueCentsSeries(): number[] {
+    const series = new Array<number>(DAYS).fill(0);
+    for (const e of ledgerEntries) {
+      const ms = new Date(e.ts).getTime();
+      if (!Number.isFinite(ms)) continue;
+      const dayOffset = Math.floor((todayMidUtc - ms) / 86_400_000);
+      if (dayOffset < 0 || dayOffset >= DAYS) continue;
+      const idx = DAYS - 1 - dayOffset;
+      // platform_fee + escrow_fee positive; refund stored negative;
+      // supplier_payout stored negative (outflow) — we want platform
+      // revenue, so include fees only.
+      if (e.kind === "platform_fee" || e.kind === "escrow_fee") {
+        series[idx] += e.cents;
+      } else if (e.kind === "refund") {
+        series[idx] += e.cents; // already negative
+      }
+    }
+    return series;
+  }
+
+  // Pull a per-entity timestamp where available. Products don't carry
+  // a createdAt, so we fall back to the agent run that discovered them
+  // (run.finishedAt). buyers + drafts have explicit timestamps.
+  const productDiscoveredAt = runs
+    .filter((r) => r.agent === "trend-hunter" && r.status === "success")
+    .map((r) => r.finishedAt);
+  const buyerDiscoveredAt = buyers.map((b) => b.discoveredAt);
+  const draftCreatedAt = drafts.map((d) => d.createdAt);
+  const draftSentAt = drafts.map((d) => d.sentAt).filter((x): x is string => !!x);
+  // Buyer reply timestamps — first buyer ThreadMessage per draft
+  const replyAt: string[] = [];
+  for (const d of drafts) {
+    const firstBuyer = (d.thread ?? []).find((m) => m.role === "buyer");
+    if (firstBuyer) replyAt.push(firstBuyer.at);
+  }
+  // High-demand products — sample the discoveredAt of runs that found
+  // them. Approximation: scale by share of high-demand vs total.
+  const highDemandShare = products.length > 0 ? highDemandCount / products.length : 0;
+  const productSeries = binByDay(productDiscoveredAt);
+  const highDemandSeries = productSeries.map((n) => Math.round(n * highDemandShare));
+
+  const series = {
+    // Daily NEW counts for accumulating metrics — flat lines mean "no
+    // activity that day", which is honest signal.
+    opportunities: binByDay([...productDiscoveredAt, ...buyerDiscoveredAt, ...draftCreatedAt]),
+    highDemandProducts: highDemandSeries,
+    buyersContacted: binByDay(draftSentAt),
+    responsesReceived: binByDay(replyAt),
+    // Daily SNAPSHOT for the in-flight metric (not daily-new)
+    dealsInPipeline: buildDealsInPipelineSeries(),
+    // Cents per day, summed across platform_fee + escrow_fee - refund.
+    estRevenueCents: buildRevenueCentsSeries(),
+  };
+
   const hasAnyData =
     products.length > 0 ||
     buyers.length > 0 ||
@@ -199,6 +305,11 @@ export async function GET() {
       pipelineValueCents,
       estRevenueCents: pipelineValueCents + revenue.netPlatformRevenueCents,
     },
+    // 14-day per-day series powering the KPI tile sparklines. Each array
+    // is oldest→newest. Daily NEW for opportunities / highDemand /
+    // buyersContacted / responses / revenue. Daily SNAPSHOT for
+    // dealsInPipeline (point-in-time count of active deals).
+    series,
     counts: {
       products: products.length,
       buyers: buyers.length,

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import Sparkline from "@/components/ui/Sparkline";
 
 type Stats = {
   hasAnyData: boolean;
@@ -21,6 +22,17 @@ type Stats = {
     dealsInPipeline: number;
     pipelineValueCents: number;
     estRevenueCents: number;
+  };
+  // 14-day per-day series (oldest first). Daily-new for accumulating
+  // metrics, daily-snapshot for dealsInPipeline. estRevenueCents is
+  // in cents. Absence is OK — UI falls back to no sparkline.
+  series?: {
+    opportunities: number[];
+    highDemandProducts: number[];
+    buyersContacted: number[];
+    responsesReceived: number[];
+    dealsInPipeline: number[];
+    estRevenueCents: number[];
   };
 };
 
@@ -86,6 +98,7 @@ export default function KpiGrid() {
   }
 
   const t = stats?.totals;
+  const s = stats?.series;
   // Each tile is a Link to the most relevant detail page. The href +
   // hint match the metric so an operator clicking "Buyers Contacted"
   // lands on the surface where they can act on those drafts.
@@ -98,6 +111,8 @@ export default function KpiGrid() {
     sub: string;
     href: string;
     cta: string;          // hover hint shown bottom-right of the card
+    series?: number[];     // 14-day data for sparkline
+    seriesHint?: string;   // tooltip on hover
   };
   const cards: Tile[] = [
     {
@@ -108,6 +123,8 @@ export default function KpiGrid() {
       sub: "products + buyers + drafts",
       href: "/products",
       cta: "Open Product Discovery →",
+      series: s?.opportunities,
+      seriesHint: "Daily new opportunities · last 14 days",
     },
     {
       label: "High Demand Products",
@@ -117,6 +134,8 @@ export default function KpiGrid() {
       sub: "demand score ≥ 70",
       href: "/products",
       cta: "Filter by demand →",
+      series: s?.highDemandProducts,
+      seriesHint: "Daily new high-demand discoveries · last 14 days",
     },
     {
       label: "Buyers Contacted",
@@ -126,6 +145,8 @@ export default function KpiGrid() {
       sub: "outreach drafts sent",
       href: "/outreach",
       cta: "Open Outreach →",
+      series: s?.buyersContacted,
+      seriesHint: "Daily sends · last 14 days",
     },
     {
       label: "Responses Received",
@@ -138,6 +159,8 @@ export default function KpiGrid() {
           : "no replies yet",
       href: "/outreach",
       cta: "View threads →",
+      series: s?.responsesReceived,
+      seriesHint: "Daily new buyer replies · last 14 days",
     },
     {
       label: "Deals in Pipeline",
@@ -147,6 +170,8 @@ export default function KpiGrid() {
       sub: t ? `Value ${fmtCents(t.pipelineValueCents)}` : "—",
       href: "/crm",
       cta: "Open CRM →",
+      series: s?.dealsInPipeline,
+      seriesHint: "Daily snapshot of active deals · last 14 days",
     },
     {
       label: "Est. Revenue",
@@ -156,15 +181,17 @@ export default function KpiGrid() {
       sub: "in-flight + released",
       href: "/earnings",
       cta: "Open Earnings →",
+      series: s?.estRevenueCents,
+      seriesHint: "Daily realized revenue ($) · last 14 days",
     },
   ];
 
-  const toneMap: Record<TileTone, { bg: string; text: string; ring: string }> = {
-    brand: { bg: "bg-brand-500/10", text: "text-brand-300", ring: "hover:border-brand-500/50" },
-    amber: { bg: "bg-accent-amber/10", text: "text-accent-amber", ring: "hover:border-accent-amber/50" },
-    blue: { bg: "bg-accent-blue/10", text: "text-accent-blue", ring: "hover:border-accent-blue/50" },
-    cyan: { bg: "bg-accent-cyan/10", text: "text-accent-cyan", ring: "hover:border-accent-cyan/50" },
-    green: { bg: "bg-accent-green/10", text: "text-accent-green", ring: "hover:border-accent-green/50" },
+  const toneMap: Record<TileTone, { bg: string; text: string; ring: string; line: string }> = {
+    brand: { bg: "bg-brand-500/10", text: "text-brand-300", ring: "hover:border-brand-500/50", line: "#a87dff" },
+    amber: { bg: "bg-accent-amber/10", text: "text-accent-amber", ring: "hover:border-accent-amber/50", line: "#f59e0b" },
+    blue: { bg: "bg-accent-blue/10", text: "text-accent-blue", ring: "hover:border-accent-blue/50", line: "#3b82f6" },
+    cyan: { bg: "bg-accent-cyan/10", text: "text-accent-cyan", ring: "hover:border-accent-cyan/50", line: "#06b6d4" },
+    green: { bg: "bg-accent-green/10", text: "text-accent-green", ring: "hover:border-accent-green/50", line: "#22c55e" },
   };
 
   return (
@@ -195,10 +222,20 @@ export default function KpiGrid() {
             </div>
             <div className="mt-1 text-2xl font-bold">{k.value}</div>
             <div className="mt-0.5 text-[11px] text-ink-tertiary">{k.sub}</div>
-            <div className="mt-3 flex items-center justify-between">
-              <div className={`h-0.5 flex-1 rounded-full bg-bg-hover/60`} />
+            {/* Real per-day sparkline when /api/dashboard/stats supplied
+                a series (14 days oldest→newest). When all zeros, the
+                Sparkline renders a flat baseline — that's honest, not
+                fake. */}
+            <div className="mt-3" title={k.seriesHint}>
+              {k.series && k.series.length > 0 ? (
+                <Sparkline data={k.series} color={tone.line} />
+              ) : (
+                <div className="h-0.5 rounded-full bg-bg-hover/60" />
+              )}
+            </div>
+            <div className="mt-2 text-right">
               <span
-                className={`ml-2 text-[10px] opacity-60 transition group-hover:opacity-100 ${tone.text}`}
+                className={`text-[10px] opacity-60 transition group-hover:opacity-100 ${tone.text}`}
               >
                 {k.cta}
               </span>
