@@ -2,19 +2,16 @@
 import {
   Calendar,
   DollarSign,
-  Filter,
   Plus,
   Search,
   Sparkles,
   TrendingUp,
   Workflow,
-  Zap,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import Drawer from "@/components/ui/Drawer";
 import {
-  DEALS,
   STAGES,
   STAGE_DOT,
   STAGE_TONE,
@@ -195,9 +192,11 @@ export default function CrmPage() {
   const [open, setOpen] = useState<LiveDeal | null>(null);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"kanban" | "list">("kanban");
-  const [staticDeals, setStaticDeals] = useState<LiveDeal[]>(DEALS);
+  // SAMPLE DEALS removed: no more "Sarah Chen / Marcus Brooks / Priya Patel"
+  // mixed into the operator's real pipeline. Real deals come from
+  // /api/crm/deals (which derives from sent OutreachDrafts that have
+  // dealStage / dealValue / dealUnits set).
   const [liveDeals, setLiveDeals] = useState<LiveDeal[]>([]);
-  const [source, setSource] = useState<"all" | "live" | "demo">("all");
   const [toast, setToast] = useState<string | null>(null);
   const router = useRouter();
 
@@ -228,27 +227,26 @@ export default function CrmPage() {
     const next = stages[idx + 1];
     const newProb = next === "Closed Won" ? 100 : Math.min(95, d.probability + 15);
 
-    // Live deals (real drafts) persist via API; static deals stay client-side
-    if (d.draftId) {
-      try {
-        const res = await fetch("/api/crm/deals", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ draftId: d.draftId, stage: next }),
-        });
-        if (!res.ok) throw new Error("Stage update failed");
-      } catch (e) {
-        showToast(e instanceof Error ? e.message : "Stage update failed");
-        return;
-      }
-      setLiveDeals((prev) =>
-        prev.map((x) => (x.id === d.id ? { ...x, stage: next, probability: newProb, lastTouch: "just now" } : x))
-      );
-    } else {
-      setStaticDeals((prev) =>
-        prev.map((x) => (x.id === d.id ? { ...x, stage: next, probability: newProb, lastTouch: "just now" } : x))
-      );
+    // Every deal here is real (backed by a draft) — no client-only static
+    // deals to fall through to. Persist via PATCH and update local state.
+    if (!d.draftId) {
+      showToast("Deal isn't backed by a draft — can't advance");
+      return;
     }
+    try {
+      const res = await fetch("/api/crm/deals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: d.draftId, stage: next }),
+      });
+      if (!res.ok) throw new Error("Stage update failed");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Stage update failed");
+      return;
+    }
+    setLiveDeals((prev) =>
+      prev.map((x) => (x.id === d.id ? { ...x, stage: next, probability: newProb, lastTouch: "just now" } : x))
+    );
     setOpen({ ...d, stage: next, probability: newProb });
     showToast(`Advanced to ${next}`);
   }
@@ -258,22 +256,17 @@ export default function CrmPage() {
     router.push(`/deals?company=${encodeURIComponent(d.company)}&product=${encodeURIComponent(d.product)}`);
   }
 
-  const merged = useMemo<LiveDeal[]>(() => {
-    if (source === "live") return liveDeals;
-    if (source === "demo") return staticDeals;
-    return [...liveDeals, ...staticDeals];
-  }, [source, liveDeals, staticDeals]);
-
+  // Real-only — liveDeals is the full list now that the SAMPLE seed is gone.
   const filtered = useMemo(() => {
-    if (!query) return merged;
+    if (!query) return liveDeals;
     const q = query.toLowerCase();
-    return merged.filter(
+    return liveDeals.filter(
       (d) =>
         d.company.toLowerCase().includes(q) ||
         d.product.toLowerCase().includes(q) ||
         d.owner.toLowerCase().includes(q)
     );
-  }, [query, merged]);
+  }, [query, liveDeals]);
 
   const byStage: Record<DealStage, LiveDeal[]> = useMemo(() => {
     const out = {} as Record<DealStage, LiveDeal[]>;
@@ -295,7 +288,10 @@ export default function CrmPage() {
           <div>
             <h1 className="text-2xl font-bold">CRM Pipeline</h1>
             <p className="text-xs text-ink-secondary">
-              {filtered.length} deals · {formatMoney(totalValue)} pipeline value · {formatMoney(wonValue)} closed won
+              {liveDeals.length === 0
+                ? "No deals yet — deals appear when an OutreachDraft is sent and gets a dealStage / dealValue"
+                : `${filtered.length} deal${filtered.length === 1 ? "" : "s"} · ${formatMoney(totalValue)} pipeline value · ${formatMoney(wonValue)} closed won`
+              }
             </p>
           </div>
         </div>
@@ -308,27 +304,6 @@ export default function CrmPage() {
               placeholder="Search deals…"
               className="h-9 w-64 rounded-lg border border-bg-border bg-bg-card pl-9 pr-3 text-sm placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
             />
-          </div>
-          <div className="flex overflow-hidden rounded-lg border border-bg-border">
-            {(["all", "live", "demo"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setSource(s)}
-                className={`px-3 text-xs capitalize ${
-                  source === s ? "bg-brand-500/15 text-brand-200" : "bg-bg-card text-ink-secondary"
-                }`}
-                title={
-                  s === "live"
-                    ? "Only deals backed by real drafts"
-                    : s === "demo"
-                    ? "Only sample/demo deals"
-                    : "Live + demo deals"
-                }
-              >
-                {s === "live" && <Zap className="mr-1 inline h-3 w-3" />}
-                {s}
-              </button>
-            ))}
           </div>
           <div className="flex overflow-hidden rounded-lg border border-bg-border">
             <button
@@ -403,6 +378,21 @@ export default function CrmPage() {
               </tr>
             </thead>
             <tbody>
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-5 py-12 text-center">
+                    <Workflow className="mx-auto mb-2 h-6 w-6 text-ink-tertiary" />
+                    <div className="text-sm font-semibold">
+                      {liveDeals.length === 0 ? "No deals in your pipeline yet" : "No deals match your search"}
+                    </div>
+                    <p className="mx-auto mt-1 max-w-md text-xs text-ink-tertiary">
+                      {liveDeals.length === 0
+                        ? <>Deals appear here when an outreach draft is sent and the operator (or the Negotiation Agent) sets a deal stage. Run a pipeline from <a href="/pipeline" className="text-brand-300 hover:underline">/pipeline</a> to start.</>
+                        : "Clear the search box to see all deals."}
+                    </p>
+                  </td>
+                </tr>
+              )}
               {filtered.map((d) => (
                 <tr
                   key={d.id}
