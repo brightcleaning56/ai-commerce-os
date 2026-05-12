@@ -1079,6 +1079,40 @@ export type OutreachDraft = {
   linkedinSentBody?: string;
   linkedinSendError?: string;
   /**
+   * AI-suggested replies (slice: reply triage). When a buyer responds via
+   * web or email, the Reply Triage Agent generates 1-3 alternative
+   * responses the operator can pick from. Each suggestion is keyed to
+   * the buyer message it's responding to (`basedOnMessageId`) so old
+   * suggestions don't appear once a newer buyer reply lands.
+   *
+   * Lifecycle: append on generation, stamp `sentAt` when operator clicks
+   * Send (and the email goes out), or `discardedAt` when operator
+   * dismisses. Never deleted — operator can refer back to what was
+   * suggested vs picked vs sent.
+   */
+  suggestedReplies?: Array<{
+    id: string;                       // sug_<random>
+    generatedAt: string;              // ISO
+    basedOnMessageId: string;         // the buyer ThreadMessage this responds to
+    actionLabel:
+      | "Accept"
+      | "Counter"
+      | "Decline"
+      | "Clarify"
+      | "Schedule"
+      | "Other";
+    subject: string;
+    body: string;
+    rationale?: string;               // 1-line "why I'd send this"
+    confidence: number;               // 0-100 self-rated
+    modelUsed: string;                // anthropic model id or "fallback"
+    estCostUsd?: number;
+    usedFallback: boolean;
+    sentAt?: string;                  // when operator clicked Send
+    sentMessageId?: string;           // provider message id from sendEmail
+    discardedAt?: string;             // when operator clicked Discard
+  }>;
+  /**
    * If this draft is a follow-up to a previous one, points back at it. Lets the
    * UI render the lineage and prevents the follow-up agent from generating
    * an infinite chain of re-pitches.

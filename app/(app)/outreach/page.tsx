@@ -77,6 +77,9 @@ type DraftItem = {
   estCostUsd?: number;
   usedFallback: boolean;
   thread?: ThreadMsg[];
+  // AI Reply Triage suggestions — generated when a buyer reply lands.
+  // Operator picks one + clicks Send, or Discard to remove.
+  suggestedReplies?: SuggestedReply[];
   sentAt?: string;
   sentToEmail?: string;
   redirectedFromEmail?: string;
@@ -137,6 +140,23 @@ type ThreadMsg = {
   cost?: number;
   summary?: string;
   recommendedAction?: string;
+};
+
+type SuggestedReply = {
+  id: string;
+  generatedAt: string;
+  basedOnMessageId: string;
+  actionLabel: "Accept" | "Counter" | "Decline" | "Clarify" | "Schedule" | "Other";
+  subject: string;
+  body: string;
+  rationale?: string;
+  confidence: number;
+  modelUsed: string;
+  estCostUsd?: number;
+  usedFallback: boolean;
+  sentAt?: string;
+  sentMessageId?: string;
+  discardedAt?: string;
 };
 
 const DRAFT_TONE: Record<string, string> = {
@@ -299,6 +319,233 @@ function CampaignDetail({
           <CheckCircle2 className="h-4 w-4" /> View Replies ({c.replied})
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Reply Triage panel — renders AI-suggested responses for the LATEST
+ * buyer message on a draft. Each suggestion shows actionLabel +
+ * confidence + rationale + body preview, with Send / Discard buttons.
+ *
+ * Send → POST /api/drafts/[id]/suggested-replies/[suggestionId]/send
+ *        which uses sendEmail (CAN-SPAM footer auto-attaches), stamps
+ *        sentAt, and appends a ThreadMessage with role:"agent".
+ * Discard → DELETE same endpoint
+ *
+ * If no suggestions exist for the latest buyer message yet, shows
+ * a "Generate suggestions" button (manual trigger for cases where
+ * auto-trigger missed or operator wants to regenerate after editing).
+ */
+function SuggestedRepliesPanel({
+  draftId,
+  draftBuyerCompany,
+  thread,
+  suggestedReplies,
+  onSent,
+}: {
+  draftId: string;
+  draftBuyerCompany: string;
+  thread: ThreadMsg[];
+  suggestedReplies: SuggestedReply[];
+  onSent: (updatedDraft: { thread?: ThreadMsg[] }) => void;
+}) {
+  const [generating, setGenerating] = useState(false);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [localSuggestions, setLocalSuggestions] = useState<SuggestedReply[]>(suggestedReplies);
+  const { toast } = useToast();
+
+  // Re-sync when parent props change (e.g. polling refresh)
+  useEffect(() => {
+    setLocalSuggestions(suggestedReplies);
+  }, [suggestedReplies]);
+
+  // Latest buyer message is what triage responds to. If none → no panel.
+  const buyerMessages = thread.filter((m) => m.role === "buyer");
+  const latestBuyerMessage = buyerMessages[buyerMessages.length - 1];
+  if (!latestBuyerMessage) return null;
+
+  // Only show suggestions tied to the latest buyer message AND not yet
+  // sent/discarded. Old suggestions stay in the array but don't render.
+  const active = localSuggestions.filter(
+    (s) => s.basedOnMessageId === latestBuyerMessage.id && !s.sentAt && !s.discardedAt,
+  );
+  const sentForLatest = localSuggestions.filter(
+    (s) => s.basedOnMessageId === latestBuyerMessage.id && s.sentAt,
+  );
+
+  async function generate() {
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const r = await fetch(`/api/drafts/${draftId}/suggested-replies`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Generate failed (${r.status})`);
+      if (d.skipped === "already-suggested") {
+        toast("Suggestions already exist for this reply", "info");
+      } else {
+        toast(`Generated ${d.generated?.length ?? 0} suggestion${d.generated?.length === 1 ? "" : "s"}`, "success");
+      }
+      // Refresh by GETting the full list
+      const re = await fetch(`/api/drafts/${draftId}/suggested-replies`, { cache: "no-store" });
+      if (re.ok) {
+        const rd = await re.json();
+        setLocalSuggestions(rd.suggestions ?? []);
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Generate failed", "error");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function send(suggestionId: string) {
+    if (pendingId) return;
+    setPendingId(suggestionId);
+    try {
+      const r = await fetch(
+        `/api/drafts/${draftId}/suggested-replies/${suggestionId}/send`,
+        { method: "POST" },
+      );
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Send failed (${r.status})`);
+      toast(
+        d.alreadySent
+          ? "This suggestion was already sent"
+          : `Sent to ${draftBuyerCompany} · ${d.provider ?? "email"}`,
+        d.alreadySent ? "info" : "success",
+      );
+      // Optimistically update local state: mark this suggestion as sent
+      setLocalSuggestions((prev) =>
+        prev.map((s) => (s.id === suggestionId ? { ...s, sentAt: d.sentAt ?? new Date().toISOString() } : s)),
+      );
+      // Tell parent so its thread list refreshes
+      const re = await fetch(`/api/drafts/${draftId}/suggested-replies`, { cache: "no-store" });
+      void re;
+      // Bump parent's thread by re-fetching the draft
+      const dr = await fetch(`/api/drafts`, { cache: "no-store" });
+      if (dr.ok) {
+        const dl = await dr.json();
+        const fresh = (dl.drafts as Array<{ id: string; thread?: ThreadMsg[] }>).find((x) => x.id === draftId);
+        if (fresh) onSent(fresh);
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Send failed", "error");
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  async function discard(suggestionId: string) {
+    if (pendingId) return;
+    setPendingId(suggestionId);
+    try {
+      const r = await fetch(
+        `/api/drafts/${draftId}/suggested-replies/${suggestionId}/send`,
+        { method: "DELETE" },
+      );
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Discard failed (${r.status})`);
+      setLocalSuggestions((prev) =>
+        prev.map((s) => (s.id === suggestionId ? { ...s, discardedAt: new Date().toISOString() } : s)),
+      );
+      toast("Discarded", "info");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Discard failed", "error");
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  const ACTION_TONE: Record<SuggestedReply["actionLabel"], string> = {
+    Accept: "bg-accent-green/15 text-accent-green",
+    Counter: "bg-accent-amber/15 text-accent-amber",
+    Decline: "bg-accent-red/15 text-accent-red",
+    Clarify: "bg-accent-blue/15 text-accent-blue",
+    Schedule: "bg-brand-500/15 text-brand-200",
+    Other: "bg-bg-hover text-ink-secondary",
+  };
+
+  return (
+    <div className="rounded-md border border-brand-500/30 bg-brand-500/5 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-brand-300">
+          <Sparkles className="h-3 w-3" /> AI suggested replies
+          {sentForLatest.length > 0 && (
+            <span className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[9px] font-semibold text-accent-green">
+              {sentForLatest.length} sent
+            </span>
+          )}
+        </div>
+        {active.length === 0 && (
+          <button
+            onClick={generate}
+            disabled={generating}
+            className="flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[10px] hover:bg-bg-hover disabled:opacity-60"
+          >
+            {generating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+            {sentForLatest.length > 0 ? "Generate more" : "Generate"}
+          </button>
+        )}
+      </div>
+
+      {active.length === 0 ? (
+        <p className="mt-1.5 text-[11px] text-ink-tertiary">
+          {sentForLatest.length > 0
+            ? "Already responded. Generate fresh suggestions if the buyer replies again."
+            : "Auto-triggered when buyer replies via /reply/[token]. Or click Generate to ask Claude for response options."}
+        </p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {active.map((s) => (
+            <div
+              key={s.id}
+              className="rounded-md border border-bg-border bg-bg-card/60 p-2.5"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${ACTION_TONE[s.actionLabel]}`}>
+                    {s.actionLabel}
+                  </span>
+                  <span className="text-[10px] text-ink-tertiary">{s.confidence}%</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => discard(s.id)}
+                    disabled={pendingId !== null}
+                    className="rounded-md border border-bg-border bg-bg-hover/40 px-2 py-1 text-[10px] text-ink-secondary hover:bg-bg-hover hover:text-ink-primary disabled:opacity-50"
+                    title="Discard this suggestion"
+                  >
+                    Discard
+                  </button>
+                  <button
+                    onClick={() => send(s.id)}
+                    disabled={pendingId !== null}
+                    className="flex items-center gap-1 rounded-md bg-gradient-brand px-2.5 py-1 text-[10px] font-semibold shadow-glow disabled:opacity-50"
+                    title="Send this response via email — uses /api/drafts/[id]/suggested-replies/[id]/send. CAN-SPAM footer auto-attaches."
+                  >
+                    {pendingId === s.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Send className="h-3 w-3" />
+                    )}
+                    Send
+                  </button>
+                </div>
+              </div>
+              {s.rationale && (
+                <p className="mt-1.5 text-[10px] italic text-ink-tertiary">{s.rationale}</p>
+              )}
+              <div className="mt-1.5 text-[11px] font-semibold text-ink-primary">
+                Subject: <span className="font-normal text-ink-secondary">{s.subject}</span>
+              </div>
+              <pre className="mt-1 whitespace-pre-wrap break-words font-sans text-[11px] text-ink-secondary">
+                {s.body}
+              </pre>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -635,6 +882,17 @@ function DraftCard({
                     recommendedAction={m.recommendedAction}
                   />
                 ))}
+
+                {/* AI Reply Triage — surfaces 1-3 operator-pickable
+                    responses for the latest buyer message */}
+                <SuggestedRepliesPanel
+                  draftId={d.id}
+                  draftBuyerCompany={d.buyerCompany}
+                  thread={d.thread ?? []}
+                  suggestedReplies={d.suggestedReplies ?? []}
+                  onSent={(updated) => onThreadUpdate(d.id, updated.thread ?? [])}
+                />
+
                 {negotiationMeta && (
                   <div className="rounded-md border border-brand-500/30 bg-brand-500/5 px-3 py-2">
                     <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-brand-300">

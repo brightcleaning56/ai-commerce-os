@@ -124,6 +124,20 @@ export async function POST(
 
   await store.appendToThread(draft.id, newMsg);
 
+  // ─── Auto-fire Reply Triage Agent ────────────────────────────────────
+  // As soon as the buyer message lands, kick off the agent that proposes
+  // 1-3 operator-pickable responses. Fire-and-forget — never blocks the
+  // buyer's submission on Anthropic latency. Errors are logged + swallowed
+  // so the public reply page always returns success.
+  //
+  // The operator sees suggestions in /outreach next time they look at
+  // the thread.
+  import("@/lib/agents/replyTriage")
+    .then((m) => m.runReplyTriage(draft.id))
+    .catch((err) => {
+      console.error("[drafts/reply] reply triage failed", err);
+    });
+
   // Best-effort operator notification — don't block buyer's response on email.
   // Operator will see this message in /outreach either way.
   const op = getOperator();
