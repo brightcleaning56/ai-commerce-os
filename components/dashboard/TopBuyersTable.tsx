@@ -14,6 +14,9 @@ type Buyer = {
   industry?: string;
   intentScore?: number;
   fit?: number;
+  // Optional — present on most DiscoveredBuyer / static catalog records.
+  // Used to wire the LinkedIn icon to the real profile when available.
+  linkedin?: string;
 };
 
 export default function TopBuyersTable() {
@@ -88,7 +91,10 @@ export default function TopBuyersTable() {
                 return (
                   <tr key={b.id} className="border-t border-bg-border hover:bg-bg-hover/30">
                     <td className="px-5 py-3">
-                      <div className="flex items-center gap-3">
+                      <Link
+                        href={`/buyers?focus=${b.id}`}
+                        className="flex items-center gap-3 hover:text-brand-200"
+                      >
                         <div className="grid h-9 w-9 place-items-center rounded-md bg-bg-hover text-[10px] font-semibold">
                           {initials || "??"}
                         </div>
@@ -100,7 +106,7 @@ export default function TopBuyersTable() {
                             </div>
                           )}
                         </div>
-                      </div>
+                      </Link>
                     </td>
                     <td className="px-3 py-3 text-ink-secondary">{b.type}</td>
                     <td className="px-3 py-3 text-ink-secondary">{b.location}</td>
@@ -114,12 +120,26 @@ export default function TopBuyersTable() {
                         >
                           <Mail className="h-3.5 w-3.5" />
                         </Link>
-                        <button
-                          className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-secondary hover:text-ink-primary"
-                          title="LinkedIn (coming soon)"
-                        >
-                          <Linkedin className="h-3.5 w-3.5" />
-                        </button>
+                        {b.linkedin ? (
+                          <a
+                            href={
+                              b.linkedin.startsWith("http")
+                                ? b.linkedin
+                                : `https://${b.linkedin.replace(/^\/+/, "")}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-secondary hover:text-ink-primary"
+                            title={`Open LinkedIn — ${b.linkedin}`}
+                          >
+                            <Linkedin className="h-3.5 w-3.5" />
+                          </a>
+                        ) : (
+                          // Hide the LinkedIn button entirely when there's
+                          // no profile URL on the record. Better than a
+                          // dead "coming soon" button — same honesty rule.
+                          null
+                        )}
                       </div>
                     </td>
                   </tr>

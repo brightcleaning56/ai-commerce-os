@@ -199,7 +199,12 @@ export function CategoryDonut() {
             {series.map((cat) => {
               const pct = total === 0 ? 0 : ((cat.value / total) * 100).toFixed(0);
               return (
-                <div key={cat.name} className="flex items-center justify-between gap-2">
+                <Link
+                  key={cat.name}
+                  href={`/products?category=${encodeURIComponent(cat.name)}`}
+                  className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-bg-hover/50"
+                  title={`Filter Product Discovery by ${cat.name}`}
+                >
                   <span className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full" style={{ background: cat.fill }} />
                     <span className="text-ink-secondary truncate">{cat.name}</span>
@@ -207,7 +212,7 @@ export function CategoryDonut() {
                   <span className="text-ink-tertiary">
                     {pct}% ({cat.value})
                   </span>
-                </div>
+                </Link>
               );
             })}
           </div>

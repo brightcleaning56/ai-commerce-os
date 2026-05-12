@@ -1,6 +1,6 @@
 "use client";
 import clsx from "clsx";
-import { Bookmark, Eye, Flame, Sparkles } from "lucide-react";
+import { Eye, Flame, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -112,7 +112,10 @@ export default function TopProductsTable() {
                 return (
                   <tr key={p.id} className="border-t border-bg-border hover:bg-bg-hover/30">
                     <td className="px-5 py-3">
-                      <div className="flex items-center gap-3">
+                      <Link
+                        href={`/products?focus=${p.id}`}
+                        className="flex items-center gap-3 hover:text-brand-200"
+                      >
                         <div className="grid h-9 w-9 place-items-center rounded-md bg-gradient-card text-base">
                           {p.emoji ?? "📦"}
                         </div>
@@ -120,7 +123,7 @@ export default function TopProductsTable() {
                           <div className="font-medium">{p.name}</div>
                           <div className="text-[11px] text-ink-tertiary">{p.category}</div>
                         </div>
-                      </div>
+                      </Link>
                     </td>
                     <td className="px-3 py-3 font-semibold text-brand-200">{p.demandScore}</td>
                     <td className="px-3 py-3 w-32">
@@ -144,12 +147,13 @@ export default function TopProductsTable() {
                         <Link
                           href={`/products?focus=${p.id}`}
                           className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-secondary hover:text-ink-primary"
+                          title="View product"
                         >
                           <Eye className="h-3.5 w-3.5" />
                         </Link>
-                        <button className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-secondary hover:text-ink-primary">
-                          <Bookmark className="h-3.5 w-3.5" />
-                        </button>
+                        {/* Dead bookmark button removed — no watchlist
+                            backend exists. Re-add as a Link when the
+                            saved-products feature ships. */}
                       </div>
                     </td>
                   </tr>
