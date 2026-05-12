@@ -741,6 +741,31 @@ export type BusinessRecord = {
   doNotContact?: boolean;           // explicit operator flag
   optedOutAt?: string;              // ISO when buyer opted out
   optedOutReason?: string;          // "unsubscribe-link" / "complaint" / etc.
+  // ── AI Profile (slice 3 of Business Network Intelligence) ─────────────
+  // Set by the Business Profile Agent (lib/agents/businessProfile.ts) when
+  // it fetches the business's homepage and asks Claude to extract what
+  // they sell, who their likely suppliers/distributors are, etc. Updated
+  // on each /profile scan. Confidence is the model's own self-rating of
+  // how solid each inference is (homepage-only data is fuzzy).
+  //
+  // This data feeds the Business Outreach Agent — when present, the
+  // agent personalizes the pitch with concrete signals ("I see you
+  // carry Brand X, we have a better supplier for that") instead of the
+  // generic industry-level pitch.
+  aiProfile?: {
+    scannedAt: string;              // ISO when the scan ran
+    homepageUrl?: string;           // URL that was actually fetched (after redirects)
+    productsSold: string[];         // 0-10 short labels ("commercial roofing", "shingles")
+    likelySupplierBrands: string[]; // 0-10 brand names visible in copy/logos
+    likelyDistributors: string[];   // 0-5 channel partners they sell through
+    industryRefined?: string;       // more specific than CSV import (e.g. "Commercial roofing contractor" vs "Roofing")
+    summary?: string;               // 1-2 sentence operator-readable summary
+    confidence: number;             // 0-100 self-rating of the inferences
+    modelUsed: string;              // anthropic model id or "fallback"
+    estCostUsd?: number;            // total Anthropic cost for this scan
+    fetchError?: string;            // populated when homepage fetch fails
+    usedFallback: boolean;          // true if Anthropic call skipped/failed
+  };
 };
 
 /**

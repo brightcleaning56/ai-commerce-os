@@ -1,6 +1,7 @@
 "use client";
 import {
   AlertCircle,
+  Brain,
   Building2,
   CheckCircle2,
   Database,
@@ -8,6 +9,7 @@ import {
   MapPin,
   Search,
   Send,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -32,6 +34,21 @@ type BusinessSource =
   | "data_axle"
   | "google_places"
   | "census";
+
+type AiProfile = {
+  scannedAt: string;
+  homepageUrl?: string;
+  productsSold: string[];
+  likelySupplierBrands: string[];
+  likelyDistributors: string[];
+  industryRefined?: string;
+  summary?: string;
+  confidence: number;
+  modelUsed: string;
+  estCostUsd?: number;
+  fetchError?: string;
+  usedFallback: boolean;
+};
 
 type BusinessRecord = {
   id: string;
@@ -61,6 +78,7 @@ type BusinessRecord = {
   lastContactedAt?: string;
   outreachCount?: number;
   doNotContact?: boolean;
+  aiProfile?: AiProfile;
 };
 
 type Counts = {
@@ -144,11 +162,15 @@ export default function BusinessesPage() {
   const [selected, setSelected] = useState<BusinessRecord | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [draftingOutreach, setDraftingOutreach] = useState(false);
+  const [scanningProfile, setScanningProfile] = useState<string | null>(null);
+  const [batchScanning, setBatchScanning] = useState(false);
   const { toast } = useToast();
 
   // Max batch size matches the endpoint's MAX_BUSINESSES_PER_BATCH.
   // Operator can run the action multiple times for larger campaigns.
   const MAX_BATCH = 25;
+  // Profile-batch endpoint is capped lower (homepage fetch + Claude per row).
+  const MAX_PROFILE_BATCH = 10;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -289,6 +311,64 @@ export default function BusinessesPage() {
       toast(e instanceof Error ? e.message : "Draft outreach failed", "error");
     } finally {
       setDraftingOutreach(false);
+    }
+  }
+
+  async function runProfileScanOne(b: BusinessRecord) {
+    if (scanningProfile) return;
+    if (!b.website) {
+      toast("No website on record — add one to enable profile scan", "info");
+      return;
+    }
+    setScanningProfile(b.id);
+    try {
+      const r = await fetch(`/api/admin/businesses/${b.id}/profile`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Scan failed (${r.status})`);
+      const conf = d.profile?.confidence ?? 0;
+      const products = d.profile?.productsSold?.length ?? 0;
+      toast(
+        d.profile?.fetchError
+          ? `Scan failed: ${d.profile.fetchError}`
+          : `Profile scanned — ${products} products found · ${conf}% confidence`,
+        d.profile?.fetchError ? "error" : "success",
+      );
+      // Update local selected if open
+      if (selected?.id === b.id) {
+        setSelected({ ...selected, aiProfile: d.profile });
+      }
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Profile scan failed", "error");
+    } finally {
+      setScanningProfile(null);
+    }
+  }
+
+  async function runProfileScanBatch() {
+    const ids = Array.from(checked).slice(0, MAX_PROFILE_BATCH);
+    if (ids.length === 0) return;
+    setBatchScanning(true);
+    try {
+      const r = await fetch("/api/admin/businesses/profile-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ businessIds: ids }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Batch scan failed (${r.status})`);
+      const scanned = d.scanned ?? 0;
+      const skipped = d.skipped ?? 0;
+      const errored = d.errored ?? 0;
+      toast(
+        `Scanned ${scanned}${skipped ? ` · skipped ${skipped}` : ""}${errored ? ` · errored ${errored}` : ""}`,
+        scanned > 0 ? "success" : "info",
+      );
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Batch scan failed", "error");
+    } finally {
+      setBatchScanning(false);
     }
   }
 
@@ -503,6 +583,15 @@ export default function BusinessesPage() {
               Clear
             </button>
             <button
+              onClick={runProfileScanBatch}
+              disabled={batchScanning || checked.size === 0}
+              title={`Run the AI Profile Scan on up to ${MAX_PROFILE_BATCH} selected at a time. Fetches each homepage, extracts products + suppliers + distributors via Claude. ~$0.003 per scan.`}
+              className="flex items-center gap-2 rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-1.5 text-[11px] hover:bg-brand-500/20 disabled:opacity-60"
+            >
+              {batchScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Brain className="h-3.5 w-3.5" />}
+              Profile scan (≤{MAX_PROFILE_BATCH})
+            </button>
+            <button
               onClick={draftOutreachForChecked}
               disabled={draftingOutreach || checked.size === 0}
               title="Generate a personalized AVYN-onboarding draft per business. Suppressed (DNC) rows are skipped server-side. Drafts land in /outreach for review before send."
@@ -574,7 +663,18 @@ export default function BusinessesPage() {
                           />
                         </td>
                         <td className="px-4 py-3">
-                          <div className="font-medium">{b.name}</div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium">{b.name}</span>
+                            {b.aiProfile && b.aiProfile.confidence >= 30 && !b.aiProfile.fetchError && (
+                              <span
+                                title={`AI profile scanned · ${b.aiProfile.confidence}% confidence`}
+                                className="flex items-center gap-0.5 rounded bg-brand-500/15 px-1 py-0.5 text-[9px] font-semibold text-brand-200"
+                              >
+                                <Brain className="h-2.5 w-2.5" />
+                                {b.aiProfile.confidence}
+                              </span>
+                            )}
+                          </div>
                           {b.email && (
                             <div className="text-[11px] text-ink-tertiary">{b.email}</div>
                           )}
@@ -659,6 +759,92 @@ export default function BusinessesPage() {
                 )}
                 {selected.outreachCount && selected.outreachCount > 0 && (
                   <Field k="Outreach attempts" v={String(selected.outreachCount)} />
+                )}
+              </div>
+
+              {/* AI Profile Scan — shown when present + button to (re)run */}
+              <div className="rounded-lg border border-brand-500/30 bg-gradient-to-br from-brand-500/5 to-transparent p-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[11px] font-semibold text-brand-200">
+                    <Brain className="h-3.5 w-3.5" />
+                    AI Profile Scan
+                    {selected.aiProfile && (
+                      <span className="text-[10px] font-normal text-ink-tertiary">
+                        · {selected.aiProfile.confidence}% confidence
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => runProfileScanOne(selected)}
+                    disabled={scanningProfile === selected.id || !selected.website}
+                    title={!selected.website ? "Needs a website on the record" : "Re-run the homepage fetch + AI extraction"}
+                    className="flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[10px] hover:bg-bg-hover disabled:opacity-60"
+                  >
+                    {scanningProfile === selected.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
+                    {selected.aiProfile ? "Re-scan" : "Run scan"}
+                  </button>
+                </div>
+
+                {!selected.aiProfile ? (
+                  <p className="mt-2 text-[11px] text-ink-tertiary">
+                    {selected.website
+                      ? <>No scan yet. Click <strong>Run scan</strong> to fetch the homepage + extract products / suppliers / distributors via Claude (~$0.003).</>
+                      : "Add a website to the record first — the scan reads from the homepage."}
+                  </p>
+                ) : selected.aiProfile.fetchError ? (
+                  <div className="mt-2 rounded-md border border-accent-red/30 bg-accent-red/5 px-2 py-1.5 text-[11px] text-accent-red">
+                    Scan failed: {selected.aiProfile.fetchError}
+                  </div>
+                ) : (
+                  <div className="mt-2 space-y-2 text-[11px]">
+                    {selected.aiProfile.summary && (
+                      <p className="text-ink-secondary">{selected.aiProfile.summary}</p>
+                    )}
+                    {selected.aiProfile.industryRefined && selected.aiProfile.industryRefined !== selected.industry && (
+                      <div className="text-ink-tertiary">
+                        <span className="font-semibold text-ink-secondary">Refined:</span> {selected.aiProfile.industryRefined}
+                      </div>
+                    )}
+                    {selected.aiProfile.productsSold.length > 0 && (
+                      <div>
+                        <div className="text-[9px] uppercase tracking-wider text-ink-tertiary">Sells</div>
+                        <div className="mt-0.5 flex flex-wrap gap-1">
+                          {selected.aiProfile.productsSold.map((p) => (
+                            <span key={p} className="rounded bg-brand-500/15 px-1.5 py-0.5 text-[10px] text-brand-200">{p}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {selected.aiProfile.likelySupplierBrands.length > 0 && (
+                      <div>
+                        <div className="text-[9px] uppercase tracking-wider text-ink-tertiary">Likely buys from</div>
+                        <div className="mt-0.5 flex flex-wrap gap-1">
+                          {selected.aiProfile.likelySupplierBrands.map((b) => (
+                            <span key={b} className="rounded bg-accent-amber/15 px-1.5 py-0.5 text-[10px] text-accent-amber">{b}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {selected.aiProfile.likelyDistributors.length > 0 && (
+                      <div>
+                        <div className="text-[9px] uppercase tracking-wider text-ink-tertiary">Sells through</div>
+                        <div className="mt-0.5 flex flex-wrap gap-1">
+                          {selected.aiProfile.likelyDistributors.map((d) => (
+                            <span key={d} className="rounded bg-accent-cyan/15 px-1.5 py-0.5 text-[10px] text-accent-cyan">{d}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div className="text-[10px] text-ink-tertiary">
+                      Scanned {relTime(selected.aiProfile.scannedAt)}
+                      {selected.aiProfile.estCostUsd && ` · $${selected.aiProfile.estCostUsd.toFixed(4)}`}
+                      {selected.aiProfile.usedFallback && " · fallback (no Anthropic)"}
+                    </div>
+                  </div>
                 )}
               </div>
 

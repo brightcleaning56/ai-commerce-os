@@ -106,14 +106,24 @@ function buildPrompt(b: BusinessRecord): string {
   const location = [b.city, b.state, b.zip].filter(Boolean).join(", ") || "their region";
   const dm = b.contactName ?? "";
   const dmTitle = b.contactTitle ?? "";
-  const industry = b.industry ?? "their business";
+  const industry = b.aiProfile?.industryRefined || b.industry || "their business";
+
+  // When a Profile Scan has run, surface its findings to the prompt so
+  // the pitch can reference real signals from the business's homepage
+  // ("I see you carry Brand X — we have a better supplier") instead of
+  // staying at the generic industry level.
+  const profileBlock = b.aiProfile && b.aiProfile.confidence >= 30
+    ? `\n\n## What we know about this specific business (from homepage scan, confidence ${b.aiProfile.confidence}/100)
+${b.aiProfile.summary ? `Summary: ${b.aiProfile.summary}\n` : ""}${b.aiProfile.productsSold.length > 0 ? `Products/services they sell: ${b.aiProfile.productsSold.join(", ")}\n` : ""}${b.aiProfile.likelySupplierBrands.length > 0 ? `Brands they currently use (likely suppliers): ${b.aiProfile.likelySupplierBrands.join(", ")}\n` : ""}${b.aiProfile.likelyDistributors.length > 0 ? `Channels they sell through: ${b.aiProfile.likelyDistributors.join(", ")}\n` : ""}
+Reference ONE of these signals naturally in the email body — pick whichever feels most relevant. Don't list them; weave one in conversationally.`
+    : "";
 
   return `You are the Business Outreach Agent for AVYN Commerce. Your job: draft a personalized first-touch outreach to a target business pitching AVYN's value.
 
 ## Target business
 - Name: ${b.name}
 - Industry: ${industry}
-- Location: ${location}${dm ? `\n- Decision-maker: ${dm}${dmTitle ? `, ${dmTitle}` : ""}` : ""}${b.website ? `\n- Website: ${b.website}` : ""}${b.employeesBand ? `\n- Size: ${b.employeesBand} employees` : ""}
+- Location: ${location}${dm ? `\n- Decision-maker: ${dm}${dmTitle ? `, ${dmTitle}` : ""}` : ""}${b.website ? `\n- Website: ${b.website}` : ""}${b.employeesBand ? `\n- Size: ${b.employeesBand} employees` : ""}${profileBlock}
 
 ## What AVYN does for THIS shape of business
 ${angle}
@@ -124,7 +134,7 @@ Sign emails with "${op.name}" on its own line, then "${op.title} · ${op.company
 
 ## Rules
 - Greet by first name if a decision-maker is known; otherwise greet "Hi there" or use the company name naturally
-- Reference one specific thing about this business (industry vertical, city, size) — feels personal, not blast
+- Reference one specific thing about this business (industry vertical, city, size, OR a signal from the homepage scan if confident) — feels personal, not blast
 - The ask should be soft: "open to a 15-min call?" or "want me to send a 1-page overview?"
 - No buzzwords ("synergy", "circle back", "leverage", "robust", "best-in-class"). No exclamation marks.
 - Email: 70-110 words, plain text, 3 short paragraphs max
