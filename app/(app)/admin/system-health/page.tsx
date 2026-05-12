@@ -37,6 +37,32 @@ type TestResult = {
   provider?: string;
 };
 
+type CronRunRecord = {
+  id: string;
+  ranAt: string;
+  durationMs: number;
+  status: "success" | "error";
+  totals?: {
+    products: number;
+    buyers: number;
+    suppliers: number;
+    drafts: number;
+    totalCost: number;
+  };
+  errorMessage?: string;
+};
+
+type CronStatusResponse = {
+  deployed: boolean;
+  platform: string;
+  enabled: boolean;
+  secretConfigured: boolean;
+  scheduleHuman: string;
+  nextRunAt: string | null;
+  lastRun: CronRunRecord | null;
+  recentRuns: CronRunRecord[];
+};
+
 type HealthResponse = {
   overall: "green" | "yellow" | "red";
   blockingFailures: number;
@@ -73,6 +99,7 @@ const ROW_META: Record<
 
 export default function SystemHealthPage() {
   const [data, setData] = useState<HealthResponse | null>(null);
+  const [cronStatus, setCronStatus] = useState<CronStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testEmailTo, setTestEmailTo] = useState("");
@@ -131,13 +158,19 @@ export default function SystemHealthPage() {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch("/api/admin/system-health", { cache: "no-store", credentials: "include" });
-      if (!r.ok) {
-        const body = await r.json().catch(() => ({}));
-        setError(body.error ?? `API returned ${r.status}`);
+      // Parallel: env-introspection health AND cron run history. The cron
+      // endpoint is unauthenticated (read-only) so any operator can see it.
+      const [healthR, cronR] = await Promise.all([
+        fetch("/api/admin/system-health", { cache: "no-store", credentials: "include" }),
+        fetch("/api/cron/status", { cache: "no-store" }).catch(() => null),
+      ]);
+      if (!healthR.ok) {
+        const body = await healthR.json().catch(() => ({}));
+        setError(body.error ?? `API returned ${healthR.status}`);
         return;
       }
-      setData(await r.json());
+      setData(await healthR.json());
+      if (cronR?.ok) setCronStatus(await cronR.json());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Network error");
     } finally {
@@ -304,6 +337,82 @@ export default function SystemHealthPage() {
               </div>
             </div>
           </div>
+
+          {/* Recent cron activity — shows what actually fired vs the
+              schedule. /api/cron/status only records pipeline-cron runs
+              today, so other crons (lead-followups, outreach-jobs,
+              auto-promote-sweep, followups, daily-digest) won't show
+              here yet. When they do (slice to capture cron-run records
+              from those endpoints), this panel reads them automatically. */}
+          {cronStatus && (
+            <div className="rounded-xl border border-bg-border bg-bg-card">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-bg-border px-5 py-3.5">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <Clock className="h-4 w-4 text-brand-300" /> Recent cron activity
+                </div>
+                <div className="text-[11px] text-ink-tertiary">
+                  Pipeline · {cronStatus.scheduleHuman}
+                  {cronStatus.nextRunAt && (
+                    <> · next {new Date(cronStatus.nextRunAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</>
+                  )}
+                </div>
+              </div>
+              {cronStatus.recentRuns.length === 0 ? (
+                <div className="px-5 py-8 text-center text-[11px] text-ink-tertiary">
+                  No pipeline-cron runs recorded yet.{" "}
+                  {!cronStatus.deployed
+                    ? "Cron schedules only fire when deployed to Netlify or Vercel."
+                    : "Wait for the next scheduled fire or trigger via the cron endpoint."}
+                </div>
+              ) : (
+                <ul className="divide-y divide-bg-border text-[11px]">
+                  {cronStatus.recentRuns.slice(0, 10).map((run) => (
+                    <li key={run.id} className="flex flex-wrap items-center gap-3 px-5 py-2">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                          run.status === "success"
+                            ? "bg-accent-green/15 text-accent-green"
+                            : "bg-accent-red/15 text-accent-red"
+                        }`}
+                      >
+                        {run.status === "success" ? (
+                          <CheckCircle2 className="h-3 w-3" />
+                        ) : (
+                          <XCircle className="h-3 w-3" />
+                        )}
+                        {run.status}
+                      </span>
+                      <span className="font-mono text-ink-tertiary">{run.id.slice(0, 18)}</span>
+                      <span className="text-ink-secondary">
+                        {new Date(run.ranAt).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                      <span className="text-ink-tertiary">
+                        {(run.durationMs / 1000).toFixed(1)}s
+                      </span>
+                      {run.totals && (
+                        <span className="text-ink-tertiary">
+                          {run.totals.products}p · {run.totals.buyers}b · {run.totals.drafts}d ·{" "}
+                          ${run.totals.totalCost.toFixed(4)}
+                        </span>
+                      )}
+                      {run.errorMessage && (
+                        <span className="text-accent-red" title={run.errorMessage}>
+                          {run.errorMessage.length > 80
+                            ? run.errorMessage.slice(0, 80) + "…"
+                            : run.errorMessage}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
         </>
       )}
 
