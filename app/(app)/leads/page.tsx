@@ -1,5 +1,6 @@
 "use client";
 import {
+  Bot,
   Building2,
   CheckCircle2,
   Clock,
@@ -9,7 +10,9 @@ import {
   Phone,
   RefreshCw,
   Search,
+  Send,
   Snowflake,
+  Sparkles,
   ThermometerSun,
   UserPlus,
   XCircle,
@@ -195,6 +198,45 @@ export default function LeadsPage() {
   }
 
   const [promoting, setPromoting] = useState<string | null>(null);
+  const [firingAi, setFiringAi] = useState<string | null>(null);
+
+  /**
+   * Manually trigger AI outreach for a lead. The server picks first-touch
+   * vs followup based on aiReply state — operator just clicks one button.
+   * Useful when the auto-trigger failed (Postmark not approved yet,
+   * transient Anthropic error) or when the operator wants to send an
+   * extra nudge between cron windows.
+   */
+  async function fireAiReply(lead: Lead) {
+    setFiringAi(lead.id);
+    try {
+      const r = await fetch(`/api/leads/${lead.id}/ai-reply`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        throw new Error(d.error ?? `AI reply failed (${r.status})`);
+      }
+      // Server returns the updated lead so we can refresh without a 2nd GET.
+      if (d.lead) {
+        setLeads((all) => (all ?? []).map((l) => (l.id === lead.id ? d.lead : l)));
+        if (selected?.id === lead.id) setSelected(d.lead);
+      }
+      const kindLabel = d.kind === "followup" ? "followup" : "first-touch reply";
+      if (d.status === "sent") {
+        toast(`AI ${kindLabel} sent`, "success");
+      } else if (d.status === "skipped") {
+        toast(
+          `AI ${kindLabel} generated but email skipped${d.errorMessage ? ` — ${d.errorMessage}` : ""}`,
+          "info",
+        );
+      } else {
+        toast(`AI ${kindLabel} failed${d.errorMessage ? ` — ${d.errorMessage}` : ""}`, "error");
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "AI reply failed", "error");
+    } finally {
+      setFiringAi(null);
+    }
+  }
 
   async function promoteToBuyer(lead: Lead) {
     if (lead.promotedToBuyerId) {
@@ -245,6 +287,36 @@ export default function LeadsPage() {
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
         </button>
+      </div>
+
+      {/* How AI outreach to leads works — explainer banner. Operators land
+          here from a "Inbound Leads · LIVE" nav badge and need to know what
+          the system does automatically vs what they have to click. */}
+      <div className="rounded-xl border border-brand-500/30 bg-brand-500/5 px-4 py-3">
+        <div className="flex items-start gap-3">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand-500/15">
+            <Bot className="h-4 w-4 text-brand-200" />
+          </div>
+          <div className="flex-1 text-[12px] text-ink-secondary">
+            <div className="font-semibold text-brand-200">How AI outreach to leads works</div>
+            <ol className="mt-1 list-decimal space-y-0.5 pl-4">
+              <li>
+                <span className="font-semibold text-ink-primary">T+0</span> — lead submits <code className="rounded bg-bg-hover px-1">/contact</code>; AI auto-replies via email
+                {" "}(+ SMS if phone given). You get a notification email at the same time.
+              </li>
+              <li>
+                <span className="font-semibold text-ink-primary">If score ≥ 70</span>, the lead is auto-promoted to a Buyer and the Outreach Agent
+                {" "}starts drafting product-specific pitches in <a href="/outreach" className="text-brand-300 underline">/outreach</a>.
+              </li>
+              <li>
+                <span className="font-semibold text-ink-primary">Day +3, +6, +9</span> — daily cron fires shorter follow-up nudges if the lead is still in <code className="rounded bg-bg-hover px-1">new</code>.
+              </li>
+              <li>
+                <span className="font-semibold text-ink-primary">Manual override</span> — open any lead below and click <span className="font-semibold text-brand-200">Send AI reply now</span> to retry / nudge on demand.
+              </li>
+            </ol>
+          </div>
+        </div>
       </div>
 
       {/* Tier breakdown — at-a-glance triage */}
@@ -629,6 +701,61 @@ export default function LeadsPage() {
                   </div>
                 </div>
               )}
+
+              {/* Manual AI outreach trigger — server picks first-touch vs
+                  followup based on aiReply state. Always available so the
+                  operator can retry when Postmark is suppressed / un-approved
+                  or send an extra nudge between cron windows. */}
+              <div>
+                <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-tertiary">
+                  <span>AI outreach</span>
+                  {selected.aiReply?.status === "sent" && (
+                    <span className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[9px] font-semibold text-accent-green">
+                      first reply sent
+                    </span>
+                  )}
+                  {selected.aiReply?.status === "error" && (
+                    <span className="rounded bg-accent-red/15 px-1.5 py-0.5 text-[9px] font-semibold text-accent-red">
+                      auto-reply errored
+                    </span>
+                  )}
+                  {selected.aiReply?.status === "skipped" && (
+                    <span className="rounded bg-accent-amber/15 px-1.5 py-0.5 text-[9px] font-semibold text-accent-amber">
+                      auto-reply skipped
+                    </span>
+                  )}
+                  {!selected.aiReply && (
+                    <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[9px] font-semibold text-ink-tertiary">
+                      never run
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={() => fireAiReply(selected)}
+                  disabled={firingAi === selected.id}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-2 text-[11px] font-semibold text-brand-200 transition hover:bg-brand-500/20 disabled:opacity-60"
+                  title={
+                    selected.aiReply?.status === "sent"
+                      ? "Send a fresh follow-up nudge to this lead now"
+                      : "Generate + send the first-touch AI reply now"
+                  }
+                >
+                  {firingAi === selected.id ? (
+                    <><Sparkles className="h-3.5 w-3.5 animate-pulse" /> Generating…</>
+                  ) : selected.aiReply?.status === "sent" ? (
+                    <><Send className="h-3.5 w-3.5" /> Send AI followup now</>
+                  ) : (
+                    <><Sparkles className="h-3.5 w-3.5" /> Send AI reply now</>
+                  )}
+                </button>
+                <div className="mt-1.5 text-[10px] text-ink-tertiary">
+                  {selected.aiReply?.status === "sent"
+                    ? "Generates a shorter second-touch nudge and appends it to followups below."
+                    : selected.aiReply?.status === "error" || selected.aiReply?.status === "skipped"
+                      ? "Re-runs the first-touch reply. Useful when Postmark blocked the auto-trigger."
+                      : "Generates and sends the personalized intro email (+ SMS if phone given)."}
+                </div>
+              </div>
 
               <div>
                 <div className="mb-1.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Promote</div>
