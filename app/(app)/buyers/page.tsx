@@ -12,7 +12,6 @@ import { useEffect, useMemo, useState } from "react";
 import Drawer from "@/components/ui/Drawer";
 import BuyerDetail from "@/components/buyers/BuyerDetail";
 import {
-  BUYERS,
   BUYER_COUNTRIES,
   BUYER_STATUSES,
   BUYER_TYPES,
@@ -60,10 +59,11 @@ export default function BuyersPage() {
       .catch(() => {});
   }, []);
 
-  const allBuyers: DiscoveredBuyer[] = useMemo(
-    () => [...discovered, ...BUYERS],
-    [discovered]
-  );
+  // Real-only: every buyer in the list is a DiscoveredBuyer that landed
+  // via the agent pipeline or the Lead → Buyer auto-promote rule. The
+  // hardcoded BUYERS sample was removed so operator never sees fake
+  // "FitLife Stores" / "Petopia Boutique" alongside their real ones.
+  const allBuyers: DiscoveredBuyer[] = useMemo(() => discovered, [discovered]);
 
   const list = useMemo(() => {
     let out = allBuyers.filter((b) => {
@@ -99,10 +99,14 @@ export default function BuyersPage() {
           <div>
             <h1 className="text-2xl font-bold">Buyer Discovery</h1>
             <p className="text-xs text-ink-secondary">
-              {list.length} of {allBuyers.length} buyers · enriched from LinkedIn, Apollo, and 7 directories
-              {discovered.length > 0 && (
-                <> · <span className="text-brand-300">{discovered.length} live</span> from agent runs</>
-              )}
+              {allBuyers.length === 0
+                ? "No buyers yet — discovered by pipeline runs or promoted from leads"
+                : <>
+                    {list.length} of {allBuyers.length} buyer{allBuyers.length === 1 ? "" : "s"} ·
+                    {" "}<span className="text-brand-300">{discovered.length} live</span>
+                    {" "}from agent runs &amp; lead promotions
+                  </>
+              }
             </p>
           </div>
         </div>
@@ -156,7 +160,7 @@ export default function BuyersPage() {
                   />
                   <span className="flex-1 text-ink-secondary">{t}</span>
                   <span className="text-ink-tertiary">
-                    {BUYERS.filter((b) => b.type === t).length}
+                    {allBuyers.filter((b) => b.type === t).length}
                   </span>
                 </label>
               ))}
@@ -199,7 +203,7 @@ export default function BuyersPage() {
                   />
                   <span className="flex-1 text-ink-secondary">{s}</span>
                   <span className="text-ink-tertiary">
-                    {BUYERS.filter((b) => b.status === s).length}
+                    {allBuyers.filter((b) => b.status === s).length}
                   </span>
                 </label>
               ))}
@@ -257,6 +261,21 @@ export default function BuyersPage() {
                 </tr>
               </thead>
               <tbody>
+                {list.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-12 text-center">
+                      <Users className="mx-auto mb-2 h-6 w-6 text-ink-tertiary" />
+                      <div className="text-sm font-semibold">
+                        {allBuyers.length === 0 ? "No buyers yet" : "No buyers match your filters"}
+                      </div>
+                      <p className="mx-auto mt-1 max-w-md text-xs text-ink-tertiary">
+                        {allBuyers.length === 0
+                          ? <>Buyers appear here when the Buyer Discovery agent finds them via pipeline runs, or when a hot lead gets promoted from <a href="/leads" className="text-brand-300 hover:underline">/leads</a>.</>
+                          : "Lower the intent threshold or clear filters to see more."}
+                      </p>
+                    </td>
+                  </tr>
+                )}
                 {list.map((b) => (
                   <tr
                     key={b.id}
