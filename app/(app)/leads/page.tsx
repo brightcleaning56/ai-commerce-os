@@ -4,8 +4,10 @@ import {
   Building2,
   CheckCircle2,
   Clock,
+  FileText,
   Flame,
   Inbox,
+  Loader2,
   Mail,
   Phone,
   RefreshCw,
@@ -194,6 +196,45 @@ export default function LeadsPage() {
       toast(`Marked ${next}`);
     } catch (err) {
       toast(err instanceof Error ? err.message : "Update failed", "error");
+    }
+  }
+
+  // ─── Operator notes ─────────────────────────────────────────────────
+  // Local draft buffer so typing is responsive; PATCH fires on blur (or
+  // explicit Cmd/Ctrl+S). Server side already accepts notes via the same
+  // PATCH endpoint -- this just exposes the field in the UI.
+  const [notesDraft, setNotesDraft] = useState("");
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [notesDirty, setNotesDirty] = useState(false);
+  // Reset the draft when the operator picks a different lead.
+  useEffect(() => {
+    setNotesDraft(selected?.notes ?? "");
+    setNotesDirty(false);
+  }, [selected?.id, selected?.notes]);
+
+  async function saveNotes() {
+    if (!selected) return;
+    if (!notesDirty) return;
+    setNotesSaving(true);
+    try {
+      const r = await fetch(`/api/leads/${selected.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: notesDraft }),
+      });
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(body.error ?? `PATCH failed (${r.status})`);
+      }
+      const d = await r.json();
+      setLeads((all) => (all ?? []).map((l) => (l.id === selected.id ? d.lead : l)));
+      setSelected(d.lead);
+      setNotesDirty(false);
+      toast("Notes saved");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Save failed", "error");
+    } finally {
+      setNotesSaving(false);
     }
   }
 
@@ -768,6 +809,49 @@ export default function LeadsPage() {
                   </div>
                 </div>
               )}
+
+              {/* Operator notes — free-text annotations. Persists via PATCH
+                  /api/leads/[id]. Saves on blur (or Cmd/Ctrl+S); editing UX
+                  matches the Settings page so the pattern is familiar. */}
+              <div>
+                <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-tertiary">
+                  <span className="flex items-center gap-1">
+                    <FileText className="h-3 w-3" /> Notes
+                  </span>
+                  <span className="flex items-center gap-2">
+                    {notesDirty && !notesSaving && (
+                      <span className="text-accent-amber normal-case tracking-normal">unsaved</span>
+                    )}
+                    {notesSaving && (
+                      <span className="flex items-center gap-1 normal-case tracking-normal">
+                        <Loader2 className="h-3 w-3 animate-spin" /> saving
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <textarea
+                  value={notesDraft}
+                  onChange={(e) => {
+                    setNotesDraft(e.target.value);
+                    setNotesDirty(e.target.value !== (selected.notes ?? ""));
+                  }}
+                  onBlur={saveNotes}
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+                      e.preventDefault();
+                      saveNotes();
+                    }
+                  }}
+                  placeholder="Why this lead matters, who introduced them, what they actually want…"
+                  rows={3}
+                  maxLength={5000}
+                  className="w-full resize-y rounded-md border border-bg-border bg-bg-card p-2 text-xs placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+                />
+                <div className="mt-1 flex items-center justify-between text-[10px] text-ink-tertiary">
+                  <span>Saves on blur · ⌘S to save now</span>
+                  <span>{notesDraft.length}/5000</span>
+                </div>
+              </div>
 
               {/* Manual AI outreach trigger — server picks first-touch vs
                   followup based on aiReply state. Always available so the
