@@ -2,6 +2,7 @@ import {
   Activity,
   Building2,
   GitBranch,
+  Layers,
   Lightbulb,
   LayoutDashboard,
   Package,
@@ -68,6 +69,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Inbound Leads", href: "/leads", icon: Inbox, badge: "LIVE" },
       { label: "Outreach Automation", href: "/outreach", icon: Send },
+      { label: "Job Queue", href: "/admin/outreach-jobs", icon: Layers, badge: "NEW" },
       { label: "AI Agents", href: "/agents", icon: Bot, badge: "AI" },
       { label: "Auto Pipeline", href: "/pipeline", icon: Zap, badge: "AUTO" },
       { label: "Approvals", href: "/approvals", icon: ShieldCheck, badge: "REVIEW" },
