@@ -45,12 +45,14 @@ const PUBLIC_PATHS = [
   "/api/auth/signin",       // sign-in form submits here
   "/api/signin-summary",    // public aggregate stats for the sign-in right panel
   "/api/leads",             // public POST from /contact form (handler gates GET via requireAdmin)
+  "/api/unsubscribe",       // CAN-SPAM: public POST, token-verified server-side
 ];
 const PUBLIC_PREFIXES = [
   "/share/",
   "/quote/",
   "/invite/",                // /invite/[token] — token IS the auth
   "/reply/",                 // /reply/[token] — buyer-facing public reply page
+  "/u/",                     // /u/[token] — CAN-SPAM unsubscribe landing page
   "/api/share/",
   "/api/quotes/",
   "/api/invites/",           // /api/invites/[token] + /accept — token-gated

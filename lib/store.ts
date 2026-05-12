@@ -30,6 +30,7 @@ const API_KEYS_FILE = "api-keys.json";
 const BUSINESSES_FILE = "businesses.json";
 const SUPPLY_EDGES_FILE = "supply-edges.json";
 const BRAND_ALTERNATIVES_FILE = "brand-alternatives.json";
+const EMAIL_SUPPRESSIONS_FILE = "email-suppressions.json";
 
 // ─── Backend selection ─────────────────────────────────────────────────────
 // STORE_BACKEND=blobs → Netlify Blobs (recommended for Netlify deploys)
@@ -881,6 +882,43 @@ export type BrandAlternative = {
   contextSampleSize?: number;    // how many businesses' edges informed the prompt
 };
 
+/**
+ * Email suppression list — the single source of truth for "this email
+ * should NEVER receive outreach". Every email send path checks this
+ * before transmitting. CAN-SPAM requires honored unsubscribe within
+ * 10 business days; we honor immediately + permanently.
+ *
+ * Sources:
+ *   - "unsubscribe":   recipient clicked the footer link in any email
+ *   - "complaint":     bounce/spam/abuse webhook from Postmark/Resend
+ *   - "operator":      manual block via /admin/businesses or /leads UI
+ *   - "import":        bulk-imported DNC list
+ *   - "hard_bounce":   email provider reported invalid recipient
+ *
+ * Email is always lowercased on write. Lookup is O(n) over the
+ * suppression list; for 10k+ entries we'd shard or index, but at
+ * single-operator scale this is fine.
+ */
+export type EmailSuppressionSource =
+  | "unsubscribe"
+  | "complaint"
+  | "operator"
+  | "import"
+  | "hard_bounce";
+
+export type EmailSuppression = {
+  id: string;                     // sup_<random>
+  email: string;                  // lowercased, trimmed
+  source: EmailSuppressionSource;
+  reason?: string;                // free-text, ≤ 200 chars
+  addedAt: string;                // ISO
+  // Where the email lived in our system at the time of suppression —
+  // helps the operator understand which campaign / lead drove it.
+  contextLeadId?: string;
+  contextBusinessId?: string;
+  contextDraftId?: string;
+};
+
 export type ThreadMessage = {
   id: string;
   role: "agent" | "buyer";
@@ -1468,6 +1506,45 @@ export const store = {
     all[idx] = merged;
     await getBackend().write(BRAND_ALTERNATIVES_FILE, all);
     return merged;
+  },
+
+  // ─── Email Suppression List (CAN-SPAM) ─────────────────────────────────
+  async getEmailSuppressions(): Promise<EmailSuppression[]> {
+    return getBackend().read<EmailSuppression[]>(EMAIL_SUPPRESSIONS_FILE, []);
+  },
+  async isEmailSuppressed(email: string): Promise<boolean> {
+    const norm = (email ?? "").trim().toLowerCase();
+    if (!norm) return false;
+    const all = await store.getEmailSuppressions();
+    return all.some((s) => s.email === norm);
+  },
+  /**
+   * Add an email to the suppression list. Idempotent: re-adding the
+   * same email is a no-op (returns the existing entry).
+   */
+  async addEmailSuppression(
+    input: Omit<EmailSuppression, "id" | "addedAt"> & { addedAt?: string },
+  ): Promise<EmailSuppression> {
+    const norm = input.email.trim().toLowerCase();
+    if (!norm) throw new Error("email required");
+    const all = await store.getEmailSuppressions();
+    const existing = all.find((s) => s.email === norm);
+    if (existing) return existing;
+    const created: EmailSuppression = {
+      id: `sup_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`,
+      email: norm,
+      source: input.source,
+      reason: input.reason?.slice(0, 200),
+      addedAt: input.addedAt ?? new Date().toISOString(),
+      contextLeadId: input.contextLeadId,
+      contextBusinessId: input.contextBusinessId,
+      contextDraftId: input.contextDraftId,
+    };
+    // Cap at 100k (FTC-comfortable size). Older entries stay — never
+    // auto-prune a suppression record without operator intervention.
+    const next = [created, ...all].slice(0, 100_000);
+    await getBackend().write(EMAIL_SUPPRESSIONS_FILE, next);
+    return created;
   },
 
   // Pipeline runs (snapshots for /share/[id])

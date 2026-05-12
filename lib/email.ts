@@ -6,6 +6,13 @@
  * for local dev without hitting any real provider.
  *
  * Safety guards:
+ * - Suppression list check on every send — recipients who unsubscribed never
+ *   receive another email. Short-circuits before any provider call.
+ * - CAN-SPAM footer auto-appended to textBody + htmlBody on every send (with
+ *   per-recipient HMAC unsubscribe URL). Bypass with skipFooter=true ONLY
+ *   for transactional system mail (password resets, etc. — currently none).
+ * - List-Unsubscribe headers (RFC 8058) attached to Postmark sends so Gmail/
+ *   iCloud surface native unsubscribe UI + count it for deliverability.
  * - If no provider token is set: simulated send, never hits the network.
  * - If EMAIL_TEST_RECIPIENT is set: every send is redirected to that address
  *   (with a header noting the original recipient). Use this in staging.
@@ -14,13 +21,19 @@
  *   simulated.
  *
  * Env vars:
- * - POSTMARK_TOKEN          Postmark Server API token
- * - RESEND_TOKEN            Resend API key (used if Postmark not set)
- * - EMAIL_FROM              From address, e.g. "outreach@yourdomain.com"
- * - EMAIL_FROM_NAME         Display name (default: "AVYN Wholesale")
- * - EMAIL_TEST_RECIPIENT    Optional. If set, all sends redirect here.
- * - EMAIL_LIVE              "true" to allow sending to real recipient (override).
+ * - POSTMARK_TOKEN            Postmark Server API token
+ * - RESEND_TOKEN              Resend API key (used if Postmark not set)
+ * - EMAIL_FROM                From address, e.g. "outreach@yourdomain.com"
+ * - EMAIL_FROM_NAME           Display name (default: "AVYN Wholesale")
+ * - EMAIL_TEST_RECIPIENT      Optional. If set, all sends redirect here.
+ * - EMAIL_LIVE                "true" to allow sending to real recipient (override).
+ * - OPERATOR_POSTAL_ADDRESS   REQUIRED for CAN-SPAM. Footer physical address.
+ * - UNSUBSCRIBE_SECRET        HMAC secret for unsubscribe tokens (falls back
+ *                             to ADMIN_TOKEN with a warning if unset).
  */
+
+import { buildHtmlFooter, buildListUnsubscribeHeaders, buildPlainTextFooter } from "@/lib/emailFooter";
+import { store } from "@/lib/store";
 
 export type SendInput = {
   to: string;
@@ -29,6 +42,13 @@ export type SendInput = {
   htmlBody?: string;
   replyTo?: string;
   metadata?: Record<string, string>;
+  /**
+   * Skip the CAN-SPAM footer + suppression check. Use ONLY for genuine
+   * transactional mail (password resets, account confirmations) that
+   * the recipient has explicitly requested. Marketing / outreach must
+   * never set this.
+   */
+  skipFooter?: boolean;
 };
 
 export type SendResult = {
@@ -40,6 +60,8 @@ export type SendResult = {
   simulated?: boolean;
   errorMessage?: string;
   rawStatus?: number;
+  /** Set when the suppression-list check short-circuited the send. */
+  suppressed?: boolean;
 };
 
 export type EmailProviderInfo = {
@@ -136,6 +158,14 @@ async function sendPostmark(input: SendInput, actualTo: string, redirected: bool
         HtmlBody: htmlBody,
         MessageStream: "outbound",
         Metadata: input.metadata,
+        // RFC 8058 one-click unsubscribe headers — Gmail/iCloud surface
+        // a native "Unsubscribe" link above the message. Skipped for
+        // transactional mail (skipFooter=true).
+        Headers: input.skipFooter
+          ? undefined
+          : Object.entries(buildListUnsubscribeHeaders(input.to)).map(
+              ([Name, Value]) => ({ Name, Value }),
+            ),
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -239,9 +269,58 @@ function sendFallback(input: SendInput, actualTo: string, redirected: boolean): 
 /** Public entry point */
 export async function sendEmail(input: SendInput): Promise<SendResult> {
   const info = getEmailProviderInfo();
-  const { actualTo, redirected } = resolveRecipient(input.to);
 
-  if (info.provider === "postmark") return sendPostmark(input, actualTo, redirected);
-  if (info.provider === "resend") return sendResend(input, actualTo, redirected);
-  return sendFallback(input, actualTo, redirected);
+  // ─── Suppression check (CAN-SPAM honor) ────────────────────────────────
+  // Recipients who have unsubscribed (or been marked DNC) must NEVER
+  // receive another email — even transactional, since their account
+  // relationship is severed. The only exception is skipFooter=true mail
+  // tied to active accounts (password reset etc.) — none of those exist
+  // today; keeping the exception narrow.
+  if (!input.skipFooter) {
+    try {
+      const suppressed = await store.isEmailSuppressed(input.to);
+      if (suppressed) {
+        if (typeof console !== "undefined") {
+          console.log(`[email] suppressed send to ${input.to} (on unsubscribe list)`);
+        }
+        return {
+          ok: false,
+          provider: info.provider,
+          sentTo: input.to,
+          suppressed: true,
+          errorMessage: "Recipient has unsubscribed (suppression list)",
+        };
+      }
+    } catch (e) {
+      // Storage hiccup: fail OPEN (let the send through) but log. The
+      // unsubscribe footer in the email + the recipient's own provider
+      // headers still let them opt out — fail-closed here would cause
+      // legitimate sends to silently stop on every storage blip.
+      if (typeof console !== "undefined") {
+        console.warn("[email] suppression check failed (failing open):", e instanceof Error ? e.message : e);
+      }
+    }
+  }
+
+  // ─── CAN-SPAM footer injection ─────────────────────────────────────────
+  // Appends unsubscribe link + operator postal address to BOTH textBody
+  // and htmlBody. Skipped only when skipFooter=true. The htmlBody is
+  // built later inside buildBodies if not supplied; we pre-build it
+  // here so the footer goes into the right place.
+  const augmented: SendInput =
+    input.skipFooter
+      ? input
+      : {
+          ...input,
+          textBody: input.textBody.trimEnd() + "\n\n" + buildPlainTextFooter(input.to),
+          htmlBody: input.htmlBody
+            ? input.htmlBody + buildHtmlFooter(input.to)
+            : undefined, // buildBodies will derive htmlBody from textBody (which now includes the footer)
+        };
+
+  const { actualTo, redirected } = resolveRecipient(augmented.to);
+
+  if (info.provider === "postmark") return sendPostmark(augmented, actualTo, redirected);
+  if (info.provider === "resend") return sendResend(augmented, actualTo, redirected);
+  return sendFallback(augmented, actualTo, redirected);
 }
