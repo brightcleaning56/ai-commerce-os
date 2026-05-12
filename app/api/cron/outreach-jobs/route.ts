@@ -144,6 +144,21 @@ export async function GET(req: NextRequest) {
     ...(done ? { status: "completed" as const, completedAt: now } : {}),
   });
 
+  // ─── Job completion notification ─────────────────────────────────────
+  // When this tick finishes the job, email the operator a summary so they
+  // know to come review /outreach. Fire-and-forget — never blocks the
+  // cron tick on email delivery (Postmark hiccups etc).
+  if (done) {
+    import("@/lib/jobCompletionEmail")
+      .then((m) => m.sendJobCompletionEmail({ ...fresh, stats, outcomes: combinedOutcomes }))
+      .catch((e) => {
+        console.warn(
+          `[cron-outreach-jobs] completion email failed for ${job.id}:`,
+          e instanceof Error ? e.message : e,
+        );
+      });
+  }
+
   return NextResponse.json({
     ok: true,
     jobId: job.id,
