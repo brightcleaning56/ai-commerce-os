@@ -30,123 +30,12 @@ type AuditEvent = {
   hash: string;
 };
 
-const EVENTS: AuditEvent[] = [
-  {
-    id: "e1",
-    ts: "2024-05-19 14:42:18 UTC",
-    actor: { type: "human", name: "Eric Moore", initials: "EM" },
-    action: "Updated commission rate for plan 'Growth'",
-    resource: "Plan",
-    resourceId: "plan_growth",
-    category: "Billing",
-    ipAddress: "192.0.2.142",
-    diff: [{ field: "commissionRate", from: "0.05", to: "0.04" }],
-    hash: "0x9c4e2a8b",
-  },
-  {
-    id: "e2",
-    ts: "2024-05-19 14:38:02 UTC",
-    actor: { type: "agent", name: "Risk Agent", initials: "RA" },
-    action: "Auto-paused supplier due to risk score increase",
-    resource: "Supplier",
-    resourceId: "s14",
-    category: "Agent",
-    diff: [
-      { field: "status", from: "Active", to: "Paused" },
-      { field: "riskScore", from: "42", to: "71" },
-    ],
-    hash: "0x5b219f0c",
-  },
-  {
-    id: "e3",
-    ts: "2024-05-19 14:21:55 UTC",
-    actor: { type: "human", name: "Sarah Chen", initials: "SC" },
-    action: "Granted 'Operator' role to new member",
-    resource: "User",
-    resourceId: "u7 (lena.m@external-vendor.com)",
-    category: "Permissions",
-    ipAddress: "192.0.2.45",
-    diff: [{ field: "role", from: "(invited)", to: "Operator" }],
-    hash: "0xa3f81d4e",
-  },
-  {
-    id: "e4",
-    ts: "2024-05-19 14:18:11 UTC",
-    actor: { type: "agent", name: "Outreach Agent", initials: "OA" },
-    action: "Sent personalized email to 156 buyers",
-    resource: "Campaign",
-    resourceId: "c1 (Summer Fitness Products)",
-    category: "Outreach",
-    hash: "0xd8124a93",
-  },
-  {
-    id: "e5",
-    ts: "2024-05-19 13:54:08 UTC",
-    actor: { type: "human", name: "Eric Moore", initials: "EM" },
-    action: "Rotated production API key 'sk_live_4f29'",
-    resource: "API Key",
-    resourceId: "k1",
-    category: "Auth",
-    ipAddress: "192.0.2.142",
-    hash: "0x71e2b410",
-  },
-  {
-    id: "e6",
-    ts: "2024-05-19 13:42:31 UTC",
-    actor: { type: "system", name: "Stripe Webhook", initials: "SW" },
-    action: "Auto-released $24,500 from escrow",
-    resource: "Order",
-    resourceId: "o3",
-    category: "Billing",
-    diff: [{ field: "escrowStatus", from: "Delivered", to: "Released" }],
-    hash: "0x3c9077e1",
-  },
-  {
-    id: "e7",
-    ts: "2024-05-19 13:18:17 UTC",
-    actor: { type: "human", name: "Marcus Brooks", initials: "MB" },
-    action: "Approved buyer outreach for FitLife Stores",
-    resource: "Outreach Approval",
-    resourceId: "ap-9912",
-    category: "Outreach",
-    ipAddress: "192.0.2.88",
-    hash: "0x82910f4a",
-  },
-  {
-    id: "e8",
-    ts: "2024-05-19 12:01:03 UTC",
-    actor: { type: "human", name: "Eric Moore", initials: "EM" },
-    action: "Enabled SCIM provisioning",
-    resource: "Workspace",
-    resourceId: "ws_acmebrand",
-    category: "Permissions",
-    ipAddress: "192.0.2.142",
-    diff: [{ field: "scimEnabled", from: "false", to: "true" }],
-    hash: "0xe44d2901",
-  },
-  {
-    id: "e9",
-    ts: "2024-05-19 11:42:50 UTC",
-    actor: { type: "agent", name: "Negotiation Agent", initials: "NA" },
-    action: "Drafted counter-offer to Mumbai Goods Ltd.",
-    resource: "Quote",
-    resourceId: "q-4422",
-    category: "Outreach",
-    diff: [{ field: "discount", from: "5%", to: "8%" }],
-    hash: "0x1b88f02a",
-  },
-  {
-    id: "e10",
-    ts: "2024-05-19 09:18:42 UTC",
-    actor: { type: "human", name: "Aiko Tanaka", initials: "AT" },
-    action: "Failed login (incorrect password)",
-    resource: "Session",
-    resourceId: "—",
-    category: "Auth",
-    ipAddress: "203.0.113.4",
-    hash: "0x7a2b1190",
-  },
-];
+// Hardcoded SAMPLE EVENTS list lived here previously — every row was fake
+// (Sarah Chen, Marcus Brooks, fake "Stripe Webhook · auto-released $24,500",
+// fake "Enabled SCIM provisioning"). Removed in favor of /api/admin/audit
+// which derives the feed from real records: leads, drafts, transactions,
+// agent runs, cron runs, pipeline runs, invites, API keys, risk flags,
+// quotes. Do NOT re-add a hardcoded EVENTS array here.
 
 const CAT_TONE: Record<string, string> = {
   Auth: "bg-accent-blue/15 text-accent-blue",
@@ -157,6 +46,9 @@ const CAT_TONE: Record<string, string> = {
   Outreach: "bg-accent-cyan/15 text-accent-cyan",
   Transaction: "bg-accent-green/15 text-accent-green",
   Risk: "bg-accent-red/15 text-accent-red",
+  Lead: "bg-brand-500/15 text-brand-200",
+  Invite: "bg-accent-amber/15 text-accent-amber",
+  Pipeline: "bg-accent-cyan/15 text-accent-cyan",
 };
 
 const ACTOR_ICON: Record<Actor["type"], { Icon: React.ComponentType<{ className?: string }>; bg: string; text: string }> = {
@@ -165,7 +57,7 @@ const ACTOR_ICON: Record<Actor["type"], { Icon: React.ComponentType<{ className?
   system: { Icon: Shield, bg: "bg-bg-hover", text: "text-ink-secondary" },
 };
 
-const CATEGORIES = ["All", "Transaction", "Agent", "Outreach", "Billing", "Risk", "Auth", "Data", "Permissions"] as const;
+const CATEGORIES = ["All", "Lead", "Outreach", "Transaction", "Pipeline", "Agent", "Auth", "Invite", "Billing", "Risk"] as const;
 
 export default function AuditLogsPage() {
   const [query, setQuery] = useState("");

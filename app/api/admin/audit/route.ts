@@ -25,7 +25,18 @@ export const dynamic = "force-dynamic";
  * Older runs without timestamps fall through; we never invent data.
  */
 
-type AuditCategory = "Auth" | "Data" | "Permissions" | "Billing" | "Agent" | "Outreach" | "Transaction" | "Risk";
+type AuditCategory =
+  | "Auth"
+  | "Data"
+  | "Permissions"
+  | "Billing"
+  | "Agent"
+  | "Outreach"
+  | "Transaction"
+  | "Risk"
+  | "Lead"
+  | "Invite"
+  | "Pipeline";
 
 type Event = {
   id: string;
@@ -72,12 +83,28 @@ export async function GET(req: NextRequest) {
   const auth = requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
-  const [transactions, runs, riskFlags, drafts, quotes] = await Promise.all([
-    store.getTransactions(),
-    store.getRuns(),
-    store.getRiskFlags(),
-    store.getDrafts(),
-    store.getQuotes(),
+  const [
+    transactions,
+    runs,
+    riskFlags,
+    drafts,
+    quotes,
+    leads,
+    invites,
+    apiKeys,
+    cronRuns,
+    pipelineRuns,
+  ] = await Promise.all([
+    store.getTransactions().catch(() => []),
+    store.getRuns().catch(() => []),
+    store.getRiskFlags().catch(() => []),
+    store.getDrafts().catch(() => []),
+    store.getQuotes().catch(() => []),
+    store.getLeads().catch(() => []),
+    store.getInvites().catch(() => []),
+    store.getApiKeys().catch(() => []),
+    store.getCronRuns().catch(() => []),
+    store.getPipelineRuns().catch(() => []),
   ]);
 
   const events: Event[] = [];
@@ -217,6 +244,246 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ── Lead lifecycle ───────────────────────────────────────────────────
+  for (const l of leads) {
+    // Capture
+    {
+      const id = `lead-captured-${l.id}`;
+      events.push({
+        id,
+        ts: l.createdAt,
+        actor: { type: "human", name: l.name, initials: initialsOf(l.name) },
+        action: l.source === "signup-form"
+          ? `Submitted signup form (${l.company}${l.industry ? ` · ${l.industry}` : ""})`
+          : `Submitted contact form (${l.company}${l.industry ? ` · ${l.industry}` : ""})`,
+        resource: "Lead",
+        resourceId: `${l.id} · ${l.email}`,
+        category: "Lead",
+        diff: [{ field: "status", from: "—", to: "new" }],
+        hash: shortHash(`${id}|${l.createdAt}|capture`),
+      });
+    }
+    // AI auto-reply
+    if (l.aiReply) {
+      const r = l.aiReply;
+      const id = `lead-aireply-${l.id}-${r.at}`;
+      events.push({
+        id,
+        ts: r.at,
+        actor: { type: "agent", name: "Lead Followup Agent", initials: "LF" },
+        action: r.status === "sent"
+          ? `AI welcome reply sent to ${l.name} via ${(r.channel ?? []).join(" + ") || "email"}`
+          : r.status === "skipped"
+            ? `AI welcome reply skipped (no transport)`
+            : r.status === "error"
+              ? `AI welcome reply failed${r.errorMessage ? ` · ${r.errorMessage.slice(0, 60)}` : ""}`
+              : `AI welcome reply queued`,
+        resource: "Lead",
+        resourceId: l.id,
+        category: "Lead",
+        diff: [
+          { field: "ai_reply_status", from: "—", to: r.status },
+          ...(r.estCostUsd != null ? [{ field: "spend", from: "0", to: `$${r.estCostUsd.toFixed(5)}` }] : []),
+        ],
+        hash: shortHash(`${id}|${r.at}|${r.status}`),
+      });
+    }
+    // Auto-followups (each one is its own event)
+    for (const fu of l.aiFollowups ?? []) {
+      const id = `lead-followup-${l.id}-${fu.at}`;
+      events.push({
+        id,
+        ts: fu.at,
+        actor: { type: "agent", name: "Lead Followup Agent", initials: "LF" },
+        action: fu.status === "sent"
+          ? `Day-${fu.daysSinceCreated} AI followup sent to ${l.name}`
+          : fu.status === "error"
+            ? `Day-${fu.daysSinceCreated} AI followup failed`
+            : `Day-${fu.daysSinceCreated} AI followup skipped`,
+        resource: "Lead",
+        resourceId: l.id,
+        category: "Lead",
+        diff: [
+          { field: "followup_status", from: "—", to: fu.status },
+          ...(fu.estCostUsd != null ? [{ field: "spend", from: "0", to: `$${fu.estCostUsd.toFixed(5)}` }] : []),
+        ],
+        hash: shortHash(`${id}|${fu.at}|${fu.status}`),
+      });
+    }
+    // Resubmissions
+    for (const rs of l.resubmissions ?? []) {
+      const id = `lead-resubmit-${l.id}-${rs.at}`;
+      events.push({
+        id,
+        ts: rs.at,
+        actor: { type: "human", name: l.name, initials: initialsOf(l.name) },
+        action: rs.changedFields.length
+          ? `Re-submitted lead · added ${rs.changedFields.join(", ")}`
+          : `Re-submitted lead`,
+        resource: "Lead",
+        resourceId: l.id,
+        category: "Lead",
+        hash: shortHash(`${id}|${rs.at}|resubmit`),
+      });
+    }
+    // Promotion to buyer (operator click or auto-rule)
+    if (l.promotedAt && l.promotedToBuyerId) {
+      const isAuto = l.promotedBy === "auto";
+      const id = `lead-promoted-${l.id}`;
+      events.push({
+        id,
+        ts: l.promotedAt,
+        actor: isAuto
+          ? { type: "agent", name: "Auto-Promote Agent", initials: "AP" }
+          : { type: "human", name: "Operator", initials: "OP" },
+        action: isAuto
+          ? `Auto-promoted hot lead to buyer (score crossed AUTO_PROMOTE_LEAD_SCORE)`
+          : `Promoted lead to buyer`,
+        resource: "Lead",
+        resourceId: l.id,
+        category: "Lead",
+        diff: [{ field: "promotedToBuyerId", from: "—", to: l.promotedToBuyerId }],
+        hash: shortHash(`${id}|${l.promotedAt}|promoted`),
+      });
+    }
+  }
+
+  // ── Workspace invites ────────────────────────────────────────────────
+  for (const inv of invites) {
+    {
+      const id = `invite-created-${inv.id}`;
+      events.push({
+        id,
+        ts: inv.createdAt,
+        actor: { type: "human", name: inv.invitedBy, initials: initialsOf(inv.invitedBy.split("@")[0]) },
+        action: `Invited ${inv.email} as ${inv.role}`,
+        resource: "Invite",
+        resourceId: inv.id,
+        category: "Invite",
+        diff: [{ field: "role", from: "—", to: inv.role }],
+        hash: shortHash(`${id}|${inv.createdAt}|invite`),
+      });
+    }
+    if (inv.acceptedAt) {
+      const id = `invite-accepted-${inv.id}`;
+      events.push({
+        id,
+        ts: inv.acceptedAt,
+        actor: {
+          type: "human",
+          name: inv.acceptedName ?? inv.email,
+          initials: initialsOf(inv.acceptedName ?? inv.email.split("@")[0]),
+        },
+        action: `Accepted ${inv.role} invite to the workspace`,
+        resource: "Invite",
+        resourceId: inv.id,
+        category: "Invite",
+        diff: [{ field: "status", from: "pending", to: "accepted" }],
+        hash: shortHash(`${id}|${inv.acceptedAt}|accept`),
+      });
+    }
+    if (inv.cancelledAt) {
+      const id = `invite-cancelled-${inv.id}`;
+      events.push({
+        id,
+        ts: inv.cancelledAt,
+        actor: { type: "human", name: "Operator", initials: "OP" },
+        action: `Cancelled pending invite for ${inv.email}`,
+        resource: "Invite",
+        resourceId: inv.id,
+        category: "Invite",
+        diff: [{ field: "status", from: "pending", to: "cancelled" }],
+        hash: shortHash(`${id}|${inv.cancelledAt}|cancel`),
+      });
+    }
+  }
+
+  // ── API keys ─────────────────────────────────────────────────────────
+  for (const k of apiKeys) {
+    {
+      const id = `apikey-created-${k.id}`;
+      events.push({
+        id,
+        ts: k.createdAt,
+        actor: { type: "human", name: k.createdBy, initials: initialsOf(k.createdBy.split("@")[0]) },
+        action: `Created API key "${k.name}" (${k.environment})`,
+        resource: "API Key",
+        resourceId: `${k.id} · ${k.prefix}…`,
+        category: "Auth",
+        diff: [
+          { field: "environment", from: "—", to: k.environment },
+          { field: "scopes", from: "—", to: k.scopes.join(", ") },
+        ],
+        hash: shortHash(`${id}|${k.createdAt}|create`),
+      });
+    }
+    if (k.revokedAt) {
+      const id = `apikey-revoked-${k.id}`;
+      events.push({
+        id,
+        ts: k.revokedAt,
+        actor: { type: "human", name: "Operator", initials: "OP" },
+        action: `Revoked API key "${k.name}"`,
+        resource: "API Key",
+        resourceId: `${k.id} · ${k.prefix}…`,
+        category: "Auth",
+        diff: [{ field: "status", from: "Active", to: "Revoked" }],
+        hash: shortHash(`${id}|${k.revokedAt}|revoke`),
+      });
+    }
+  }
+
+  // ── Cron + pipeline runs ─────────────────────────────────────────────
+  for (const c of cronRuns) {
+    const id = `cron-${c.id}`;
+    events.push({
+      id,
+      ts: c.ranAt,
+      actor: { type: "system", name: "Pipeline Cron", initials: "PC" },
+      action: c.status === "error"
+        ? `Pipeline cron failed${c.errorMessage ? ` · ${c.errorMessage.slice(0, 80)}` : ""}`
+        : `Pipeline cron tick · ${c.totals.products}p · ${c.totals.buyers}b · ${c.totals.drafts}d`,
+      resource: "Cron",
+      resourceId: c.id,
+      category: "Pipeline",
+      diff: [
+        { field: "status", from: "started", to: c.status },
+        { field: "spend", from: "0", to: `$${c.totals.totalCost.toFixed(5)}` },
+      ],
+      hash: shortHash(`${id}|${c.ranAt}|${c.status}`),
+    });
+  }
+  for (const p of pipelineRuns) {
+    const id = `pipeline-${p.id}`;
+    events.push({
+      id,
+      ts: p.startedAt,
+      actor: p.triggeredBy === "cron"
+        ? { type: "system", name: "Pipeline Cron", initials: "PC" }
+        : { type: "human", name: "Operator", initials: "OP" },
+      action: `${p.triggeredBy === "cron" ? "Autonomous" : "Manual"} pipeline run · ${p.totals.products}p · ${p.totals.buyers}b · ${p.totals.suppliers}s · ${p.totals.drafts}d`,
+      resource: "Pipeline",
+      resourceId: p.id,
+      category: "Pipeline",
+      diff: [{ field: "spend", from: "0", to: `$${p.totals.totalCost.toFixed(5)}` }],
+      hash: shortHash(`${id}|${p.startedAt}|run`),
+    });
+    if (p.revokedAt) {
+      const rid = `pipeline-revoked-${p.id}`;
+      events.push({
+        id: rid,
+        ts: p.revokedAt,
+        actor: { type: "human", name: "Operator", initials: "OP" },
+        action: `Revoked share link for pipeline run ${p.id}`,
+        resource: "Pipeline",
+        resourceId: p.id,
+        category: "Pipeline",
+        diff: [{ field: "share", from: "active", to: "revoked" }],
+        hash: shortHash(`${rid}|${p.revokedAt}|revoke`),
+      });
+    }
+  }
+
   // Newest first
   events.sort((a, b) => b.ts.localeCompare(a.ts));
 
@@ -229,6 +496,10 @@ export async function GET(req: NextRequest) {
       outreach: events.filter((e) => e.category === "Outreach").length,
       billing: events.filter((e) => e.category === "Billing").length,
       risk: events.filter((e) => e.category === "Risk").length,
+      lead: events.filter((e) => e.category === "Lead").length,
+      invite: events.filter((e) => e.category === "Invite").length,
+      auth: events.filter((e) => e.category === "Auth").length,
+      pipeline: events.filter((e) => e.category === "Pipeline").length,
     },
     hashChainOk: true,
   });
