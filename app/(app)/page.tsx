@@ -81,10 +81,10 @@ export default function DashboardPage() {
           <p className="text-sm text-ink-secondary">{subheadline()}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm text-ink-secondary">
+          <span className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm text-ink-secondary">
             <Calendar className="h-4 w-4" />
             {today}
-          </button>
+          </span>
           <Link
             href="/pipeline"
             className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"

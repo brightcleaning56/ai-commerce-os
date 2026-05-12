@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { store } from "@/lib/store";
+import { scoreLead } from "@/lib/leadScore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,10 +26,11 @@ export const dynamic = "force-dynamic";
  *                        than pay supplier)
  */
 export async function GET() {
-  const [drafts, transactions, riskFlags] = await Promise.all([
+  const [drafts, transactions, riskFlags, leads] = await Promise.all([
     store.getDrafts(),
     store.getTransactions(),
     store.getRiskFlags(),
+    store.getLeads(),
   ]);
 
   const now = Date.now();
@@ -44,7 +46,12 @@ export async function GET() {
       | "dispute_closing"
       | "dispute_open"
       | "risk_flag"
-      | "supplier_disconnect";
+      | "supplier_disconnect"
+      // Lead-side attention items (added alongside the buyer-side ones so
+      // operator's first glance covers BOTH halves of the funnel).
+      | "lead_ai_stuck"
+      | "lead_hot_unhandled"
+      | "inbound_reply";
     count: number;
     urgency: "high" | "medium" | "low";
     label: string;
@@ -53,6 +60,84 @@ export async function GET() {
     cta: string;
   };
   const items: Item[] = [];
+
+  // ── Inbound replies awaiting operator triage ──────────────────────────
+  // A draft has an inbound reply when its threadMessages contain at least
+  // one entry from a non-agent role AND there's at least one suggested
+  // reply pending (i.e. the operator hasn't picked / sent one yet).
+  // Matches /outreach SuggestedRepliesPanel surface — this just rolls
+  // up the count so the operator sees "you have 3 buyers waiting".
+  const inboundReplyDrafts = drafts.filter((d) => {
+    const thread = (d as { threadMessages?: { role: string }[] }).threadMessages;
+    if (!Array.isArray(thread) || thread.length === 0) return false;
+    const lastInboundIdx = (() => {
+      for (let i = thread.length - 1; i >= 0; i--) {
+        if (thread[i].role === "buyer" || thread[i].role === "lead") return i;
+      }
+      return -1;
+    })();
+    if (lastInboundIdx === -1) return false;
+    // If the most recent message is from the agent (a reply we already sent),
+    // we don't need to triage — wait for the next inbound.
+    const lastMessage = thread[thread.length - 1];
+    if (lastMessage.role === "agent" || lastMessage.role === "operator") return false;
+    return true;
+  }).length;
+  if (inboundReplyDrafts > 0) {
+    items.push({
+      type: "inbound_reply",
+      count: inboundReplyDrafts,
+      urgency: inboundReplyDrafts >= 5 ? "high" : "medium",
+      label: `${inboundReplyDrafts} buyer ${inboundReplyDrafts === 1 ? "reply" : "replies"} waiting`,
+      detail: "Reply Triage agent suggested responses — pick one and send",
+      href: "/outreach",
+      cta: "Open thread",
+    });
+  }
+
+  // ── Stuck lead AI replies (queue what the new /leads bulk-retry covers) ─
+  // Same predicate as /api/leads/retry-stuck so the count matches exactly.
+  // Most operators won't act unless this gets above a few — but a single
+  // hot lead with a missing AI reply is enough to flag.
+  const stuckLeads = leads.filter((l) => {
+    if (l.status !== "new") return false;
+    if (!l.aiReply) return true;
+    const s = l.aiReply.status;
+    return s === "error" || s === "skipped" || s === "pending";
+  }).length;
+  if (stuckLeads > 0) {
+    items.push({
+      type: "lead_ai_stuck",
+      count: stuckLeads,
+      urgency: stuckLeads >= 10 ? "high" : "medium",
+      label: `${stuckLeads} lead${stuckLeads === 1 ? "" : "s"} stuck without AI reply`,
+      detail: "Click \"Retry AI for N stuck\" on /leads to drain. Usually means Postmark wasn't approved when they came in.",
+      href: "/leads",
+      cta: "Open /leads",
+    });
+  }
+
+  // ── Hot leads not yet promoted ────────────────────────────────────────
+  // These are leads where leadScore.tier === "hot" (70+) but the operator
+  // hasn't promoted them and auto-promote didn't fire (probably because
+  // AUTO_PROMOTE_LEAD_SCORE is set higher, or auto-promote is disabled,
+  // or status changed before the auto-promote sweep ran).
+  const hotUnhandled = leads.filter((l) => {
+    if (l.promotedToBuyerId) return false;
+    if (l.status === "lost" || l.status === "won") return false;
+    return scoreLead(l).tier === "hot";
+  }).length;
+  if (hotUnhandled > 0) {
+    items.push({
+      type: "lead_hot_unhandled",
+      count: hotUnhandled,
+      urgency: "high",
+      label: `${hotUnhandled} hot lead${hotUnhandled === 1 ? "" : "s"} not yet promoted`,
+      detail: "Score 70+. Promote to Buyer to let the Outreach Agent start drafting.",
+      href: "/leads",
+      cta: "Review hot leads",
+    });
+  }
 
   // ── Pending drafts awaiting approval ──────────────────────────────────
   const pendingDrafts = drafts.filter((d) => d.status === "draft").length;

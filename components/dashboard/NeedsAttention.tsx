@@ -5,7 +5,10 @@ import {
   CheckCircle2,
   Clock,
   CreditCard,
+  Flame,
+  Inbox,
   Mail,
+  MessageSquare,
   Package,
   ShieldAlert,
   Truck,
@@ -20,7 +23,10 @@ type AttentionType =
   | "dispute_closing"
   | "dispute_open"
   | "risk_flag"
-  | "supplier_disconnect";
+  | "supplier_disconnect"
+  | "lead_ai_stuck"
+  | "lead_hot_unhandled"
+  | "inbound_reply";
 
 type Item = {
   type: AttentionType;
@@ -45,6 +51,9 @@ const ICON: Record<AttentionType, React.ComponentType<{ className?: string }>> =
   dispute_open: AlertTriangle,
   risk_flag: ShieldAlert,
   supplier_disconnect: CreditCard,
+  lead_ai_stuck: Inbox,
+  lead_hot_unhandled: Flame,
+  inbound_reply: MessageSquare,
 };
 
 const URGENCY_TONE: Record<Item["urgency"], { ring: string; bg: string; iconBg: string; iconText: string; cta: string }> = {
