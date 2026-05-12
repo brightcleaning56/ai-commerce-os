@@ -217,30 +217,60 @@ export default function EdgesPage() {
     brandAgg: BrandAggregate,
     alt: BrandAlternativeEntry,
   ) {
-    const ids = brandAgg.topBusinesses.slice(0, MAX_DRAFT_BATCH).map((b) => b.businessId);
-    if (ids.length === 0) return;
+    // ALL businesses sourcing from this brand — not just topBusinesses.
+    // The job queue handles >25 by ticking through in 5-min batches.
+    const allIds = brandAgg.topBusinessIds;
+    if (allIds.length === 0) return;
     setDraftingAltName(alt.name);
+
+    const useJobQueue = allIds.length > MAX_DRAFT_BATCH;
+
     try {
-      const r = await fetch("/api/admin/businesses/draft-outreach", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          businessIds: ids,
-          pitchOverride: {
-            currentBrand: brandAgg.brand,
-            alternative: alt.name,
-            rationale: alt.rationale,
-          },
-        }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? `Draft failed (${r.status})`);
-      const drafted = d.drafted ?? 0;
-      const skipped = d.skipped ?? 0;
-      toast(
-        `Drafted ${drafted} "switch ${brandAgg.brand} → ${alt.name}" pitch${drafted === 1 ? "" : "es"}${skipped ? ` · skipped ${skipped}` : ""} — review in /outreach`,
-        drafted > 0 ? "success" : "info",
-      );
+      if (useJobQueue) {
+        // Queue an async job — cron processes 25 per tick (~5 min apart)
+        const r = await fetch("/api/admin/outreach-jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            businessIds: allIds,
+            pitchOverride: {
+              currentBrand: brandAgg.brand,
+              alternative: alt.name,
+              rationale: alt.rationale,
+            },
+            campaignLabel: `Switch ${brandAgg.brand} → ${alt.name}`,
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? `Queue failed (${r.status})`);
+        const ticksEst = Math.ceil(allIds.length / MAX_DRAFT_BATCH);
+        toast(
+          `Queued ${allIds.length} "${brandAgg.brand} → ${alt.name}" pitches · cron processes 25 per tick (~${ticksEst * 5} min total). Drafts appear in /outreach as they're built.`,
+          "success",
+        );
+      } else {
+        // Small campaign — process synchronously, drafts land immediately
+        const r = await fetch("/api/admin/businesses/draft-outreach", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            businessIds: allIds,
+            pitchOverride: {
+              currentBrand: brandAgg.brand,
+              alternative: alt.name,
+              rationale: alt.rationale,
+            },
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? `Draft failed (${r.status})`);
+        const drafted = d.drafted ?? 0;
+        const skipped = d.skipped ?? 0;
+        toast(
+          `Drafted ${drafted} "switch ${brandAgg.brand} → ${alt.name}" pitch${drafted === 1 ? "" : "es"}${skipped ? ` · skipped ${skipped}` : ""} — review in /outreach`,
+          drafted > 0 ? "success" : "info",
+        );
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : "Draft failed", "error");
     } finally {
@@ -249,29 +279,47 @@ export default function EdgesPage() {
   }
 
   async function draftOutreachForBrand(brand: BrandAggregate) {
-    // Cap at 25 (the endpoint's hard limit). If more businesses use this
-    // brand, operator runs the action again — we slice the highest-
-    // confidence batch first.
-    const ids = brand.topBusinesses
-      .slice(0, MAX_DRAFT_BATCH)
-      .map((b) => b.businessId);
-    if (ids.length === 0) return;
+    // Use ALL business ids on the brand — the job queue handles N > 25
+    // by ticking. For N <= 25 we send synchronously for instant feedback.
+    const allIds = brand.topBusinessIds;
+    if (allIds.length === 0) return;
     setDrafting(true);
+
+    const useJobQueue = allIds.length > MAX_DRAFT_BATCH;
+
     try {
-      const r = await fetch("/api/admin/businesses/draft-outreach", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ businessIds: ids }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? `Draft outreach failed (${r.status})`);
-      const drafted = d.drafted ?? 0;
-      const skipped = d.skipped ?? 0;
-      const errored = d.errored ?? 0;
-      toast(
-        `Drafted ${drafted}${skipped ? ` · skipped ${skipped}` : ""}${errored ? ` · errored ${errored}` : ""} — review in /outreach`,
-        drafted > 0 ? "success" : "info",
-      );
+      if (useJobQueue) {
+        const r = await fetch("/api/admin/outreach-jobs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            businessIds: allIds,
+            campaignLabel: `Generic AVYN pitch · ${brand.brand} users (${allIds.length})`,
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? `Queue failed (${r.status})`);
+        const ticksEst = Math.ceil(allIds.length / MAX_DRAFT_BATCH);
+        toast(
+          `Queued outreach for ${allIds.length} businesses · cron processes 25 per tick (~${ticksEst * 5} min total)`,
+          "success",
+        );
+      } else {
+        const r = await fetch("/api/admin/businesses/draft-outreach", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ businessIds: allIds }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? `Draft outreach failed (${r.status})`);
+        const drafted = d.drafted ?? 0;
+        const skipped = d.skipped ?? 0;
+        const errored = d.errored ?? 0;
+        toast(
+          `Drafted ${drafted}${skipped ? ` · skipped ${skipped}` : ""}${errored ? ` · errored ${errored}` : ""} — review in /outreach`,
+          drafted > 0 ? "success" : "info",
+        );
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : "Draft outreach failed", "error");
     } finally {
@@ -516,21 +564,25 @@ export default function EdgesPage() {
                   onClick={() => draftOutreachForBrand(selected)}
                   disabled={drafting || selected.businessCount === 0}
                   className="flex items-center gap-2 rounded-lg bg-gradient-brand px-4 py-2 text-sm font-semibold shadow-glow disabled:opacity-60"
-                  title={`Generate AVYN-onboarding drafts for the top ${Math.min(selected.businessCount, MAX_DRAFT_BATCH)} businesses (highest confidence first). Suppressed rows are skipped server-side. Drafts land in /outreach for review.`}
+                  title={
+                    selected.businessCount > MAX_DRAFT_BATCH
+                      ? `Queue outreach for ALL ${selected.businessCount} businesses · cron drafts 25 per tick (~${Math.ceil(selected.businessCount / MAX_DRAFT_BATCH) * 5} min total). Drafts appear in /outreach as they're built.`
+                      : `Generate AVYN-onboarding drafts for all ${selected.businessCount} businesses. Suppressed rows are skipped server-side.`
+                  }
                 >
                   {drafting ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
                     <Send className="h-3.5 w-3.5" />
                   )}
-                  Draft outreach for{" "}
-                  {Math.min(selected.businessCount, MAX_DRAFT_BATCH)}
+                  {selected.businessCount > MAX_DRAFT_BATCH
+                    ? `Queue outreach for ${selected.businessCount}`
+                    : `Draft outreach for ${selected.businessCount}`}
                 </button>
               </div>
               {selected.businessCount > MAX_DRAFT_BATCH && (
                 <p className="mt-2 text-[10px] text-ink-tertiary">
-                  Cap {MAX_DRAFT_BATCH}/run · {selected.businessCount - MAX_DRAFT_BATCH} remaining
-                  for a follow-up batch.
+                  Job queue · cron processes {MAX_DRAFT_BATCH} per tick (~{Math.ceil(selected.businessCount / MAX_DRAFT_BATCH) * 5} min for all {selected.businessCount}). Drafts appear in /outreach as they&apos;re built.
                 </p>
               )}
               {selected.coBrands.length > 0 && (
@@ -631,7 +683,9 @@ export default function EdgesPage() {
                             title={
                               alt.score === 0
                                 ? "Fallback alt (no Anthropic) — re-generate after wiring API key"
-                                : `Draft "switch ${selected.brand} → ${alt.name}" pitch for the top ${Math.min(selected.businessCount, MAX_DRAFT_BATCH)} businesses`
+                                : selected.businessCount > MAX_DRAFT_BATCH
+                                  ? `Queue "switch ${selected.brand} → ${alt.name}" outreach for ALL ${selected.businessCount} businesses · cron drafts 25 per tick (~${Math.ceil(selected.businessCount / MAX_DRAFT_BATCH) * 5} min total). Drafts appear in /outreach as they're built.`
+                                  : `Draft "switch ${selected.brand} → ${alt.name}" pitch for all ${selected.businessCount} businesses`
                             }
                             className="flex shrink-0 items-center gap-1 rounded-md bg-gradient-brand px-2.5 py-1 text-[10px] font-semibold shadow-glow disabled:opacity-50"
                           >
@@ -640,7 +694,9 @@ export default function EdgesPage() {
                             ) : (
                               <Send className="h-3 w-3" />
                             )}
-                            Pitch swap to {Math.min(selected.businessCount, MAX_DRAFT_BATCH)}
+                            {selected.businessCount > MAX_DRAFT_BATCH
+                              ? `Queue swap → ${selected.businessCount}`
+                              : `Pitch swap → ${selected.businessCount}`}
                           </button>
                         </div>
                       </div>

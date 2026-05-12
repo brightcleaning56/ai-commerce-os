@@ -31,6 +31,7 @@ const BUSINESSES_FILE = "businesses.json";
 const SUPPLY_EDGES_FILE = "supply-edges.json";
 const BRAND_ALTERNATIVES_FILE = "brand-alternatives.json";
 const EMAIL_SUPPRESSIONS_FILE = "email-suppressions.json";
+const OUTREACH_JOBS_FILE = "outreach-jobs.json";
 
 // ─── Backend selection ─────────────────────────────────────────────────────
 // STORE_BACKEND=blobs → Netlify Blobs (recommended for Netlify deploys)
@@ -919,6 +920,76 @@ export type EmailSuppression = {
   contextDraftId?: string;
 };
 
+/**
+ * Outreach job queue — async bulk-draft processing. The Business
+ * Outreach Agent caps at 25 businesses per synchronous request to fit
+ * Anthropic spend + lambda timeout budgets. To campaign at scale
+ * (100+ businesses sharing the same pitch angle), operator queues a
+ * job; cron picks it up + processes 25 per tick until done.
+ *
+ * Lifecycle:
+ *   pending   → just created, cron hasn't started it yet
+ *   running   → cron has begun processing, partial progress
+ *   completed → every businessId has an outcome
+ *   cancelled → operator cancelled via DELETE
+ *   failed    → unrecoverable error (e.g. ANTHROPIC_API_KEY revoked
+ *               mid-job and the cron can't make progress; operator
+ *               must resolve + restart)
+ *
+ * Idempotency: each business is processed at most once. The cron
+ * walks businessIds[] in order, appending to outcomes[]. On restart
+ * after a crash, the cron resumes from outcomes.length.
+ */
+export type OutreachJobStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "cancelled"
+  | "failed";
+
+export type OutreachJobOutcome =
+  | { businessId: string; status: "drafted"; draftId: string; at: string }
+  | { businessId: string; status: "skipped"; reason: string; at: string }
+  | { businessId: string; status: "error"; error: string; at: string };
+
+export type OutreachJob = {
+  id: string;                     // job_<random>
+  createdAt: string;              // ISO
+  createdBy: string;              // operator email
+  status: OutreachJobStatus;
+  // List of businesses to process. Frozen at creation time — operator
+  // can't add to a running job; they create a new job for additional
+  // targets.
+  businessIds: string[];
+  // Optional pitch override applied to every business in the job.
+  // Same shape as the /draft-outreach endpoint's pitchOverride.
+  pitchOverride?: {
+    currentBrand: string;
+    alternative: string;
+    rationale: string;
+  };
+  // Per-tick batch size. Defaults to 25 (matches the synchronous
+  // endpoint's cap). Cron processes this many per run.
+  batchSize: number;
+  // Append-only outcomes. cron iterates businessIds[outcomes.length]
+  // forward, appending after each business is processed. On
+  // completed/cancelled, outcomes.length === businessIds.length.
+  outcomes: OutreachJobOutcome[];
+  // Operator-facing breadcrumbs.
+  campaignLabel?: string;         // e.g. "Switch GAF → ABC Roofing"
+  startedAt?: string;             // first time cron picked it up
+  completedAt?: string;           // when status flipped to completed
+  cancelledAt?: string;
+  lastTickAt?: string;            // last cron pass that touched this job
+  // Surface-level stats for fast list rendering (re-derivable from
+  // outcomes but cached here so /admin doesn't scan the whole array).
+  stats: {
+    drafted: number;
+    skipped: number;
+    errored: number;
+  };
+};
+
 export type ThreadMessage = {
   id: string;
   role: "agent" | "buyer";
@@ -1545,6 +1616,58 @@ export const store = {
     const next = [created, ...all].slice(0, 100_000);
     await getBackend().write(EMAIL_SUPPRESSIONS_FILE, next);
     return created;
+  },
+
+  // ─── Outreach Jobs (bulk-draft queue) ──────────────────────────────────
+  async getOutreachJobs(): Promise<OutreachJob[]> {
+    return getBackend().read<OutreachJob[]>(OUTREACH_JOBS_FILE, []);
+  },
+  async getOutreachJob(id: string): Promise<OutreachJob | null> {
+    const all = await store.getOutreachJobs();
+    return all.find((j) => j.id === id) ?? null;
+  },
+  async addOutreachJob(job: OutreachJob): Promise<void> {
+    const existing = await store.getOutreachJobs();
+    // Keep last 500 jobs. Older ones drop off — operator can't drift
+    // back to ancient campaigns but the running/pending ones are
+    // always preserved by the sort below.
+    const sorted = [job, ...existing].sort((a, b) => {
+      // Active jobs (pending/running) stay; completed/cancelled by
+      // recency.
+      const aActive = a.status === "pending" || a.status === "running";
+      const bActive = b.status === "pending" || b.status === "running";
+      if (aActive !== bActive) return aActive ? -1 : 1;
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+    await getBackend().write(OUTREACH_JOBS_FILE, sorted.slice(0, 500));
+  },
+  async updateOutreachJob(id: string, patch: Partial<OutreachJob>): Promise<OutreachJob | null> {
+    const all = await store.getOutreachJobs();
+    const idx = all.findIndex((j) => j.id === id);
+    if (idx === -1) return null;
+    all[idx] = {
+      ...all[idx],
+      ...patch,
+      id: all[idx].id,
+      createdAt: all[idx].createdAt,
+    };
+    await getBackend().write(OUTREACH_JOBS_FILE, all);
+    return all[idx];
+  },
+  /**
+   * Returns the next job the cron should work on. Priority:
+   *   1. status="running" jobs (resume in-progress work first)
+   *   2. status="pending" jobs (oldest createdAt first — FIFO)
+   * Returns null when there's nothing to do.
+   */
+  async getNextOutreachJob(): Promise<OutreachJob | null> {
+    const all = await store.getOutreachJobs();
+    const running = all.filter((j) => j.status === "running")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    if (running[0]) return running[0];
+    const pending = all.filter((j) => j.status === "pending")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return pending[0] ?? null;
   },
 
   // Pipeline runs (snapshots for /share/[id])

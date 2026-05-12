@@ -71,6 +71,13 @@
 [functions."cron-auto-promote-sweep"]
   schedule = "15 * * * *"
 
+# Every 5 minutes — process the OutreachJob queue. Picks up the next
+# pending/running job and drafts up to batchSize (default 25) businesses.
+# A 100-business campaign clears in ~20 min; 1000 in ~3.5 hrs. Idle ticks
+# return early with {ok, idle:true}.
+[functions."cron-outreach-jobs"]
+  schedule = "*/5 * * * *"
+
 # ─── Headers ───────────────────────────────────────────────────────────────
 # Defense-in-depth: deny framing of the operator dashboard, declare strict
 # content security on the marketing landing.
