@@ -7,6 +7,7 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 const PROMPT_VERSIONS = [
   { v: "v2.4", deployed: "May 18", replyRate: 14.9, change: "+2.1pp", winner: true, samples: 412 },
@@ -45,7 +46,62 @@ const RECOMMENDATIONS = [
   },
 ];
 
+type LiveLearningKpis = {
+  // Real reply rate from /api/outreach/insights — same number the
+  // Outreach page header tile shows. Single source of truth.
+  replyRatePct: number | null;
+  totalSent: number;
+  totalReplied: number;
+  // Real AI cost from /api/admin/health (today's spend ledger).
+  aiSpendTodayUsd: number | null;
+  aiCallsToday: number | null;
+};
+
 export default function LearningPage() {
+  const [kpis, setKpis] = useState<LiveLearningKpis>({
+    replyRatePct: null,
+    totalSent: 0,
+    totalReplied: 0,
+    aiSpendTodayUsd: null,
+    aiCallsToday: null,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [insightsRes, healthRes] = await Promise.all([
+          fetch("/api/outreach/insights", { cache: "no-store" }),
+          fetch("/api/admin/health", { cache: "no-store" }),
+        ]);
+        if (cancelled) return;
+        const next: LiveLearningKpis = { ...kpis };
+        if (insightsRes.ok) {
+          const d = await insightsRes.json();
+          if (d.insights?.hasAnyData) {
+            next.replyRatePct = d.insights.overallReplyRatePct ?? 0;
+            next.totalSent = d.insights.totalSent ?? 0;
+            next.totalReplied = d.insights.totalReplied ?? 0;
+          }
+        }
+        if (healthRes.ok) {
+          const d = await healthRes.json();
+          if (d.spend?.today) {
+            next.aiSpendTodayUsd = d.spend.today.cost ?? 0;
+            next.aiCallsToday = d.spend.today.calls ?? 0;
+          }
+        }
+        setKpis(next);
+      } catch {
+        // Silent — tiles fall back to "—".
+      }
+    }
+    load();
+    const id = setInterval(load, 30_000);
+    return () => { cancelled = true; clearInterval(id); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -69,25 +125,61 @@ export default function LearningPage() {
             <Brain className="h-3.5 w-3.5 text-accent-amber" />
           </div>
           <div className="flex-1">
-            <span className="font-semibold text-accent-amber">Showcase — every number on this page is illustrative</span>
+            <span className="font-semibold text-accent-amber">Partly live, partly illustrative</span>
             <span className="text-ink-secondary">
               {" "}
-              — Prompt versioning + auto-tuning is in the roadmap. Today the agents use fixed
-              system prompts (see <code className="rounded bg-bg-hover px-1 text-[10px]">lib/agents/*.ts</code>).
-              Real per-agent token spend and success rates already land on{" "}
-              <a href="/agents" className="text-brand-300 hover:text-brand-200 underline">/agents</a>{" "}
-              and{" "}
-              <a href="/reports" className="text-brand-300 hover:text-brand-200 underline">/reports</a>.
+              — KPI tiles tagged <span className="text-accent-green font-semibold">Live</span> are
+              real (reply rate from sent drafts, AI spend from the spend ledger). The lower
+              tables (prompt evolution, lead-source ROI, winners/losers, recommendations) are
+              illustrative — the prompt-versioning + auto-tuning engine is in the roadmap.
+              Today the agents use fixed system prompts (see{" "}
+              <code className="rounded bg-bg-hover px-1 text-[10px]">lib/agents/*.ts</code>).
+              See real per-agent token spend on{" "}
+              <a href="/agents" className="text-brand-300 hover:text-brand-200 underline">/agents</a>.
             </span>
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Prompt versions tested" v="14" />
-        <Stat label="Active experiments" v="4" />
-        <Stat label="Reply rate (current)" v="14.9%" delta="+2.1pp" up />
-        <Stat label="Token spend ↓" v="−$182/wk" delta="cheap-tier routing" up />
+        <Stat
+          label="Prompt versions tested"
+          v="—"
+          hint="Versioning ships in the roadmap"
+        />
+        <Stat
+          label="Active experiments"
+          v="—"
+          hint="A/B runner ships in the roadmap"
+        />
+        <Stat
+          label="Reply rate (live)"
+          v={
+            kpis.replyRatePct === null
+              ? "—"
+              : `${kpis.replyRatePct}%`
+          }
+          hint={
+            kpis.replyRatePct === null
+              ? "No sent drafts yet"
+              : `${kpis.totalReplied}/${kpis.totalSent} sent · live from /api/outreach/insights`
+          }
+          live
+        />
+        <Stat
+          label="AI spend today"
+          v={
+            kpis.aiSpendTodayUsd === null
+              ? "—"
+              : `$${kpis.aiSpendTodayUsd.toFixed(4)}`
+          }
+          hint={
+            kpis.aiCallsToday === null
+              ? "No AI calls today"
+              : `${kpis.aiCallsToday.toLocaleString()} Anthropic calls · live from spend ledger`
+          }
+          live
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -264,11 +356,32 @@ export default function LearningPage() {
   );
 }
 
-function Stat({ label, v, delta, up }: { label: string; v: string | number; delta?: string; up?: boolean }) {
+function Stat({
+  label,
+  v,
+  delta,
+  up,
+  hint,
+  live,
+}: {
+  label: string;
+  v: string | number;
+  delta?: string;
+  up?: boolean;
+  hint?: string;
+  live?: boolean;
+}) {
   return (
     <div className="rounded-xl border border-bg-border bg-bg-card p-4">
-      <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
-      <div className="mt-1 text-2xl font-bold">{v}</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
+        {live && (
+          <span className="rounded bg-accent-green/15 px-1 py-0.5 text-[9px] uppercase tracking-wider text-accent-green">
+            Live
+          </span>
+        )}
+      </div>
+      <div className={`mt-1 text-2xl font-bold ${v === "—" ? "text-ink-tertiary" : ""}`}>{v}</div>
       {delta && (
         <div
           className={`mt-1 flex items-center gap-1 text-[11px] font-semibold ${
@@ -279,6 +392,7 @@ function Stat({ label, v, delta, up }: { label: string; v: string | number; delt
           {delta}
         </div>
       )}
+      {hint && <div className="mt-1 text-[10px] text-ink-tertiary">{hint}</div>}
     </div>
   );
 }
