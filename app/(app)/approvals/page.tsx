@@ -430,9 +430,9 @@ export default function ApprovalsPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Total pending" v={totalPending} Icon={Clock} />
-        <Stat label="Outreach drafts" v={pendingDrafts.length} Icon={Mail} />
-        <Stat label="Critical/High flags" v={pendingFlags.length} Icon={ShieldAlert} />
+        <Stat label="Total pending" v={totalPending} Icon={Clock} onClick={() => setFilter("all")} active={filter === "all"} />
+        <Stat label="Outreach drafts" v={pendingDrafts.length} Icon={Mail} onClick={() => setFilter("drafts")} active={filter === "drafts"} />
+        <Stat label="Critical/High flags" v={pendingFlags.length} Icon={ShieldAlert} onClick={() => setFilter("risks")} active={filter === "risks"} />
         <Stat label="Low/Med flags" v={lowMediumFlags.length} Icon={AlertTriangle} hint="not in queue" />
       </div>
 
@@ -927,18 +927,38 @@ function Stat({
   v,
   Icon,
   hint,
+  onClick,
+  active,
 }: {
   label: string;
   v: number;
   Icon: React.ComponentType<{ className?: string }>;
   hint?: string;
+  onClick?: () => void;
+  active?: boolean;
 }) {
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+  const inner = (
+    <>
       <Icon className="h-4 w-4 text-brand-300" />
       <div className="mt-2 text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
       <div className="mt-1 text-2xl font-bold">{v}</div>
       {hint && <div className="text-[10px] text-ink-tertiary">{hint}</div>}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`group block w-full rounded-xl border border-bg-border bg-bg-card p-4 text-left ring-1 transition-all hover:bg-bg-hover hover:ring-brand-500/40 ${active ? "ring-brand-500/60" : "ring-transparent"}`}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }

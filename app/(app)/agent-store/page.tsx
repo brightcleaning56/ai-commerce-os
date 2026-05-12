@@ -244,9 +244,12 @@ export default function AgentStorePage() {
             </p>
           </div>
         </div>
-        <button className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm">
+        <a
+          href="mailto:hello@avyncommerce.com?subject=Agent%20Store%20publisher%20application"
+          className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
+        >
           <ArrowUpRight className="h-4 w-4" /> Publish your own agent
-        </button>
+        </a>
       </div>
 
       {/* Preview banner — agent installation flow not yet live */}

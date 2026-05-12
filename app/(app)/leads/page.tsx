@@ -781,7 +781,7 @@ export default function LeadsPage() {
                       </div>
                     </div>
                     <a
-                      href="/buyers"
+                      href={`/buyers?focus=${encodeURIComponent(selected.promotedToBuyerId)}`}
                       className="rounded-md border border-accent-green/40 bg-accent-green/10 px-2 py-1 text-[10px] font-semibold text-accent-green hover:bg-accent-green/20"
                     >
                       Open buyer

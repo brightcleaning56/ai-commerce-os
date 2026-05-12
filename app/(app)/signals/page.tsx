@@ -120,16 +120,22 @@ export default function SignalsPage() {
           label="Reddit signals"
           v={data?.reddit.signals.length ?? 0}
           hint={data ? `${data.reddit.subsHit}/${data.reddit.subsTotal} subs` : "—"}
+          onClick={data ? () => setTab("reddit") : undefined}
+          active={tab === "reddit"}
         />
         <Stat
           label="HN launches"
           v={data?.hn.signals.length ?? 0}
           hint={data ? `${data.hn.totalScanned} top stories scanned` : "—"}
+          onClick={data ? () => setTab("hn") : undefined}
+          active={tab === "hn"}
         />
         <Stat
           label="Total"
           v={data?.totalSignals ?? 0}
           hint="active signals"
+          onClick={data ? () => setTab("all") : undefined}
+          active={tab === "all"}
         />
       </div>
 
@@ -275,12 +281,40 @@ function SignalRow({ s }: { s: RedditSignal | HNSignal }) {
   );
 }
 
-function Stat({ label, v, hint }: { label: string; v: string | number; hint: string }) {
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+function Stat({
+  label,
+  v,
+  hint,
+  onClick,
+  active,
+}: {
+  label: string;
+  v: string | number;
+  hint: string;
+  onClick?: () => void;
+  active?: boolean;
+}) {
+  const inner = (
+    <>
       <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
       <div className="mt-1 text-2xl font-bold">{v}</div>
       <div className="text-[11px] text-ink-tertiary">{hint || "—"}</div>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`group block w-full rounded-xl border border-bg-border bg-bg-card p-4 text-left ring-1 transition-all hover:bg-bg-hover hover:ring-brand-500/40 ${active ? "ring-brand-500/60" : "ring-transparent"}`}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }

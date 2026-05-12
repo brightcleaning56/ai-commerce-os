@@ -1,13 +1,15 @@
 "use client";
 import {
   Linkedin,
+  Loader2,
   Mail,
   Search,
   SlidersHorizontal,
   Sparkles,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Drawer from "@/components/ui/Drawer";
 import BuyerDetail from "@/components/buyers/BuyerDetail";
 import {
@@ -42,6 +44,16 @@ const SORT = [
 ] as const;
 
 export default function BuyersPage() {
+  return (
+    <Suspense fallback={<div className="grid place-items-center py-16 text-ink-tertiary"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+      <BuyersInner />
+    </Suspense>
+  );
+}
+
+function BuyersInner() {
+  const search = useSearchParams();
+  const focusId = search.get("focus");
   const [query, setQuery] = useState("");
   const [types, setTypes] = useState<string[]>([]);
   const [countries, setCountries] = useState<string[]>([]);
@@ -57,6 +69,24 @@ export default function BuyersPage() {
       .then((d) => setDiscovered(d.buyers ?? []))
       .catch(() => {});
   }, []);
+
+  // When the page is opened from /leads' "Open buyer" link with ?focus=<id>,
+  // auto-open that buyer's detail drawer once the list has loaded. Also
+  // relaxes the intent filter so the freshly-promoted buyer (which starts
+  // at intentScore 0 from the lead promotion path) shows up immediately.
+  useEffect(() => {
+    if (!focusId || discovered.length === 0) return;
+    const match = discovered.find((b) => b.id === focusId);
+    if (match) {
+      setOpen(match);
+      // Relax filters so the row is also visible behind the drawer.
+      setMinIntent(0);
+      setStatuses([]);
+      setTypes([]);
+      setCountries([]);
+      setQuery("");
+    }
+  }, [focusId, discovered]);
 
   // Real-only: every buyer in the list is a DiscoveredBuyer that landed
   // via the agent pipeline or the Lead → Buyer auto-promote rule. The
@@ -331,12 +361,40 @@ export default function BuyersPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                        <button className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-secondary hover:text-ink-primary">
-                          <Mail className="h-3.5 w-3.5" />
-                        </button>
-                        <button className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-secondary hover:text-ink-primary">
-                          <Linkedin className="h-3.5 w-3.5" />
-                        </button>
+                        {b.email ? (
+                          <a
+                            href={`mailto:${b.email}`}
+                            title={`Email ${b.email}`}
+                            className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-secondary transition hover:border-brand-500/40 hover:text-brand-200"
+                          >
+                            <Mail className="h-3.5 w-3.5" />
+                          </a>
+                        ) : (
+                          <span
+                            title="No email on file"
+                            className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-tertiary opacity-40"
+                          >
+                            <Mail className="h-3.5 w-3.5" />
+                          </span>
+                        )}
+                        {b.linkedin ? (
+                          <a
+                            href={b.linkedin.startsWith("http") ? b.linkedin : `https://${b.linkedin}`}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            title={`Open ${b.linkedin}`}
+                            className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-secondary transition hover:border-brand-500/40 hover:text-brand-200"
+                          >
+                            <Linkedin className="h-3.5 w-3.5" />
+                          </a>
+                        ) : (
+                          <span
+                            title="No LinkedIn on file"
+                            className="grid h-7 w-7 place-items-center rounded-md border border-bg-border text-ink-tertiary opacity-40"
+                          >
+                            <Linkedin className="h-3.5 w-3.5" />
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>
