@@ -103,10 +103,10 @@ export default function TasksPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Open" v={open} Icon={Clock} />
-        <Stat label="Phone tasks" v={phone} Icon={Phone} />
-        <Stat label="Sequences" v={seq} Icon={MessageSquare} />
-        <Stat label="Completed" v={done} Icon={CheckCircle2} />
+        <Stat label="Open" v={open} Icon={Clock} onClick={() => setFilter("open")} active={filter === "open"} />
+        <Stat label="Phone tasks" v={phone} Icon={Phone} onClick={() => setFilter("phone")} active={filter === "phone"} />
+        <Stat label="Sequences" v={seq} Icon={MessageSquare} onClick={() => setFilter("sequence")} active={filter === "sequence"} />
+        <Stat label="Completed" v={done} Icon={CheckCircle2} onClick={() => setFilter("done")} active={filter === "done"} />
       </div>
 
       <div className="flex flex-wrap items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs w-fit">
@@ -207,12 +207,28 @@ export default function TasksPage() {
   );
 }
 
-function Stat({ label, v, Icon }: { label: string; v: number; Icon: React.ComponentType<{ className?: string }> }) {
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+function Stat({ label, v, Icon, onClick, active }: { label: string; v: number; Icon: React.ComponentType<{ className?: string }>; onClick?: () => void; active?: boolean }) {
+  const inner = (
+    <>
       <Icon className="h-4 w-4 text-brand-300" />
       <div className="mt-2 text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
       <div className="mt-1 text-2xl font-bold">{v}</div>
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`group block w-full rounded-xl border border-bg-border bg-bg-card p-4 text-left transition-all hover:bg-bg-hover hover:ring-brand-500/40 ring-1 ${active ? "ring-brand-500/60" : "ring-transparent"}`}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }

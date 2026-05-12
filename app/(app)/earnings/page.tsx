@@ -241,6 +241,7 @@ export default function EarningsPage() {
           delta="Platform + escrow fees, less refunds"
           tone="brand"
           Icon={CircleDollarSign}
+          href="/reports"
         />
         <KpiCard
           label="In-flight Escrow"
@@ -248,6 +249,7 @@ export default function EarningsPage() {
           delta={`${tiles.inFlightCount} txn${tiles.inFlightCount === 1 ? "" : "s"} held`}
           tone="amber"
           Icon={Clock}
+          href="/escrow"
         />
         <KpiCard
           label="Lifetime Platform Fees"
@@ -255,6 +257,7 @@ export default function EarningsPage() {
           delta={`Escrow fees: ${fmtCents(tiles.lifetimeEscrow)}`}
           tone="blue"
           Icon={TrendingUp}
+          href="/reports"
         />
         <KpiCard
           label="Settled Deals"
@@ -262,6 +265,7 @@ export default function EarningsPage() {
           delta="Released or completed"
           tone="green"
           Icon={CheckCircle2}
+          href="/transactions"
         />
       </div>
 
@@ -483,22 +487,24 @@ function KpiCard({
   delta,
   tone,
   Icon,
+  href,
 }: {
   label: string;
   value: string;
   delta: string;
   tone: "brand" | "amber" | "blue" | "green";
   Icon: React.ComponentType<{ className?: string }>;
+  href?: string;
 }) {
   const toneMap = {
-    brand: { bg: "bg-brand-500/15", text: "text-brand-300" },
-    amber: { bg: "bg-accent-amber/15", text: "text-accent-amber" },
-    blue: { bg: "bg-accent-blue/15", text: "text-accent-blue" },
-    green: { bg: "bg-accent-green/15", text: "text-accent-green" },
+    brand: { bg: "bg-brand-500/15", text: "text-brand-300", ring: "hover:ring-brand-500/40" },
+    amber: { bg: "bg-accent-amber/15", text: "text-accent-amber", ring: "hover:ring-accent-amber/40" },
+    blue: { bg: "bg-accent-blue/15", text: "text-accent-blue", ring: "hover:ring-accent-blue/40" },
+    green: { bg: "bg-accent-green/15", text: "text-accent-green", ring: "hover:ring-accent-green/40" },
   };
   const t = toneMap[tone];
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+  const inner = (
+    <>
       <div className="flex items-center justify-between">
         <div className={`grid h-9 w-9 place-items-center rounded-lg ${t.bg}`}>
           <Icon className={`h-4 w-4 ${t.text}`} />
@@ -509,6 +515,21 @@ function KpiCard({
         {label}
       </div>
       <div className="mt-1 text-2xl font-bold">{value}</div>
+    </>
+  );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className={`group block rounded-xl border border-bg-border bg-bg-card p-4 ring-1 ring-transparent transition-all hover:bg-bg-hover ${t.ring}`}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }

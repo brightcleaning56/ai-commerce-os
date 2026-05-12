@@ -14,6 +14,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
+import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AgentRun } from "@/lib/store";
@@ -206,9 +207,9 @@ function AgentRunsInner() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Runs" v={totals.runs} Icon={Zap} />
-        <Stat label="Products discovered" v={totals.products} Icon={Package} />
-        <Stat label="Total cost" v={totals.cost > 0 ? `$${totals.cost.toFixed(4)}` : "$0.00"} Icon={DollarSign} />
+        <Stat label="Runs" v={totals.runs} Icon={Zap} href="/agents" />
+        <Stat label="Products discovered" v={totals.products} Icon={Package} href="/products" />
+        <Stat label="Total cost" v={totals.cost > 0 ? `$${totals.cost.toFixed(4)}` : "$0.00"} Icon={DollarSign} href="/earnings" />
         <Stat label="Avg duration" v={totals.avgMs > 0 ? `${(totals.avgMs / 1000).toFixed(2)}s` : "—"} Icon={Clock} />
       </div>
 
@@ -427,18 +428,35 @@ function Stat({
   label,
   v,
   Icon,
+  href,
 }: {
   label: string;
   v: string | number;
   Icon: React.ComponentType<{ className?: string }>;
+  href?: string;
 }) {
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+  const inner = (
+    <>
       <div className="flex items-center justify-between">
         <Icon className="h-4 w-4 text-brand-300" />
       </div>
       <div className="mt-2 text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
       <div className="mt-1 text-2xl font-bold">{v}</div>
+    </>
+  );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="group block rounded-xl border border-bg-border bg-bg-card p-4 ring-1 ring-transparent transition-all hover:bg-bg-hover hover:ring-brand-500/40"
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }

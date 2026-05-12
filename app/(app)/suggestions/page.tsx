@@ -160,10 +160,10 @@ export default function SuggestionsPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <PriorityCard label="Critical" v={data?.counts.critical ?? 0} tone="red" />
-        <PriorityCard label="High" v={data?.counts.high ?? 0} tone="amber" />
-        <PriorityCard label="Medium" v={data?.counts.medium ?? 0} tone="brand" />
-        <PriorityCard label="Low" v={data?.counts.low ?? 0} />
+        <PriorityCard label="Critical" v={data?.counts.critical ?? 0} tone="red" onClick={() => setFilter("critical")} active={filter === "critical"} />
+        <PriorityCard label="High" v={data?.counts.high ?? 0} tone="amber" onClick={() => setFilter("high")} active={filter === "high"} />
+        <PriorityCard label="Medium" v={data?.counts.medium ?? 0} tone="brand" onClick={() => setFilter("medium")} active={filter === "medium"} />
+        <PriorityCard label="Low" v={data?.counts.low ?? 0} onClick={() => setFilter("low")} active={filter === "low"} />
       </div>
 
       <div className="rounded-xl border border-bg-border bg-bg-card p-3">
@@ -260,10 +260,14 @@ function PriorityCard({
   label,
   v,
   tone,
+  onClick,
+  active,
 }: {
   label: string;
   v: number;
   tone?: "red" | "amber" | "brand";
+  onClick?: () => void;
+  active?: boolean;
 }) {
   const toneClass =
     tone === "red"
@@ -281,6 +285,24 @@ function PriorityCard({
       : tone === "brand"
       ? "text-brand-200"
       : "";
+  const activeRing =
+    active ? (
+      tone === "red" ? "ring-2 ring-accent-red/60" :
+      tone === "amber" ? "ring-2 ring-accent-amber/60" :
+      tone === "brand" ? "ring-2 ring-brand-500/60" : "ring-2 ring-brand-500/60"
+    ) : "";
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`group block w-full rounded-xl border ${toneClass} p-4 text-left transition-all hover:bg-bg-hover ${activeRing}`}
+      >
+        <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
+        <div className={`mt-1 text-2xl font-bold ${numTone}`}>{v}</div>
+      </button>
+    );
+  }
   return (
     <div className={`rounded-xl border ${toneClass} p-4`}>
       <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
@@ -288,7 +310,6 @@ function PriorityCard({
     </div>
   );
 }
-
 function relTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   if (ms < 60_000) return "just now";

@@ -19,6 +19,7 @@ import {
   Truck,
   Unlock,
 } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   ACTIVITY,
@@ -373,10 +374,10 @@ export default function MarketplacePage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Kpi label="Marketplace GMV (May)" value={fmtUSD(totals.gmv)} delta="+38% MoM" Icon={TrendingUp} tone="brand" />
-        <Kpi label="Platform Fees Earned" value={fmtUSD(totals.fees)} delta="2% effective" Icon={Banknote} tone="green" />
-        <Kpi label="In Escrow" value={fmtUSD(totals.inEscrow)} delta={`${orders.filter((o) => o.escrowStatus !== "Released").length} active`} Icon={Lock} tone="amber" />
-        <Kpi label="Cross-border Orders" value={`${orders.length}`} delta="6 countries" Icon={Globe} tone="blue" />
+        <Kpi label="Marketplace GMV (May)" value={fmtUSD(totals.gmv)} delta="+38% MoM" Icon={TrendingUp} tone="brand" href="/reports" />
+        <Kpi label="Platform Fees Earned" value={fmtUSD(totals.fees)} delta="2% effective" Icon={Banknote} tone="green" href="/earnings" />
+        <Kpi label="In Escrow" value={fmtUSD(totals.inEscrow)} delta={`${orders.filter((o) => o.escrowStatus !== "Released").length} active`} Icon={Lock} tone="amber" href="/escrow" />
+        <Kpi label="Cross-border Orders" value={`${orders.length}`} delta="6 countries" Icon={Globe} tone="blue" href="/transactions" />
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
@@ -690,22 +691,24 @@ function Kpi({
   delta,
   Icon,
   tone,
+  href,
 }: {
   label: string;
   value: string;
   delta: string;
   Icon: React.ComponentType<{ className?: string }>;
   tone: "brand" | "green" | "amber" | "blue";
+  href?: string;
 }) {
   const map = {
-    brand: { bg: "bg-brand-500/15", text: "text-brand-300" },
-    green: { bg: "bg-accent-green/15", text: "text-accent-green" },
-    amber: { bg: "bg-accent-amber/15", text: "text-accent-amber" },
-    blue: { bg: "bg-accent-blue/15", text: "text-accent-blue" },
+    brand: { bg: "bg-brand-500/15", text: "text-brand-300", ring: "hover:ring-brand-500/40" },
+    green: { bg: "bg-accent-green/15", text: "text-accent-green", ring: "hover:ring-accent-green/40" },
+    amber: { bg: "bg-accent-amber/15", text: "text-accent-amber", ring: "hover:ring-accent-amber/40" },
+    blue: { bg: "bg-accent-blue/15", text: "text-accent-blue", ring: "hover:ring-accent-blue/40" },
   };
   const t = map[tone];
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+  const inner = (
+    <>
       <div className="flex items-center justify-between">
         <div className={`grid h-9 w-9 place-items-center rounded-lg ${t.bg}`}>
           <Icon className={`h-4 w-4 ${t.text}`} />
@@ -714,6 +717,21 @@ function Kpi({
       </div>
       <div className="mt-3 text-[11px] uppercase tracking-wider text-ink-tertiary">{label}</div>
       <div className="mt-1 text-2xl font-bold">{value}</div>
+    </>
+  );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className={`group block rounded-xl border border-bg-border bg-bg-card p-4 ring-1 ring-transparent transition-all hover:bg-bg-hover ${t.ring}`}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import {
   TrendingUp,
   Workflow,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import Drawer from "@/components/ui/Drawer";
@@ -323,9 +324,12 @@ export default function CrmPage() {
               List
             </button>
           </div>
-          <button className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow">
+          <Link
+            href="/pipeline"
+            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
+          >
             <Plus className="h-4 w-4" /> New Deal
-          </button>
+          </Link>
         </div>
       </div>
 
