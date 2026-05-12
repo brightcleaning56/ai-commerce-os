@@ -29,6 +29,7 @@ const INVITES_FILE = "invites.json";
 const API_KEYS_FILE = "api-keys.json";
 const BUSINESSES_FILE = "businesses.json";
 const SUPPLY_EDGES_FILE = "supply-edges.json";
+const BRAND_ALTERNATIVES_FILE = "brand-alternatives.json";
 
 // ─── Backend selection ─────────────────────────────────────────────────────
 // STORE_BACKEND=blobs → Netlify Blobs (recommended for Netlify deploys)
@@ -833,6 +834,53 @@ function supplyEdgeDedupKey(e: Pick<SupplyEdge, "fromBusinessId" | "toName" | "k
   return `${e.fromBusinessId}|${e.toName.trim().toLowerCase()}|${e.kind}`;
 }
 
+/**
+ * BrandAlternative — the "find better suppliers" intelligence layer
+ * (slice 7). For any brand that shows up in the SupplyEdge graph, the
+ * operator can ask Claude "what 3-5 wholesalers compete with this in
+ * the same category?" — the result lives here, keyed by lowercased
+ * brand name.
+ *
+ * The outreach agent uses these alternatives to draft per-business
+ * pitches that say "switch from <brand> to <alternative> because
+ * <rationale>" rather than the generic AVYN intro. This is what
+ * turns the graph from a browse view into a revenue engine.
+ *
+ * Re-generation is supported (websites change, market shifts) —
+ * upserting the same brand replaces the alternatives array but bumps
+ * `regeneratedCount` so the operator can see if they've refreshed.
+ */
+export type BrandAlternativeEntry = {
+  name: string;                  // alternative supplier/brand name
+  rationale: string;             // 1-line "why this beats the original"
+  // Strength tag — what kind of advantage. Helps operator pick which
+  // alternative to pitch which businesses (TX retailer → regional alt).
+  strength?:
+    | "regional"
+    | "national"
+    | "moq"                      // lower minimum order quantity
+    | "price"
+    | "service"
+    | "speed"
+    | "specialty"
+    | "other";
+  score?: number;                // 0-100 model confidence
+};
+
+export type BrandAlternative = {
+  id: string;                    // alt_<random>
+  brand: string;                 // lowercased canonical key for lookup
+  brandDisplay: string;          // original-case display name
+  category?: string;             // category context the model inferred ("Roofing materials wholesale")
+  alternatives: BrandAlternativeEntry[];
+  generatedAt: string;           // ISO of most recent generation
+  modelUsed: string;             // anthropic model id or "fallback"
+  estCostUsd?: number;
+  usedFallback: boolean;
+  regeneratedCount: number;      // how many times this brand's alternatives have been refreshed
+  contextSampleSize?: number;    // how many businesses' edges informed the prompt
+};
+
 export type ThreadMessage = {
   id: string;
   role: "agent" | "buyer";
@@ -1362,6 +1410,64 @@ export const store = {
     const removed = existing.length - next.length;
     if (removed > 0) await getBackend().write(SUPPLY_EDGES_FILE, next);
     return removed;
+  },
+
+  // ─── Brand Alternatives ("find better suppliers" intelligence) ─────────
+  async getBrandAlternatives(): Promise<BrandAlternative[]> {
+    return getBackend().read<BrandAlternative[]>(BRAND_ALTERNATIVES_FILE, []);
+  },
+  async getBrandAlternative(brand: string): Promise<BrandAlternative | null> {
+    const norm = brand.trim().toLowerCase();
+    if (!norm) return null;
+    const all = await store.getBrandAlternatives();
+    return all.find((a) => a.brand === norm) ?? null;
+  },
+  /**
+   * Upsert by lowercased brand. If an entry exists, increments
+   * regeneratedCount and replaces the alternatives array with the new
+   * ones. Otherwise creates fresh.
+   */
+  async upsertBrandAlternative(
+    input: Omit<BrandAlternative, "id" | "regeneratedCount" | "generatedAt"> & { generatedAt?: string },
+  ): Promise<BrandAlternative> {
+    const all = await store.getBrandAlternatives();
+    const norm = input.brand.trim().toLowerCase();
+    const now = input.generatedAt ?? new Date().toISOString();
+    const idx = all.findIndex((a) => a.brand === norm);
+    if (idx === -1) {
+      const created: BrandAlternative = {
+        id: `alt_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`,
+        brand: norm,
+        brandDisplay: input.brandDisplay,
+        category: input.category,
+        alternatives: input.alternatives,
+        generatedAt: now,
+        modelUsed: input.modelUsed,
+        estCostUsd: input.estCostUsd,
+        usedFallback: input.usedFallback,
+        regeneratedCount: 0,
+        contextSampleSize: input.contextSampleSize,
+      };
+      const next = [created, ...all].slice(0, 10_000);
+      await getBackend().write(BRAND_ALTERNATIVES_FILE, next);
+      return created;
+    }
+    const cur = all[idx];
+    const merged: BrandAlternative = {
+      ...cur,
+      brandDisplay: input.brandDisplay || cur.brandDisplay,
+      category: input.category ?? cur.category,
+      alternatives: input.alternatives,
+      generatedAt: now,
+      modelUsed: input.modelUsed,
+      estCostUsd: input.estCostUsd,
+      usedFallback: input.usedFallback,
+      regeneratedCount: cur.regeneratedCount + 1,
+      contextSampleSize: input.contextSampleSize ?? cur.contextSampleSize,
+    };
+    all[idx] = merged;
+    await getBackend().write(BRAND_ALTERNATIVES_FILE, all);
+    return merged;
   },
 
   // Pipeline runs (snapshots for /share/[id])

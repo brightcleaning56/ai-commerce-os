@@ -100,13 +100,39 @@ function avynPitchAngleFor(b: BusinessRecord): string {
   return "find better suppliers and buyers + automate the outreach loop with AI";
 }
 
-function buildPrompt(b: BusinessRecord): string {
+/**
+ * Optional pitch override — used when the brand-alternatives engine has
+ * picked a specific alternative supplier to recommend to this business.
+ * When set, the agent's pitch becomes "switch from <currentBrand> to
+ * <alternative> because <rationale>" instead of the generic AVYN intro.
+ */
+export type PitchOverride = {
+  currentBrand: string;          // brand the business currently uses
+  alternative: string;           // the alternative we're suggesting they switch to
+  rationale: string;             // 1-line "why" — surfaced verbatim in the email
+};
+
+function buildPrompt(b: BusinessRecord, pitchOverride?: PitchOverride): string {
   const op = getOperator();
   const angle = avynPitchAngleFor(b);
   const location = [b.city, b.state, b.zip].filter(Boolean).join(", ") || "their region";
   const dm = b.contactName ?? "";
   const dmTitle = b.contactTitle ?? "";
   const industry = b.aiProfile?.industryRefined || b.industry || "their business";
+
+  // When the operator drives outreach via the Brand Alternatives flow,
+  // the prompt's job changes: don't pitch AVYN abstractly, pitch a
+  // concrete supplier swap. The rationale comes from the alternatives
+  // store (Claude-generated, operator-reviewed).
+  const pitchBlock = pitchOverride
+    ? `\n\n## Specific pitch angle (overrides default)
+This business currently sources from **${pitchOverride.currentBrand}**. AVYN connects them to
+**${pitchOverride.alternative}**, who is a better fit because: ${pitchOverride.rationale}
+
+Lead the email + LinkedIn with the supplier swap angle. Reference the original brand by name
+and the alternative by name. Don't oversell — the rationale above is the entire claim. The
+ask is: "want a 10-min intro to ${pitchOverride.alternative}?"`
+    : "";
 
   // When a Profile Scan has run, surface its findings to the prompt so
   // the pitch can reference real signals from the business's homepage
@@ -123,7 +149,7 @@ Reference ONE of these signals naturally in the email body — pick whichever fe
 ## Target business
 - Name: ${b.name}
 - Industry: ${industry}
-- Location: ${location}${dm ? `\n- Decision-maker: ${dm}${dmTitle ? `, ${dmTitle}` : ""}` : ""}${b.website ? `\n- Website: ${b.website}` : ""}${b.employeesBand ? `\n- Size: ${b.employeesBand} employees` : ""}${profileBlock}
+- Location: ${location}${dm ? `\n- Decision-maker: ${dm}${dmTitle ? `, ${dmTitle}` : ""}` : ""}${b.website ? `\n- Website: ${b.website}` : ""}${b.employeesBand ? `\n- Size: ${b.employeesBand} employees` : ""}${profileBlock}${pitchBlock}
 
 ## What AVYN does for THIS shape of business
 ${angle}
@@ -140,7 +166,7 @@ Sign emails with "${op.name}" on its own line, then "${op.title} · ${op.company
 - Email: 70-110 words, plain text, 3 short paragraphs max
 - LinkedIn: ≤ 50 words, connection-request style
 - SMS: ≤ 160 chars, casual but professional. Identify yourself as ${op.name} from ${op.company}.
-- Don't claim AVYN does things outside the angle above. Don't fake stats ("over 10,000 brands").
+- Don't claim AVYN does things outside the angle above. Don't fake stats ("over 10,000 brands").${pitchOverride ? "\n- When the pitch angle is set, weave the supplier swap naturally — don't sound like a robocall reading off a script. The rationale is the proof; the ask is the intro." : ""}
 
 Call the draft_business_outreach tool with the three channel drafts.`;
 }
@@ -150,12 +176,30 @@ Call the draft_business_outreach tool with the three channel drafts.`;
  * Mirrors the existing outreach agent's fakeDrafts pattern so /outreach
  * always has SOMETHING to render even with no API key.
  */
-function fakeBusinessDrafts(b: BusinessRecord): BusinessOutreachPayload {
+function fakeBusinessDrafts(b: BusinessRecord, pitchOverride?: PitchOverride): BusinessOutreachPayload {
   const op = getOperator();
   const opFirst = getOperatorFirstName();
   const sig = getOperatorSignature();
   const angle = avynPitchAngleFor(b);
   const greet = b.contactName ? `Hi ${b.contactName.split(" ")[0]}` : "Hi there";
+
+  if (pitchOverride) {
+    // Specific supplier-swap pitch fallback (Anthropic not configured).
+    const subj = `Quick alt to ${pitchOverride.currentBrand}`;
+    return {
+      email: {
+        subject: subj,
+        body: `${greet},\n\nNoticed ${b.name} works with ${pitchOverride.currentBrand}. I run ${op.company} and we partner with ${pitchOverride.alternative} — ${pitchOverride.rationale}\n\nWant a 10-min intro to ${pitchOverride.alternative}? Happy to broker the conversation.\n\n${sig}`,
+      },
+      linkedin: {
+        body: `${greet} — ${opFirst} from ${op.company}. We partner with ${pitchOverride.alternative} (alt to ${pitchOverride.currentBrand}). 10-min intro?`,
+      },
+      sms: {
+        body: `Hey, ${opFirst} from ${op.company}. Alt to ${pitchOverride.currentBrand}: ${pitchOverride.alternative}. 10-min intro?`,
+      },
+    };
+  }
+
   const cityBit = b.city ? `running ${b.industry ?? "things"} out of ${b.city}` : `working in ${b.industry ?? "your space"}`;
 
   return {
@@ -195,29 +239,47 @@ function getDedupeWindowDays(): number {
 async function findRecentBusinessDraft(
   businessId: string,
   windowDays: number,
+  productName?: string,
 ): Promise<OutreachDraft | null> {
   if (windowDays <= 0) return null;
   const cutoff = Date.now() - windowDays * 24 * 60 * 60 * 1000;
   const drafts = await store.getDrafts();
+  const targetProduct = productName?.trim().toLowerCase();
   for (const d of drafts) {
     if (d.status === "rejected") continue;
     if (d.buyerId !== businessId) continue;
+    // When a pitchOverride is in play, dedupe is scoped to the same
+    // alternative — operator can pitch a different alternative to the
+    // same business inside the dedupe window without it being a dupe.
+    if (targetProduct && d.productName.trim().toLowerCase() !== targetProduct) continue;
     const ts = new Date(d.createdAt).getTime();
     if (Number.isFinite(ts) && ts >= cutoff) return d;
   }
   return null;
 }
 
-export async function runBusinessOutreach(b: BusinessRecord): Promise<{
+export async function runBusinessOutreach(
+  b: BusinessRecord,
+  options: { pitchOverride?: PitchOverride } = {},
+): Promise<{
   run: AgentRun;
   draft: OutreachDraft;
   deduped?: boolean;
 }> {
+  const { pitchOverride } = options;
+  // The productName field doubles as the dedupe + insights key. When
+  // pitching a specific alternative, encode the swap so the operator
+  // can see what was pitched without opening the draft body.
+  const productName = pitchOverride
+    ? `Switch ${pitchOverride.currentBrand} → ${pitchOverride.alternative}`
+    : "AVYN Commerce onboarding";
+
   // Dedupe first — don't burn Anthropic tokens or reputation re-pitching
-  // the same business. Operator can override by deleting the existing
-  // draft and trying again, OR by setting BUSINESS_OUTREACH_DEDUPE_DAYS=0.
+  // the same business with the same angle. Operator can override by
+  // deleting the existing draft, OR by setting
+  // BUSINESS_OUTREACH_DEDUPE_DAYS=0.
   const dedupeDays = getDedupeWindowDays();
-  const existing = await findRecentBusinessDraft(b.id, dedupeDays);
+  const existing = await findRecentBusinessDraft(b.id, dedupeDays, productName);
   if (existing) {
     const synthetic: AgentRun = {
       id: existing.runId,
@@ -250,7 +312,7 @@ export async function runBusinessOutreach(b: BusinessRecord): Promise<{
 
   try {
     if (!client) {
-      payload = fakeBusinessDrafts(b);
+      payload = fakeBusinessDrafts(b, pitchOverride);
     } else {
       await checkSpendBudget();
       const res = await client.messages.create({
@@ -258,7 +320,7 @@ export async function runBusinessOutreach(b: BusinessRecord): Promise<{
         max_tokens: 1500,
         tools: [BUSINESS_OUTREACH_TOOL],
         tool_choice: { type: "tool", name: BUSINESS_OUTREACH_TOOL.name },
-        messages: [{ role: "user", content: buildPrompt(b) }],
+        messages: [{ role: "user", content: buildPrompt(b, pitchOverride) }],
       });
       inputTokens = res.usage.input_tokens;
       outputTokens = res.usage.output_tokens;
@@ -273,7 +335,7 @@ export async function runBusinessOutreach(b: BusinessRecord): Promise<{
   } catch (e) {
     runStatus = "error";
     errorMessage = e instanceof Error ? e.message : String(e);
-    payload = fakeBusinessDrafts(b);
+    payload = fakeBusinessDrafts(b, pitchOverride);
   }
 
   const finishedAt = new Date();
@@ -294,7 +356,7 @@ export async function runBusinessOutreach(b: BusinessRecord): Promise<{
     buyerCompany: b.name,
     buyerName: b.contactName ?? "",
     buyerTitle: b.contactTitle ?? "",
-    productName: "AVYN Commerce onboarding",
+    productName,
     status: "draft",
     email: payload.email,
     linkedin: payload.linkedin,
@@ -316,7 +378,7 @@ export async function runBusinessOutreach(b: BusinessRecord): Promise<{
     durationMs: finishedAt.getTime() - startedAt.getTime(),
     status: runStatus,
     inputCategory: b.industry ?? null,
-    inputProductName: "AVYN Commerce onboarding",
+    inputProductName: productName,
     productCount: 0,
     buyerCount: 1,
     modelUsed: usedFallback ? "fallback (no API key)" : MODEL_SMART,

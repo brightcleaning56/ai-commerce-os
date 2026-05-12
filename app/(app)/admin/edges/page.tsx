@@ -48,6 +48,37 @@ type BrandsPayload = {
   totalBusinesses: number;
 };
 
+type AlternativeStrength =
+  | "regional"
+  | "national"
+  | "moq"
+  | "price"
+  | "service"
+  | "speed"
+  | "specialty"
+  | "other";
+
+type BrandAlternativeEntry = {
+  name: string;
+  rationale: string;
+  strength?: AlternativeStrength;
+  score?: number;
+};
+
+type BrandAlternative = {
+  id: string;
+  brand: string;
+  brandDisplay: string;
+  category?: string;
+  alternatives: BrandAlternativeEntry[];
+  generatedAt: string;
+  modelUsed: string;
+  estCostUsd?: number;
+  usedFallback: boolean;
+  regeneratedCount: number;
+  contextSampleSize?: number;
+};
+
 const KIND_LABELS: Record<SupplyEdgeKind, string> = {
   sources_from: "Sources from",
   distributes_through: "Distributes through",
@@ -90,6 +121,12 @@ export default function EdgesPage() {
 
   const [selected, setSelected] = useState<BrandAggregate | null>(null);
   const [drafting, setDrafting] = useState(false);
+  const [alternative, setAlternative] = useState<BrandAlternative | null>(null);
+  const [loadingAlt, setLoadingAlt] = useState(false);
+  const [generatingAlt, setGeneratingAlt] = useState(false);
+  // Which alternative is currently being bulk-drafted (so we can show a
+  // per-row spinner). null = none in flight.
+  const [draftingAltName, setDraftingAltName] = useState<string | null>(null);
   const { toast } = useToast();
 
   const load = useCallback(async () => {
@@ -118,6 +155,98 @@ export default function EdgesPage() {
   }, [q, kindFilter]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Lazy-load alternatives when a brand is selected. Only fetches for
+  // sources_from edges (alternatives for distribution channels don't
+  // make sense yet — that's a slice 8 question).
+  useEffect(() => {
+    if (!selected || selected.kind !== "sources_from") {
+      setAlternative(null);
+      return;
+    }
+    let cancelled = false;
+    async function loadAlt(brand: string) {
+      setLoadingAlt(true);
+      setAlternative(null);
+      try {
+        const r = await fetch(
+          `/api/admin/edges/alternatives/${encodeURIComponent(brand)}`,
+          { cache: "no-store" },
+        );
+        if (cancelled) return;
+        if (r.status === 404) {
+          setAlternative(null);
+        } else if (r.ok) {
+          const d = await r.json();
+          setAlternative(d.alternative);
+        }
+      } catch {
+        // Silent — UI shows "no alternatives yet" + Generate button
+      } finally {
+        if (!cancelled) setLoadingAlt(false);
+      }
+    }
+    loadAlt(selected.brand);
+    return () => { cancelled = true; };
+  }, [selected]);
+
+  async function generateAlternatives(brand: string) {
+    setGeneratingAlt(true);
+    try {
+      const r = await fetch(
+        `/api/admin/edges/alternatives/${encodeURIComponent(brand)}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      );
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Generate failed (${r.status})`);
+      setAlternative(d.alternative);
+      toast(
+        d.alternative?.usedFallback
+          ? "Alternatives generated (fallback — no Anthropic key)"
+          : `Generated ${d.alternative?.alternatives?.length ?? 0} alternatives`,
+        d.alternative?.usedFallback ? "info" : "success",
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Generate failed", "error");
+    } finally {
+      setGeneratingAlt(false);
+    }
+  }
+
+  async function draftWithAlternative(
+    brandAgg: BrandAggregate,
+    alt: BrandAlternativeEntry,
+  ) {
+    const ids = brandAgg.topBusinesses.slice(0, MAX_DRAFT_BATCH).map((b) => b.businessId);
+    if (ids.length === 0) return;
+    setDraftingAltName(alt.name);
+    try {
+      const r = await fetch("/api/admin/businesses/draft-outreach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          businessIds: ids,
+          pitchOverride: {
+            currentBrand: brandAgg.brand,
+            alternative: alt.name,
+            rationale: alt.rationale,
+          },
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Draft failed (${r.status})`);
+      const drafted = d.drafted ?? 0;
+      const skipped = d.skipped ?? 0;
+      toast(
+        `Drafted ${drafted} "switch ${brandAgg.brand} → ${alt.name}" pitch${drafted === 1 ? "" : "es"}${skipped ? ` · skipped ${skipped}` : ""} — review in /outreach`,
+        drafted > 0 ? "success" : "info",
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Draft failed", "error");
+    } finally {
+      setDraftingAltName(null);
+    }
+  }
 
   async function draftOutreachForBrand(brand: BrandAggregate) {
     // Cap at 25 (the endpoint's hard limit). If more businesses use this
@@ -422,6 +551,104 @@ export default function EdgesPage() {
                 </div>
               )}
             </div>
+
+            {/* Alternatives panel — only meaningful for sources_from edges.
+                For distribution channels there's no "switch to better X" play. */}
+            {selected.kind === "sources_from" && (
+              <div className="border-b border-bg-border px-5 py-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[11px] font-semibold text-brand-200">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    AI suggested alternatives
+                    {alternative && (
+                      <span className="text-[10px] font-normal text-ink-tertiary">
+                        · generated {relTime(alternative.generatedAt)}
+                        {alternative.regeneratedCount > 0 && ` · refreshed ${alternative.regeneratedCount}×`}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => generateAlternatives(selected.brand)}
+                    disabled={generatingAlt}
+                    title={alternative ? "Re-generate alternatives (use after market shifts or better data)" : "Ask Claude to find 3-5 competing wholesalers in the same category"}
+                    className="flex items-center gap-1 rounded-md border border-brand-500/40 bg-brand-500/10 px-2.5 py-1 text-[10px] hover:bg-brand-500/20 disabled:opacity-60"
+                  >
+                    {generatingAlt ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3 w-3" />
+                    )}
+                    {alternative ? "Re-generate" : "Find alternatives"}
+                  </button>
+                </div>
+
+                {loadingAlt ? (
+                  <div className="mt-2 flex items-center gap-2 text-[11px] text-ink-tertiary">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Loading alternatives…
+                  </div>
+                ) : !alternative ? (
+                  <p className="mt-2 text-[11px] text-ink-tertiary">
+                    No alternatives generated yet. Click <strong>Find alternatives</strong> — Claude reads who currently sources from {selected.brand}, infers the category, and returns 3-5 competing wholesalers (~$0.003).
+                  </p>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    {alternative.category && (
+                      <div className="text-[10px] text-ink-tertiary">
+                        Category: <span className="text-ink-secondary">{alternative.category}</span>
+                        {alternative.contextSampleSize !== undefined && (
+                          <span> · {alternative.contextSampleSize} businesses sampled for context</span>
+                        )}
+                        {alternative.usedFallback && (
+                          <span className="ml-2 rounded bg-accent-amber/20 px-1.5 py-0.5 text-accent-amber">
+                            fallback (no Anthropic key)
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {alternative.alternatives.map((alt) => (
+                      <div
+                        key={alt.name}
+                        className="rounded-lg border border-bg-border bg-bg-card/60 p-2.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[12px] font-semibold">{alt.name}</span>
+                              {alt.strength && (
+                                <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-ink-tertiary">
+                                  {alt.strength}
+                                </span>
+                              )}
+                              {typeof alt.score === "number" && (
+                                <span className="text-[10px] text-ink-tertiary">{alt.score}%</span>
+                              )}
+                            </div>
+                            <p className="mt-1 text-[11px] text-ink-secondary">{alt.rationale}</p>
+                          </div>
+                          <button
+                            onClick={() => draftWithAlternative(selected, alt)}
+                            disabled={draftingAltName !== null || alt.score === 0}
+                            title={
+                              alt.score === 0
+                                ? "Fallback alt (no Anthropic) — re-generate after wiring API key"
+                                : `Draft "switch ${selected.brand} → ${alt.name}" pitch for the top ${Math.min(selected.businessCount, MAX_DRAFT_BATCH)} businesses`
+                            }
+                            className="flex shrink-0 items-center gap-1 rounded-md bg-gradient-brand px-2.5 py-1 text-[10px] font-semibold shadow-glow disabled:opacity-50"
+                          >
+                            {draftingAltName === alt.name ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Send className="h-3 w-3" />
+                            )}
+                            Pitch swap to {Math.min(selected.businessCount, MAX_DRAFT_BATCH)}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto px-5 py-3">
               {selected.topBusinesses.length === 0 ? (

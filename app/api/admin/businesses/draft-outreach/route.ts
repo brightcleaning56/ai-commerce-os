@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   const auth = requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
-  let body: { businessIds?: unknown };
+  let body: { businessIds?: unknown; pitchOverride?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -56,6 +56,29 @@ export async function POST(req: NextRequest) {
       { error: `Batch too large (${MAX_BUSINESSES_PER_BATCH} max). Split into smaller batches.` },
       { status: 400 },
     );
+  }
+
+  // Optional pitch override — used when the Brand Alternatives flow
+  // bulk-drafts a specific "switch from X to Y" pitch instead of the
+  // generic AVYN intro. All three fields required if present.
+  type IncomingPitchOverride = {
+    currentBrand?: unknown;
+    alternative?: unknown;
+    rationale?: unknown;
+  };
+  let pitchOverride: { currentBrand: string; alternative: string; rationale: string } | undefined;
+  if (body.pitchOverride && typeof body.pitchOverride === "object") {
+    const po = body.pitchOverride as IncomingPitchOverride;
+    const currentBrand = typeof po.currentBrand === "string" ? po.currentBrand.trim() : "";
+    const alternative = typeof po.alternative === "string" ? po.alternative.trim() : "";
+    const rationale = typeof po.rationale === "string" ? po.rationale.trim() : "";
+    if (!currentBrand || !alternative || !rationale) {
+      return NextResponse.json(
+        { error: "pitchOverride requires currentBrand, alternative, and rationale (all non-empty)" },
+        { status: 400 },
+      );
+    }
+    pitchOverride = { currentBrand, alternative, rationale: rationale.slice(0, 280) };
   }
 
   const ids: string[] = body.businessIds.filter((x): x is string => typeof x === "string");
@@ -91,7 +114,7 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const { draft, deduped } = await runBusinessOutreach(biz);
+      const { draft, deduped } = await runBusinessOutreach(biz, { pitchOverride });
 
       // Mark business as queued + bump outreach metadata. We use
       // "queued" rather than "contacted" because the draft hasn't
