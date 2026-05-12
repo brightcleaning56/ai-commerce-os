@@ -1,6 +1,7 @@
 import {
   Activity,
   Building2,
+  GitBranch,
   Lightbulb,
   LayoutDashboard,
   Package,
@@ -59,6 +60,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Buyer Discovery", href: "/buyers", icon: Users },
       { label: "Supplier Finder", href: "/suppliers", icon: Factory },
       { label: "Business Directory", href: "/admin/businesses", icon: Building2, badge: "NEW" },
+      { label: "Supply Graph", href: "/admin/edges", icon: GitBranch, badge: "NEW" },
     ],
   },
   {
