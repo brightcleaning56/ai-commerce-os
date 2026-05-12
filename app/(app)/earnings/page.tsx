@@ -1,5 +1,6 @@
 "use client";
 import {
+  AlertCircle,
   ArrowDownToLine,
   Banknote,
   Calendar,
@@ -8,55 +9,25 @@ import {
   CircleDollarSign,
   Clock,
   DollarSign,
+  ExternalLink,
+  Loader2,
   Sparkles,
   TrendingUp,
-  X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import RefundsPanel from "@/components/earnings/RefundsPanel";
 import { useChartColors } from "@/components/dashboard/useChartColors";
-import { useToast } from "@/components/Toast";
 import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import {
-  COMMISSION_TIERS,
-  EARNINGS,
-  MONTHLY_EARNINGS,
-  PAYOUTS,
-  totals,
-} from "@/lib/earnings";
-
-const STATUS_TONE: Record<string, string> = {
-  Earned: "bg-bg-hover text-ink-secondary",
-  "Pending Payout": "bg-accent-amber/15 text-accent-amber",
-  Paid: "bg-accent-green/15 text-accent-green",
-  Processing: "bg-accent-amber/15 text-accent-amber",
-};
-
-const SOURCE_COLOR: Record<string, string> = {
-  "Outreach Agent": "#7c3aed",
-  LinkedIn: "#3b82f6",
-  Referral: "#22c55e",
-  Inbound: "#06b6d4",
-};
-
-function fmt(n: number) {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1000) return `$${(n / 1000).toFixed(1)}K`;
-  return `$${Math.round(n).toLocaleString()}`;
-}
+import { COMMISSION_TIERS } from "@/lib/earnings";
 
 type LiveRevenueStats = {
   totalPlatformFeesCents: number;
@@ -69,6 +40,35 @@ type LiveRevenueStats = {
   txnsByState: Record<string, number>;
 };
 
+type Transaction = {
+  id: string;
+  buyerCompany: string;
+  buyerName: string;
+  productName: string;
+  productTotalCents: number;
+  platformFeeCents: number;
+  platformFeePctBps: number;
+  state: string;
+  createdAt: string;
+  paymentReceivedAt?: string;
+  escrowReleasedAt?: string;
+};
+
+const STATE_TONE: Record<string, string> = {
+  draft: "bg-bg-hover text-ink-tertiary",
+  proposed: "bg-bg-hover text-ink-secondary",
+  signed: "bg-accent-blue/15 text-accent-blue",
+  payment_pending: "bg-accent-amber/15 text-accent-amber",
+  escrow_held: "bg-accent-amber/15 text-accent-amber",
+  shipped: "bg-accent-blue/15 text-accent-blue",
+  delivered: "bg-accent-blue/15 text-accent-blue",
+  released: "bg-accent-green/15 text-accent-green",
+  completed: "bg-accent-green/15 text-accent-green",
+  disputed: "bg-accent-red/15 text-accent-red",
+  refunded: "bg-accent-red/15 text-accent-red",
+  cancelled: "bg-bg-hover text-ink-tertiary",
+};
+
 function fmtCents(cents: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -77,58 +77,110 @@ function fmtCents(cents: number) {
   }).format(cents / 100);
 }
 
-export default function EarningsPage() {
-  const t = totals();
-  const lifetime = MONTHLY_EARNINGS.reduce((s, m) => s + m.earned, 0) + t.earned;
-  const [payoutOpen, setPayoutOpen] = useState(false);
-  const [requested, setRequested] = useState(false);
-  const [live, setLive] = useState<LiveRevenueStats | null>(null);
-  const c = useChartColors();
-  const { toast } = useToast();
+function fmtCentsPrecise(cents: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchLive() {
-      try {
-        const r = await fetch("/api/transactions/stats", { cache: "no-store" });
-        if (!r.ok) return;
-        const d = await r.json();
-        if (!cancelled) setLive(d.stats);
-      } catch {
-        // Silent fail — live panel just won't render. Demo cards still work.
+function formatMonthLabel(yyyymm: string) {
+  // "2024-05" → "May '24"
+  const [y, m] = yyyymm.split("-").map((s) => parseInt(s, 10));
+  if (!y || !m) return yyyymm;
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  return d.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
+}
+
+const SETTLED_STATES = new Set(["released", "completed"]);
+const IN_FLIGHT_STATES = new Set(["payment_pending", "escrow_held", "shipped", "delivered"]);
+
+export default function EarningsPage() {
+  const [live, setLive] = useState<LiveRevenueStats | null>(null);
+  const [txns, setTxns] = useState<Transaction[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const c = useChartColors();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [statsRes, txnsRes] = await Promise.all([
+        fetch("/api/transactions/stats", { cache: "no-store" }),
+        fetch("/api/transactions", { cache: "no-store" }),
+      ]);
+      if (statsRes.status === 401 || txnsRes.status === 401) {
+        setLoadError("Not signed in — visit /signin and try again.");
+        return;
       }
+      if (!statsRes.ok) {
+        setLoadError(`Stats API returned ${statsRes.status}`);
+        return;
+      }
+      const statsData = await statsRes.json();
+      setLive(statsData.stats ?? null);
+      if (txnsRes.ok) {
+        const txnsData = await txnsRes.json();
+        setTxns(txnsData.transactions ?? []);
+      } else {
+        setTxns([]);
+      }
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
     }
-    fetchLive();
-    const id = setInterval(fetchLive, 30000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
   }, []);
 
-  const hasLive = !!live && (
-    live.totalPlatformFeesCents > 0
-    || live.totalEscrowFeesCents > 0
-    || live.inFlightEscrowCents > 0
-    || Object.values(live.txnsByState ?? {}).some((n) => n > 0)
-  );
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 30_000);
+    return () => clearInterval(id);
+  }, [load]);
 
-  function handleConfirmPayout() {
-    setRequested(true);
-    setPayoutOpen(false);
-    toast(`Payout request submitted for ${fmt(t.pending)} · expect ACH in 1-3 business days`);
-  }
+  // Anything to show? If no live stats AND no transactions, render the
+  // honest empty state instead of pretending we have a ledger.
+  const hasAnyData = useMemo(() => {
+    if (!live) return false;
+    return (
+      live.totalPlatformFeesCents > 0 ||
+      live.inFlightEscrowCents > 0 ||
+      Object.values(live.txnsByState ?? {}).some((n) => n > 0) ||
+      (txns?.length ?? 0) > 0
+    );
+  }, [live, txns]);
 
-  // Source breakdown
-  const sourceMap = EARNINGS.reduce((acc, e) => {
-    acc[e.source] = (acc[e.source] ?? 0) + e.amount;
-    return acc;
-  }, {} as Record<string, number>);
-  const sourceData = Object.entries(sourceMap).map(([name, value]) => ({
-    name,
-    value: +value.toFixed(0),
-    fill: SOURCE_COLOR[name] ?? "#a87dff",
-  }));
+  // KPI tiles — derived from real data
+  const tiles = useMemo(() => {
+    const settledCount = (txns ?? []).filter((t) => SETTLED_STATES.has(t.state)).length;
+    const inFlightCount = (txns ?? []).filter((t) => IN_FLIGHT_STATES.has(t.state)).length;
+    const lifetimePlatform = live?.totalPlatformFeesCents ?? 0;
+    const lifetimeEscrow = live?.totalEscrowFeesCents ?? 0;
+    const inFlightEscrow = live?.inFlightEscrowCents ?? 0;
+    const netRevenue = live?.netPlatformRevenueCents ?? 0;
+    return { lifetimePlatform, lifetimeEscrow, inFlightEscrow, netRevenue, settledCount, inFlightCount };
+  }, [live, txns]);
+
+  // Per-month chart data — show all months in the byMonth array (already sorted asc)
+  const chartData = useMemo(() => {
+    return (live?.byMonth ?? []).map((m) => ({
+      m: formatMonthLabel(m.month),
+      platform: Math.round(m.platformFeesCents / 100),
+      escrow: Math.round(m.escrowFeesCents / 100),
+    }));
+  }, [live]);
+
+  // Commission ledger rows — every transaction is a row.
+  const ledgerRows = useMemo(() => {
+    const list = txns ?? [];
+    return list
+      .slice()
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 50);
+  }, [txns]);
 
   return (
     <div className="space-y-5">
@@ -140,384 +192,262 @@ export default function EarningsPage() {
           <div>
             <h1 className="text-2xl font-bold">Earnings &amp; Commissions</h1>
             <p className="text-xs text-ink-secondary">
-              Platform takes a % of every AI-closed deal · current plan: {" "}
-              <span className="text-brand-300">{t.plan.name}</span> ({(t.plan.commissionRate * 100).toFixed(0)}% base · tiered up for smaller deals)
+              Platform fees on AI-closed deals · derived from real transactions
             </p>
           </div>
         </div>
         <button
-          onClick={() => setPayoutOpen(true)}
-          disabled={!hasLive || t.pending === 0 || requested}
-          title={!hasLive ? "Payouts activate after the live revenue ledger has activity" : undefined}
-          className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow disabled:opacity-40 disabled:cursor-not-allowed"
+          onClick={load}
+          disabled={loading}
+          className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover disabled:opacity-60"
         >
-          {requested ? (
-            <><CheckCircle2 className="h-4 w-4" /> Payout requested</>
-          ) : (
-            <><ArrowDownToLine className="h-4 w-4" /> Request Payout</>
-          )}
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+          Refresh
         </button>
       </div>
 
-      {payoutOpen && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
-          onClick={() => setPayoutOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-xl border border-bg-border bg-bg-panel shadow-2xl"
-          >
-            <div className="flex items-center justify-between border-b border-bg-border px-5 py-4">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <Banknote className="h-4 w-4 text-accent-green" /> Confirm payout request
-              </div>
-              <button
-                onClick={() => setPayoutOpen(false)}
-                className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+      {loadError && (
+        <div className="rounded-xl border border-accent-red/40 bg-accent-red/5 px-4 py-3 text-xs text-accent-red">
+          <strong className="font-semibold">Couldn&apos;t load earnings:</strong> {loadError}
+        </div>
+      )}
+
+      {/* Honest empty state — no fake "$1,240 earned in Dec '23" */}
+      {!loading && live && !hasAnyData && (
+        <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-4">
+          <div className="flex items-start gap-3 text-[12px]">
+            <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
+              <AlertCircle className="h-3.5 w-3.5 text-accent-amber" />
             </div>
-            <div className="space-y-4 px-5 py-4">
-              <div className="rounded-lg border border-bg-border bg-bg-card p-4">
-                <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">
-                  Pending payout
-                </div>
-                <div className="mt-1 text-3xl font-bold">{fmt(t.pending)}</div>
-                <div className="mt-1 text-[11px] text-ink-tertiary">
-                  Across {EARNINGS.filter((e) => e.status === "Pending Payout").length} closed deals
-                </div>
-              </div>
-              <div className="space-y-1.5 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-ink-secondary">Method</span>
-                  <span className="font-medium">ACH (1-3 business days)</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-ink-secondary">Bank account</span>
-                  <span className="font-mono">•••• 8842</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-ink-secondary">Reference</span>
-                  <span className="font-mono">PR-{Date.now().toString(36).toUpperCase()}</span>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-2 border-t border-bg-border px-5 py-3">
-              <button
-                onClick={() => setPayoutOpen(false)}
-                className="rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmPayout}
-                className="rounded-lg bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow"
-              >
-                Confirm payout
-              </button>
+            <div className="flex-1 text-ink-secondary">
+              <span className="font-semibold text-accent-amber">No transactions yet</span>
+              {" "}— platform fees appear here once buyers sign quotes and pay through escrow.
+              Once a transaction lands, this page will show real platform fees, real per-month
+              charts, and a real commission ledger. Until then, no fake numbers.
+              {" "}
+              <Link href="/transactions" className="text-brand-300 hover:underline">
+                Open transactions →
+              </Link>
             </div>
           </div>
         </div>
       )}
 
-      {!hasLive && (
-        <div className="flex items-start gap-2 rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-3 text-xs">
-          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
-            <DollarSign className="h-3.5 w-3.5 text-accent-amber" />
-          </div>
-          <div className="flex-1 text-ink-secondary">
-            <span className="font-semibold text-accent-amber">Commission ledger preview</span>
-            {" "}— Live commission tracking activates once Stripe Connect destination charges
-            settle. The numbers below show the working shape of the ledger (sample data).
-            Once transactions accumulate, the &ldquo;Live Platform Revenue&rdquo; panel
-            replaces these figures and the chart/ledger pull from your real{" "}
-            <code className="rounded bg-bg-hover px-1 text-[10px]">revenue_ledger</code>.
-          </div>
-        </div>
-      )}
-
-      {/* Live platform revenue from transaction ledger */}
-      {hasLive && live && (
-        <div className="rounded-xl border border-accent-green/30 bg-gradient-to-br from-accent-green/5 to-transparent p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-accent-green">
-              <Sparkles className="h-3.5 w-3.5" /> Live Platform Revenue · Transaction Ledger
-            </div>
-            <Link
-              href="/transactions"
-              className="text-[11px] text-brand-300 hover:underline"
-            >
-              View transactions →
-            </Link>
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="rounded-lg border border-bg-border bg-bg-card p-3">
-              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Net Platform Revenue</div>
-              <div className="mt-1 text-2xl font-bold text-accent-green">
-                {fmtCents(live.netPlatformRevenueCents)}
-              </div>
-              <div className="mt-0.5 text-[11px] text-ink-tertiary">
-                Platform + escrow fees, less refunds
-              </div>
-            </div>
-            <div className="rounded-lg border border-bg-border bg-bg-card p-3">
-              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">In-flight Escrow</div>
-              <div className="mt-1 text-2xl font-bold text-accent-amber">
-                {fmtCents(live.inFlightEscrowCents)}
-              </div>
-              <div className="mt-0.5 text-[11px] text-ink-tertiary">
-                Held until delivery confirmed
-              </div>
-            </div>
-            <div className="rounded-lg border border-bg-border bg-bg-card p-3">
-              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Platform Fees</div>
-              <div className="mt-1 text-2xl font-bold">{fmtCents(live.totalPlatformFeesCents)}</div>
-              <div className="mt-0.5 text-[11px] text-ink-tertiary">
-                Escrow fees: {fmtCents(live.totalEscrowFeesCents)}
-              </div>
-            </div>
-            <div className="rounded-lg border border-bg-border bg-bg-card p-3">
-              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Supplier Payouts</div>
-              <div className="mt-1 text-2xl font-bold">{fmtCents(live.totalSupplierPayoutsCents)}</div>
-              <div className="mt-0.5 text-[11px] text-ink-tertiary">
-                Refunds: {fmtCents(live.totalRefundsCents)}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Refund attribution — split refunds out so net revenue is honest */}
-      <RefundsPanel />
-
+      {/* KPI tiles — real numbers (zero is honest, not faked) */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiCard
-          label="Lifetime Earned"
-          value={fmt(lifetime)}
-          delta={hasLive ? "Demo + sample ledger" : "Sample data"}
+          label="Net Platform Revenue"
+          value={fmtCents(tiles.netRevenue)}
+          delta="Platform + escrow fees, less refunds"
           tone="brand"
           Icon={CircleDollarSign}
         />
         <KpiCard
-          label="Pending Payout"
-          value={fmt(t.pending)}
-          delta={`${EARNINGS.filter((e) => e.status === "Pending Payout").length} sample deals`}
+          label="In-flight Escrow"
+          value={fmtCents(tiles.inFlightEscrow)}
+          delta={`${tiles.inFlightCount} txn${tiles.inFlightCount === 1 ? "" : "s"} held`}
           tone="amber"
           Icon={Clock}
         />
         <KpiCard
-          label="In-Flight (Open Deals)"
-          value={fmt(t.inFlight)}
-          delta={`${EARNINGS.filter((e) => e.status === "Earned").length} sample deals`}
+          label="Lifetime Platform Fees"
+          value={fmtCents(tiles.lifetimePlatform)}
+          delta={`Escrow fees: ${fmtCents(tiles.lifetimeEscrow)}`}
           tone="blue"
           Icon={TrendingUp}
         />
         <KpiCard
-          label="30-Day Forecast"
-          value={fmt(t.forecast)}
-          delta="Static projection · not modelled"
+          label="Settled Deals"
+          value={tiles.settledCount.toLocaleString()}
+          delta="Released or completed"
           tone="green"
-          Icon={Sparkles}
+          Icon={CheckCircle2}
         />
       </div>
 
+      <RefundsPanel />
+
+      {/* Monthly platform fees chart — only render when there's data */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2 rounded-xl border border-bg-border bg-bg-card">
           <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold">Monthly Commissions</span>
-              <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <TrendingUp className="h-4 w-4 text-brand-300" />
+              Monthly Platform Fees
+              <span className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-accent-green">
+                Live
+              </span>
             </div>
             <div className="flex items-center gap-3 text-[11px]">
               <span className="flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-brand-400" /> Earned
+                <span className="h-2 w-2 rounded-full bg-brand-400" /> Platform
               </span>
               <span className="flex items-center gap-1.5 text-ink-tertiary">
-                <span className="h-2 w-2 rounded-full bg-ink-tertiary" /> Paid
+                <span className="h-2 w-2 rounded-full bg-ink-tertiary" /> Escrow
               </span>
             </div>
           </div>
-          <div className="h-72 px-3 py-3">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={MONTHLY_EARNINGS} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="m" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{
-                    background: c.tooltipBg,
-                    border: "1px solid #252538",
-                    borderRadius: 8,
-                  }}
-                  labelStyle={{ color: c.tooltipLabel }}
-                />
-                <Bar dataKey="earned" fill="#7c3aed" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="paid" fill="#6e6e85" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {chartData.length === 0 ? (
+            <div className="px-5 py-12 text-center text-xs text-ink-tertiary">
+              No fees recorded yet. The chart fills in as deals close.
+            </div>
+          ) : (
+            <div className="h-72 px-3 py-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="m" tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <Tooltip
+                    contentStyle={{
+                      background: c.tooltipBg,
+                      border: "1px solid #252538",
+                      borderRadius: 8,
+                    }}
+                    labelStyle={{ color: c.tooltipLabel }}
+                    formatter={(v: number) => `$${v.toLocaleString()}`}
+                  />
+                  <Bar dataKey="platform" fill="#7c3aed" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="escrow" fill="#6e6e85" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
         <div className="rounded-xl border border-bg-border bg-bg-card">
           <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
-            Earnings by Source
+            Commission Tiers
           </div>
-          <div className="h-72 px-3 py-3">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={sourceData}
-                  dataKey="value"
-                  innerRadius={50}
-                  outerRadius={80}
-                  paddingAngle={2}
-                  stroke="none"
-                >
-                  {sourceData.map((s) => (
-                    <Cell key={s.name} fill={s.fill} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8 }}
-                  formatter={(v: number) => fmt(v)}
-                />
-                <Legend
-                  iconType="circle"
-                  wrapperStyle={{ fontSize: 11, color: c.tooltipLabel }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+          <div className="divide-y divide-bg-border">
+            {COMMISSION_TIERS.map((t) => (
+              <div
+                key={t.label}
+                className="flex items-center justify-between px-5 py-3 text-xs"
+              >
+                <div>
+                  <div className="font-medium">{t.label}</div>
+                  <div className="text-[11px] text-ink-tertiary">
+                    {t.dealMin === 0 ? "Up to" : "From"} ${t.dealMin.toLocaleString()}
+                    {t.dealMax !== Infinity ? ` - $${t.dealMax.toLocaleString()}` : "+"}
+                  </div>
+                </div>
+                <span className="font-semibold text-brand-200">
+                  {(t.rate * 100).toFixed(0)}%
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="border-t border-bg-border px-5 py-3 text-[11px] text-ink-tertiary">
+            Tiered rates apply on top of plan rate. Enterprise plans negotiate custom splits.
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 rounded-xl border border-bg-border bg-bg-card">
-          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
-            <div className="text-sm font-semibold">Commission Ledger</div>
-            <Link href="/transactions" className="text-[11px] text-brand-300 hover:underline">
-              Real ledger: /transactions →
-            </Link>
+      {/* Real commission ledger — every transaction is one row */}
+      <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+        <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Banknote className="h-4 w-4 text-brand-300" />
+            Commission Ledger
+            <span className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-accent-green">
+              Live
+            </span>
           </div>
+          <Link href="/transactions" className="text-[11px] text-brand-300 hover:underline">
+            Full transactions list →
+          </Link>
+        </div>
+        {txns === null ? (
+          <div className="px-5 py-12 text-center text-xs text-ink-tertiary">
+            <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" /> Loading…
+          </div>
+        ) : ledgerRows.length === 0 ? (
+          <div className="px-5 py-12 text-center text-xs text-ink-tertiary">
+            <Banknote className="mx-auto mb-2 h-5 w-5" />
+            <div className="text-ink-secondary font-medium">No commissions yet</div>
+            <p className="mt-1 max-w-md mx-auto">
+              Each transaction creates one row here with its real platform fee, fee rate,
+              and current state. Run a pipeline and convert a quote to start the flow.
+            </p>
+          </div>
+        ) : (
           <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
-              <tr>
-                <th className="px-5 py-2.5 text-left font-medium">Deal</th>
-                <th className="px-3 py-2.5 text-left font-medium">Source</th>
-                <th className="px-3 py-2.5 text-right font-medium">Deal Value</th>
-                <th className="px-3 py-2.5 text-right font-medium">Rate</th>
-                <th className="px-3 py-2.5 text-right font-medium">Commission</th>
-                <th className="px-5 py-2.5 text-left font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {EARNINGS.map((e) => (
-                <tr
-                  key={e.id}
-                  className="border-t border-bg-border hover:bg-bg-hover/30"
-                >
-                  <td className="px-5 py-3">
-                    <div className="font-medium">{e.deal.company}</div>
-                    <div className="text-[11px] text-ink-tertiary">{e.deal.product}</div>
-                  </td>
-                  <td className="px-3 py-3">
-                    <span
-                      className="rounded-md px-2 py-0.5 text-[11px] font-medium"
-                      style={{
-                        background: `${SOURCE_COLOR[e.source]}25`,
-                        color: SOURCE_COLOR[e.source],
-                      }}
-                    >
-                      {e.source}
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 text-right">
-                    {fmt(e.deal.value)}
-                  </td>
-                  <td className="px-3 py-3 text-right text-ink-secondary">
-                    {(e.rate * 100).toFixed(0)}%
-                  </td>
-                  <td className="px-3 py-3 text-right font-semibold text-brand-200">
-                    {fmt(e.amount)}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span
-                      className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[e.status]}`}
-                    >
-                      {e.status}
-                    </span>
-                  </td>
+            <table className="min-w-full text-sm">
+              <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
+                <tr>
+                  <th className="px-5 py-2.5 text-left font-medium">Deal</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Total</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Rate</th>
+                  <th className="px-3 py-2.5 text-right font-medium">Platform Fee</th>
+                  <th className="px-3 py-2.5 text-left font-medium">State</th>
+                  <th className="px-5 py-2.5 text-left font-medium">Created</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {ledgerRows.map((t) => (
+                  <tr key={t.id} className="border-t border-bg-border hover:bg-bg-hover/30">
+                    <td className="px-5 py-3">
+                      <div className="font-medium">{t.buyerCompany}</div>
+                      <div className="text-[11px] text-ink-tertiary">{t.productName}</div>
+                    </td>
+                    <td className="px-3 py-3 text-right">{fmtCents(t.productTotalCents)}</td>
+                    <td className="px-3 py-3 text-right text-ink-secondary">
+                      {(t.platformFeePctBps / 100).toFixed(2)}%
+                    </td>
+                    <td className="px-3 py-3 text-right font-semibold text-brand-200">
+                      {fmtCentsPrecise(t.platformFeeCents)}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATE_TONE[t.state] ?? "bg-bg-hover text-ink-tertiary"}`}>
+                        {t.state}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-ink-secondary">
+                      <Calendar className="mr-1 inline h-3 w-3" />
+                      {new Date(t.createdAt).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "2-digit",
+                        year: "2-digit",
+                      })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+        )}
+      </div>
+
+      {/* Payouts — honest "not wired yet" state */}
+      <div className="rounded-xl border border-bg-border bg-bg-card">
+        <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <ArrowDownToLine className="h-4 w-4 text-brand-300" />
+            Payouts
+          </div>
+          <span className="text-[11px] text-ink-tertiary">Stripe Connect</span>
         </div>
-
-        <div className="space-y-4">
-          <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
-            <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
-              <div className="text-sm font-semibold">Payout History</div>
-              <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">Sample</span>
-            </div>
-            <div className="divide-y divide-bg-border">
-              {PAYOUTS.map((p) => (
-                <div key={p.id} className="flex items-center justify-between px-5 py-3">
-                  <div>
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <Banknote className="h-3.5 w-3.5 text-accent-green" />
-                      {fmt(p.amount)}
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[11px] text-ink-tertiary">
-                      <Calendar className="h-3 w-3" /> {p.date} · {p.method}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span
-                      className={`rounded-md px-2 py-0.5 text-[10px] font-medium ${STATUS_TONE[p.status]}`}
-                    >
-                      {p.status}
-                    </span>
-                    <div className="text-[11px] text-ink-tertiary">{p.ref}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-bg-border bg-bg-card">
-            <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
-              Commission Tiers
-            </div>
-            <div className="divide-y divide-bg-border">
-              {COMMISSION_TIERS.map((t) => (
-                <div
-                  key={t.label}
-                  className="flex items-center justify-between px-5 py-3 text-xs"
-                >
-                  <div>
-                    <div className="font-medium">{t.label}</div>
-                    <div className="text-[11px] text-ink-tertiary">
-                      {t.dealMin === 0 ? "Up to" : "From"} ${t.dealMin.toLocaleString()}
-                      {t.dealMax !== Infinity ? ` - $${t.dealMax.toLocaleString()}` : "+"}
-                    </div>
-                  </div>
-                  <span className="font-semibold text-brand-200">
-                    {(t.rate * 100).toFixed(0)}%
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="border-t border-bg-border px-5 py-3 text-[11px] text-ink-tertiary">
-              Tiered rates apply on top of plan rate. Enterprise plans negotiate custom splits.
-            </div>
-          </div>
+        <div className="px-5 py-8 text-center text-[12px] text-ink-tertiary">
+          <ArrowDownToLine className="mx-auto mb-2 h-5 w-5" />
+          <div className="text-ink-secondary font-medium">No payouts to show</div>
+          <p className="mt-1 max-w-md mx-auto">
+            Platform fees are collected via Stripe Connect destination charges as part of each
+            buyer payment — there&apos;s no separate payout cycle. When Stripe Connect is fully
+            wired, real payout history from the connected account will appear here.
+          </p>
+          <a
+            href="https://dashboard.stripe.com/connect/accounts/overview"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-flex items-center gap-1 text-brand-300 hover:underline"
+          >
+            Open Stripe Connect dashboard <ExternalLink className="h-3 w-3" />
+          </a>
         </div>
       </div>
 
+      {/* How earnings work — honest about commission model */}
       <div className="rounded-xl border border-brand-500/30 bg-brand-500/5 p-5">
         <div className="flex items-start gap-3">
           <div className="grid h-9 w-9 place-items-center rounded-lg bg-brand-500/20">
@@ -528,13 +458,18 @@ export default function EarningsPage() {
               How earnings work
             </div>
             <p className="mt-1 text-xs text-ink-secondary">
-              Every deal sourced and closed by an AI agent earns the platform a commission.
-              Plan rate ({(t.plan.commissionRate * 100).toFixed(0)}%) sets the floor — smaller deals earn a higher tier rate to make sub-$10K outreach worthwhile.
-              Payouts run monthly via ACH. Inbound + Referral deals do not earn commission.
+              Every escrow-routed transaction takes a platform fee (default 8%, configurable
+              per-deal at proposal time via <code className="rounded bg-bg-hover px-1">platformFeePctBps</code>).
+              Smaller deals can use the tiered commission rates to make sub-$10K outreach
+              worthwhile. Fees are taken on top of Stripe Connect&apos;s payment fees and net
+              out into platform revenue once escrow releases.
             </p>
-            <button className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-brand-300 hover:text-brand-200">
-              Read commission terms <ChevronRight className="h-3 w-3" />
-            </button>
+            <Link
+              href="/transactions"
+              className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-brand-300 hover:text-brand-200"
+            >
+              See the live transaction ledger <ChevronRight className="h-3 w-3" />
+            </Link>
           </div>
         </div>
       </div>
