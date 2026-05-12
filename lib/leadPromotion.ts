@@ -103,6 +103,9 @@ export function leadToDiscoveredBuyer(
     decisionMaker: lead.name || "—",
     decisionMakerTitle: "Operator",  // Lead form doesn't capture title
     email: lead.email,
+    // Carry lead.phone through so click-to-call works on the buyer record
+    // and on any phone task spawned from it. Was silently dropped before.
+    phone: lead.phone,
     linkedin: "",
     lastActivity: "Just promoted",
     status: "New",

@@ -20,6 +20,10 @@ export type Buyer = {
   decisionMaker: string;
   decisionMakerTitle: string;
   email: string;
+  // Optional E.164 phone. Lead → buyer promotion carries this through;
+  // older buyer records (sample data, agent-discovered) leave it unset.
+  // Surfaces as a click-to-call action on /buyers and /tasks.
+  phone?: string;
   linkedin: string;
   lastActivity: string;
   status: "New" | "Contacted" | "Replied" | "Negotiating" | "Closed Won" | "Closed Lost";

@@ -23,6 +23,12 @@ type LocalTask = {
   buyerId: string;
   buyerCompany: string;
   buyerName: string;
+  // Optional contact fields snapshotted at task-creation so /tasks can wire
+  // tel: / mailto: actions even when the underlying buyer record is later
+  // unavailable. Older tasks created before these fields existed get them
+  // back-filled at /tasks render-time via the live buyer lookup.
+  buyerPhone?: string;
+  buyerEmail?: string;
   type: "phone" | "sequence";
   createdAt: string;
 };
@@ -72,6 +78,11 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
         buyerId: b.id,
         buyerCompany: b.company,
         buyerName: b.decisionMaker,
+        // Snapshot contact info so /tasks can render tel:/mailto: actions
+        // without re-fetching the buyer (works even if the buyer record
+        // is later edited or removed).
+        buyerPhone: b.phone,
+        buyerEmail: b.email,
         type,
         createdAt: new Date().toISOString(),
       });
@@ -166,10 +177,16 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
               <div className="text-[11px] text-ink-tertiary">{b.decisionMakerTitle}</div>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-ink-secondary">
+          <a href={`mailto:${b.email}`} className="flex items-center gap-2 text-xs text-brand-300 hover:text-brand-200">
             <Mail className="h-3.5 w-3.5 text-ink-tertiary" />
             {b.email}
-          </div>
+          </a>
+          {b.phone && (
+            <a href={`tel:${b.phone}`} className="flex items-center gap-2 text-xs text-brand-300 hover:text-brand-200">
+              <Phone className="h-3.5 w-3.5 text-ink-tertiary" />
+              {b.phone}
+            </a>
+          )}
           <div className="flex items-center gap-2 text-xs text-ink-secondary">
             <Linkedin className="h-3.5 w-3.5 text-ink-tertiary" />
             {b.linkedin}
