@@ -35,8 +35,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: true, reason: "CRON_ENABLED=false" });
   }
 
+  const tickStart = Date.now();
+  const ranAt = new Date().toISOString();
+  const runId = `cron_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+
   const op = getOperator();
   if (!op.email) {
+    await store.saveCronRun({
+      id: runId,
+      kind: "daily-digest",
+      ranAt,
+      durationMs: Date.now() - tickStart,
+      status: "skipped",
+      summary: "no operator email configured",
+    });
     return NextResponse.json({ ok: true, skipped: true, reason: "No operator email configured" });
   }
 
@@ -137,6 +149,14 @@ export async function GET(req: NextRequest) {
     followupDueToday.length > 0;
 
   if (!hasYesterdayActivity && !hasAttention) {
+    await store.saveCronRun({
+      id: runId,
+      kind: "daily-digest",
+      ranAt,
+      durationMs: Date.now() - tickStart,
+      status: "skipped",
+      summary: "no activity + nothing needs attention",
+    });
     return NextResponse.json({
       ok: true,
       skipped: true,
@@ -276,6 +296,19 @@ export async function GET(req: NextRequest) {
     subject: `AVYN · ${today} digest${hasAttention ? ` · ${needYouCount} need you` : ""}`,
     textBody: lines.join("\n"),
     metadata: { kind: "daily-digest" },
+  });
+
+  await store.saveCronRun({
+    id: runId,
+    kind: "daily-digest",
+    ranAt,
+    durationMs: Date.now() - tickStart,
+    status: result.ok ? "success" : "error",
+    summary:
+      result.ok
+        ? `sent to ${result.sentTo ?? op.email}${hasAttention ? ` · ${needYouCount} need attention` : ""}`
+        : `send failed: ${result.errorMessage ?? "unknown"}`,
+    errorMessage: result.ok ? undefined : result.errorMessage,
   });
 
   return NextResponse.json({

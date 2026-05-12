@@ -436,20 +436,31 @@ export async function GET(req: NextRequest) {
   // ── Cron + pipeline runs ─────────────────────────────────────────────
   for (const c of cronRuns) {
     const id = `cron-${c.id}`;
+    // totals is now optional (only set on pipeline-kind runs). Build a
+    // human action label that's still meaningful for the other cron kinds
+    // (lead-followups, outreach-jobs, etc.) which store a `summary` field.
+    const kindLabel = c.kind ? c.kind : "Pipeline";
+    const action =
+      c.status === "error"
+        ? `${kindLabel} cron failed${c.errorMessage ? ` · ${c.errorMessage.slice(0, 80)}` : ""}`
+        : c.totals
+          ? `${kindLabel} cron tick · ${c.totals.products}p · ${c.totals.buyers}b · ${c.totals.drafts}d`
+          : `${kindLabel} cron tick${c.summary ? ` · ${c.summary.slice(0, 80)}` : ""}`;
+    const diff = [
+      { field: "status", from: "started", to: c.status },
+      ...(c.totals
+        ? [{ field: "spend", from: "0", to: `$${c.totals.totalCost.toFixed(5)}` }]
+        : []),
+    ];
     events.push({
       id,
       ts: c.ranAt,
-      actor: { type: "system", name: "Pipeline Cron", initials: "PC" },
-      action: c.status === "error"
-        ? `Pipeline cron failed${c.errorMessage ? ` · ${c.errorMessage.slice(0, 80)}` : ""}`
-        : `Pipeline cron tick · ${c.totals.products}p · ${c.totals.buyers}b · ${c.totals.drafts}d`,
+      actor: { type: "system", name: `${kindLabel} Cron`, initials: kindLabel.slice(0, 2).toUpperCase() },
+      action,
       resource: "Cron",
       resourceId: c.id,
       category: "Pipeline",
-      diff: [
-        { field: "status", from: "started", to: c.status },
-        { field: "spend", from: "0", to: `$${c.totals.totalCost.toFixed(5)}` },
-      ],
+      diff,
       hash: shortHash(`${id}|${c.ranAt}|${c.status}`),
     });
   }

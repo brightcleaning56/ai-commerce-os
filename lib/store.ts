@@ -497,19 +497,38 @@ export type StoredPipelineRun = {
   };
 };
 
+export type CronRunKind =
+  | "pipeline"
+  | "lead-followups"
+  | "outreach-jobs"
+  | "followups"
+  | "auto-promote-sweep"
+  | "daily-digest";
+
 export type CronRun = {
   id: string;
+  // Defaulted to "pipeline" by callers that pre-date this field for backward
+  // compat with the existing runs already on disk.
+  kind?: CronRunKind;
   ranAt: string;
   durationMs: number;
-  status: "success" | "error";
-  pipelineId: string;
-  totals: {
+  // "skipped" added so kill-switch / no-candidate ticks don't get logged as
+  // either success or error -- they're a real third state the operator
+  // needs to see distinguished.
+  status: "success" | "error" | "skipped";
+  // Pipeline-specific fields stay optional so other cron kinds can use the
+  // shared store + retention without dragging fake totals into their rows.
+  pipelineId?: string;
+  totals?: {
     products: number;
     buyers: number;
     suppliers: number;
     drafts: number;
     totalCost: number;
   };
+  // One-line summary printed in the activity panel ("3 leads followed up,
+  // 1 skipped"). Free-text; aim for under ~80 chars.
+  summary?: string;
   errorMessage?: string;
 };
 

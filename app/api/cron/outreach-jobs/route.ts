@@ -33,11 +33,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: true, reason: "CRON_ENABLED=false" });
   }
 
+  const tickStart = Date.now();
+  const ranAt = new Date().toISOString();
+
+  function runId(): string {
+    return `cron_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+  }
+
   // Global kill switch: skip the tick rather than fail the schedule.
   // Outreach jobs ship LLM-generated email -- exactly the kind of thing
   // operators expect a kill switch to halt during an incident.
   const ks = await checkKillSwitch();
   if (ks.killed) {
+    await store.saveCronRun({
+      id: runId(),
+      kind: "outreach-jobs",
+      ranAt,
+      durationMs: Date.now() - tickStart,
+      status: "skipped",
+      summary: "kill-switch active",
+    });
     return NextResponse.json({
       ok: true,
       skipped: true,
@@ -46,9 +61,16 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const tickStart = Date.now();
   const job = await store.getNextOutreachJob();
   if (!job) {
+    await store.saveCronRun({
+      id: runId(),
+      kind: "outreach-jobs",
+      ranAt,
+      durationMs: Date.now() - tickStart,
+      status: "skipped",
+      summary: "no pending jobs",
+    });
     return NextResponse.json({ ok: true, idle: true });
   }
 
@@ -172,6 +194,27 @@ export async function GET(req: NextRequest) {
         );
       });
   }
+
+  // Record the tick so it shows up in /admin/system-health's activity panel.
+  // Status: "success" if anything got drafted; "error" if it was all errors;
+  // "skipped" if the tick consisted entirely of suppression/missing-contact
+  // skips (still useful to see -- tells the operator the queue is moving).
+  const tickStatus: "success" | "error" | "skipped" =
+    drafted > 0
+      ? "success"
+      : errored > 0 && skipped === 0
+        ? "error"
+        : "skipped";
+  await store.saveCronRun({
+    id: runId(),
+    kind: "outreach-jobs",
+    ranAt,
+    durationMs: Date.now() - tickStart,
+    status: tickStatus,
+    summary:
+      `job ${job.id.slice(-6)} · ${drafted} drafted · ${skipped} skipped · ${errored} errored` +
+      (done ? " · DONE" : ` · ${combinedOutcomes.length}/${fresh.businessIds.length}`),
+  });
 
   return NextResponse.json({
     ok: true,

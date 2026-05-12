@@ -39,9 +39,10 @@ type TestResult = {
 
 type CronRunRecord = {
   id: string;
+  kind?: "pipeline" | "lead-followups" | "outreach-jobs" | "followups" | "auto-promote-sweep" | "daily-digest";
   ranAt: string;
   durationMs: number;
-  status: "success" | "error";
+  status: "success" | "error" | "skipped";
   totals?: {
     products: number;
     buyers: number;
@@ -49,7 +50,17 @@ type CronRunRecord = {
     drafts: number;
     totalCost: number;
   };
+  summary?: string;
   errorMessage?: string;
+};
+
+const CRON_KIND_LABEL: Record<NonNullable<CronRunRecord["kind"]>, string> = {
+  pipeline: "Pipeline",
+  "lead-followups": "Lead Followups",
+  "outreach-jobs": "Outreach Jobs",
+  followups: "Draft Followups",
+  "auto-promote-sweep": "Auto-Promote",
+  "daily-digest": "Daily Digest",
 };
 
 type CronStatusResponse = {
@@ -359,56 +370,68 @@ export default function SystemHealthPage() {
               </div>
               {cronStatus.recentRuns.length === 0 ? (
                 <div className="px-5 py-8 text-center text-[11px] text-ink-tertiary">
-                  No pipeline-cron runs recorded yet.{" "}
+                  No cron runs recorded yet.{" "}
                   {!cronStatus.deployed
                     ? "Cron schedules only fire when deployed to Netlify or Vercel."
-                    : "Wait for the next scheduled fire or trigger via the cron endpoint."}
+                    : "Wait for the next scheduled fire."}
                 </div>
               ) : (
                 <ul className="divide-y divide-bg-border text-[11px]">
-                  {cronStatus.recentRuns.slice(0, 10).map((run) => (
-                    <li key={run.id} className="flex flex-wrap items-center gap-3 px-5 py-2">
-                      <span
-                        className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${
-                          run.status === "success"
-                            ? "bg-accent-green/15 text-accent-green"
-                            : "bg-accent-red/15 text-accent-red"
-                        }`}
-                      >
-                        {run.status === "success" ? (
-                          <CheckCircle2 className="h-3 w-3" />
-                        ) : (
-                          <XCircle className="h-3 w-3" />
-                        )}
-                        {run.status}
-                      </span>
-                      <span className="font-mono text-ink-tertiary">{run.id.slice(0, 18)}</span>
-                      <span className="text-ink-secondary">
-                        {new Date(run.ranAt).toLocaleString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                      <span className="text-ink-tertiary">
-                        {(run.durationMs / 1000).toFixed(1)}s
-                      </span>
-                      {run.totals && (
+                  {cronStatus.recentRuns.slice(0, 15).map((run) => {
+                    const statusBg =
+                      run.status === "success"
+                        ? "bg-accent-green/15 text-accent-green"
+                        : run.status === "error"
+                          ? "bg-accent-red/15 text-accent-red"
+                          : "bg-bg-hover text-ink-secondary";
+                    const StatusIcon =
+                      run.status === "success"
+                        ? CheckCircle2
+                        : run.status === "error"
+                          ? XCircle
+                          : Clock;
+                    const kindLabel = run.kind ? CRON_KIND_LABEL[run.kind] : "Pipeline";
+                    return (
+                      <li key={run.id} className="flex flex-wrap items-center gap-3 px-5 py-2">
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${statusBg}`}
+                        >
+                          <StatusIcon className="h-3 w-3" />
+                          {run.status}
+                        </span>
+                        <span className="min-w-[110px] text-[10px] font-semibold uppercase tracking-wider text-brand-200">
+                          {kindLabel}
+                        </span>
+                        <span className="text-ink-secondary">
+                          {new Date(run.ranAt).toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
                         <span className="text-ink-tertiary">
-                          {run.totals.products}p · {run.totals.buyers}b · {run.totals.drafts}d ·{" "}
-                          ${run.totals.totalCost.toFixed(4)}
+                          {(run.durationMs / 1000).toFixed(1)}s
                         </span>
-                      )}
-                      {run.errorMessage && (
-                        <span className="text-accent-red" title={run.errorMessage}>
-                          {run.errorMessage.length > 80
-                            ? run.errorMessage.slice(0, 80) + "…"
-                            : run.errorMessage}
-                        </span>
-                      )}
-                    </li>
-                  ))}
+                        {run.summary && (
+                          <span className="text-ink-tertiary">{run.summary}</span>
+                        )}
+                        {!run.summary && run.totals && (
+                          <span className="text-ink-tertiary">
+                            {run.totals.products}p · {run.totals.buyers}b · {run.totals.drafts}d ·{" "}
+                            ${run.totals.totalCost.toFixed(4)}
+                          </span>
+                        )}
+                        {run.errorMessage && (
+                          <span className="text-accent-red" title={run.errorMessage}>
+                            {run.errorMessage.length > 80
+                              ? run.errorMessage.slice(0, 80) + "…"
+                              : run.errorMessage}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

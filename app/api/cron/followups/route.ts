@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { findFollowupCandidates, runFollowup } from "@/lib/agents/followup";
 import { requireCron } from "@/lib/auth";
 import { checkKillSwitch } from "@/lib/killSwitch";
+import { store } from "@/lib/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,8 +27,20 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  const tickStart = Date.now();
+  const ranAt = new Date().toISOString();
+  const runId = `cron_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+
   const ks = await checkKillSwitch();
   if (ks.killed) {
+    await store.saveCronRun({
+      id: runId,
+      kind: "followups",
+      ranAt,
+      durationMs: Date.now() - tickStart,
+      status: "skipped",
+      summary: "kill-switch active",
+    });
     return NextResponse.json({
       ok: true,
       skipped: true,
@@ -70,11 +83,32 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  const generated = results.filter((r) => r.ok).length;
+  const failed = results.filter((r) => !r.ok).length;
+
+  const tickStatus: "success" | "error" | "skipped" =
+    generated > 0
+      ? "success"
+      : failed > 0
+        ? "error"
+        : "skipped";
+  await store.saveCronRun({
+    id: runId,
+    kind: "followups",
+    ranAt,
+    durationMs: Date.now() - tickStart,
+    status: tickStatus,
+    summary:
+      candidates.length === 0
+        ? "no draft followup candidates"
+        : `${candidates.length} candidates · ${generated} generated · ${failed} failed`,
+  });
+
   return NextResponse.json({
     ok: true,
     candidates: candidates.length,
-    generated: results.filter((r) => r.ok).length,
-    failed: results.filter((r) => !r.ok).length,
+    generated,
+    failed,
     results,
   });
 }

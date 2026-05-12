@@ -40,8 +40,20 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  const tickStart = Date.now();
+  const startedAt = new Date().toISOString();
+  const runId = `cron_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+
   const ks = await checkKillSwitch();
   if (ks.killed) {
+    await store.saveCronRun({
+      id: runId,
+      kind: "auto-promote-sweep",
+      ranAt: startedAt,
+      durationMs: Date.now() - tickStart,
+      status: "skipped",
+      summary: "kill-switch active",
+    });
     return NextResponse.json({
       ok: true,
       skipped: true,
@@ -50,7 +62,6 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const startedAt = new Date().toISOString();
   const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
   const cutoff = Date.now() - THIRTY_DAYS_MS;
 
@@ -109,6 +120,27 @@ export async function GET(req: NextRequest) {
 
   const promoted = results.filter((r) => r.outcome === "promoted").length;
   const errored = results.filter((r) => r.outcome === "error").length;
+
+  // Activity-panel record — captures every sweep, including quiet ones,
+  // so the operator can see the cron is alive even when no leads cross
+  // the threshold.
+  const sweepStatus: "success" | "error" | "skipped" =
+    promoted > 0
+      ? "success"
+      : errored > 0
+        ? "error"
+        : "skipped";
+  await store.saveCronRun({
+    id: runId,
+    kind: "auto-promote-sweep",
+    ranAt: startedAt,
+    durationMs: Date.now() - tickStart,
+    status: sweepStatus,
+    summary:
+      candidates.length === 0
+        ? "no candidates in 30d window"
+        : `scanned ${candidates.length} · promoted ${promoted} · errored ${errored}`,
+  });
 
   return NextResponse.json({
     ok: true,
