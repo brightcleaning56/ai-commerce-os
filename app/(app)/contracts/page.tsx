@@ -197,10 +197,10 @@ export default function ContractsPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="All Contracts" v={String(counts.all)} sub="across every state" />
-        <Stat label="Awaiting Signature" v={String(counts.awaiting)} sub="proposal sent, not yet signed" tone="amber" />
-        <Stat label="Signed" v={String(counts.signed)} sub="ready for payment" tone="brand" />
-        <Stat label="Executed" v={String(counts.executed)} sub="paid + in flight or closed" tone="green" />
+        <Stat label="All Contracts" v={String(counts.all)} sub="across every state" onClick={() => setFilter("all")} active={filter === "all"} cta="Show all" />
+        <Stat label="Awaiting Signature" v={String(counts.awaiting)} sub="proposal sent, not yet signed" tone="amber" onClick={() => setFilter("awaiting")} active={filter === "awaiting"} cta="Filter awaiting" />
+        <Stat label="Signed" v={String(counts.signed)} sub="ready for payment" tone="brand" onClick={() => setFilter("signed")} active={filter === "signed"} cta="Filter signed" />
+        <Stat label="Executed" v={String(counts.executed)} sub="paid + in flight or closed" tone="green" onClick={() => setFilter("executed")} active={filter === "executed"} cta="Filter executed" />
       </div>
 
       <div className="flex flex-wrap items-center gap-1 w-fit rounded-lg border border-bg-border bg-bg-card p-1 text-xs">
@@ -306,16 +306,47 @@ export default function ContractsPage() {
   );
 }
 
-function Stat({ label, v, sub, tone = "default" }: { label: string; v: string; sub?: string; tone?: "default" | "brand" | "green" | "amber" }) {
+function Stat({ label, v, sub, tone = "default", onClick, active, cta }: { label: string; v: string; sub?: string; tone?: "default" | "brand" | "green" | "amber"; onClick?: () => void; active?: boolean; cta?: string }) {
   const valueClass =
     tone === "brand" ? "text-brand-200" :
     tone === "green" ? "text-accent-green" :
     tone === "amber" ? "text-accent-amber" : "";
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+  const ringClass =
+    tone === "brand" ? "hover:ring-brand-500/40" :
+    tone === "green" ? "hover:ring-accent-green/40" :
+    tone === "amber" ? "hover:ring-accent-amber/40" : "hover:ring-bg-border";
+  const activeRing =
+    active ? (
+      tone === "brand" ? "ring-brand-500/60" :
+      tone === "green" ? "ring-accent-green/60" :
+      tone === "amber" ? "ring-accent-amber/60" : "ring-brand-500/60"
+    ) : "ring-transparent";
+  const inner = (
+    <>
       <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
       <div className={`mt-1 text-2xl font-bold ${valueClass}`}>{v}</div>
       {sub && <div className="mt-0.5 text-[11px] text-ink-tertiary">{sub}</div>}
+      {onClick && cta && (
+        <div className="mt-2 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary group-hover:text-ink-primary transition-colors">
+          {cta} <ArrowRight className="h-3 w-3" />
+        </div>
+      )}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`group block w-full rounded-xl border border-bg-border bg-bg-card p-4 text-left ring-1 transition-all hover:bg-bg-hover ${ringClass} ${activeRing}`}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }

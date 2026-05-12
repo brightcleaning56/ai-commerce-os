@@ -236,10 +236,10 @@ export default function EscrowPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Currently Held" value={fmtCents(totals.heldCents)} sub="Awaiting delivery confirmation" tone="brand" Icon={Lock} />
-        <StatCard label="Released to Suppliers" value={fmtCents(totals.releasedCents)} sub="Lifetime payouts" tone="green" Icon={Unlock} />
-        <StatCard label="Escrow Fees Collected" value={fmtCents(totals.feesCents)} sub="Lifetime" tone="default" Icon={Landmark} />
-        <StatCard label="Disputed" value={fmtCents(totals.disputedCents)} sub="Frozen pending resolution" tone={totals.disputedCents > 0 ? "red" : "default"} Icon={AlertTriangle} />
+        <StatCard label="Currently Held" value={fmtCents(totals.heldCents)} sub="Awaiting delivery confirmation" tone="brand" Icon={Lock} href="/transactions" cta="View held" />
+        <StatCard label="Released to Suppliers" value={fmtCents(totals.releasedCents)} sub="Lifetime payouts" tone="green" Icon={Unlock} href="/earnings" cta="See payouts" />
+        <StatCard label="Escrow Fees Collected" value={fmtCents(totals.feesCents)} sub="Lifetime" tone="default" Icon={Landmark} href="/earnings" cta="Open earnings" />
+        <StatCard label="Disputed" value={fmtCents(totals.disputedCents)} sub="Frozen pending resolution" tone={totals.disputedCents > 0 ? "red" : "default"} Icon={AlertTriangle} href="/transactions" cta="Review disputes" />
       </div>
 
       <div className="flex flex-wrap items-center gap-1 w-fit rounded-lg border border-bg-border bg-bg-card p-1 text-xs">
@@ -385,26 +385,52 @@ function Milestones({ t }: { t: Transaction }) {
 }
 
 function StatCard({
-  label, value, sub, tone, Icon,
+  label, value, sub, tone, Icon, href, cta,
 }: {
   label: string;
   value: string;
   sub: string;
   tone: "default" | "brand" | "green" | "red";
   Icon: React.ComponentType<{ className?: string }>;
+  href?: string;
+  cta?: string;
 }) {
   const valueClass =
     tone === "brand" ? "text-brand-200" :
     tone === "green" ? "text-accent-green" :
     tone === "red" ? "text-accent-red" : "";
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+  const ringClass =
+    tone === "brand" ? "hover:ring-brand-500/40" :
+    tone === "green" ? "hover:ring-accent-green/40" :
+    tone === "red" ? "hover:ring-accent-red/40" : "hover:ring-bg-border";
+  const inner = (
+    <>
       <div className="flex items-center justify-between">
         <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
         <Icon className="h-3.5 w-3.5 text-ink-tertiary" />
       </div>
       <div className={`mt-1 text-2xl font-bold ${valueClass}`}>{value}</div>
       <div className="mt-0.5 text-[11px] text-ink-tertiary">{sub}</div>
+      {href && cta && (
+        <div className="mt-2 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary group-hover:text-ink-primary transition-colors">
+          {cta} <ArrowRight className="h-3 w-3" />
+        </div>
+      )}
+    </>
+  );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className={`group block rounded-xl border border-bg-border bg-bg-card p-4 ring-1 ring-transparent transition-all hover:bg-bg-hover ${ringClass}`}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }

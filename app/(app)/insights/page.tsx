@@ -15,6 +15,7 @@ import {
   TrendingUp,
   Zap,
 } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import {
   Area,
@@ -33,6 +34,7 @@ import {
   type IntentReport,
 } from "@/lib/insights";
 import Drawer from "@/components/ui/Drawer";
+import { downloadCSV } from "@/lib/csv";
 
 const COMP_TONE: Record<string, string> = {
   Low: "bg-accent-green/15 text-accent-green",
@@ -184,16 +186,33 @@ function ForecastDetail({ f }: { f: Forecast }) {
           <p className="mt-1 text-xs text-ink-secondary">
             Upgrade to unlock the full report, alert, and CSV export.
           </p>
-          <button className="mt-3 inline-flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-xs font-semibold shadow-glow">
+          <Link
+            href="/admin/billing"
+            className="mt-3 inline-flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-xs font-semibold shadow-glow"
+          >
             Upgrade to {f.tier}
-          </button>
+          </Link>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2 pb-2">
-          <button className="flex items-center justify-center gap-2 rounded-lg bg-gradient-brand py-2.5 text-sm font-semibold shadow-glow">
+          <Link
+            href="/automations"
+            className="flex items-center justify-center gap-2 rounded-lg bg-gradient-brand py-2.5 text-sm font-semibold shadow-glow"
+          >
             <Zap className="h-4 w-4" /> Set Rise Alert
-          </button>
-          <button className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card py-2.5 text-sm">
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              const rows = f.series.map((p) => ({
+                day: p.d,
+                observed: p.v ?? "",
+                predicted: p.predicted ?? "",
+              }));
+              downloadCSV(`forecast-${f.id}.csv`, rows);
+            }}
+            className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card py-2.5 text-sm hover:bg-bg-hover"
+          >
             <Download className="h-4 w-4" /> Export Report
           </button>
         </div>
@@ -290,18 +309,38 @@ function IntentDetail({ r }: { r: IntentReport }) {
           <p className="mt-1 text-xs text-ink-secondary">
             Unlock {r.buyerCount.toLocaleString()} verified buyers with triggers, contacts, and intent scores.
           </p>
-          <button className="mt-3 inline-flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-xs font-semibold shadow-glow">
+          <Link
+            href="/admin/billing"
+            className="mt-3 inline-flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-xs font-semibold shadow-glow"
+          >
             {r.price > 0 ? `Buy Report · $${r.price.toLocaleString()}` : `Upgrade to ${r.tier}`}
-          </button>
+          </Link>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2 pb-2">
-          <button className="flex items-center justify-center gap-2 rounded-lg bg-gradient-brand py-2.5 text-sm font-semibold shadow-glow">
+          <button
+            type="button"
+            onClick={() => {
+              const rows = r.sample.map((s) => ({
+                company: s.company,
+                trigger: s.trigger,
+                score: s.score,
+                industry: r.industry,
+                region: r.region,
+                signal: r.signal,
+              }));
+              downloadCSV(`intent-${r.id}.csv`, rows);
+            }}
+            className="flex items-center justify-center gap-2 rounded-lg bg-gradient-brand py-2.5 text-sm font-semibold shadow-glow"
+          >
             <Download className="h-4 w-4" /> Download CSV
           </button>
-          <button className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card py-2.5 text-sm">
+          <Link
+            href="/integrations"
+            className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card py-2.5 text-sm hover:bg-bg-hover"
+          >
             <Code2 className="h-4 w-4" /> Stream via API
-          </button>
+          </Link>
         </div>
       )}
     </div>
@@ -329,12 +368,18 @@ export default function InsightsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm">
+          <Link
+            href="/data-sources"
+            className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
+          >
             <Database className="h-4 w-4" /> Browse Data Catalog
-          </button>
-          <button className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow">
+          </Link>
+          <Link
+            href="/admin/billing"
+            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
+          >
             <ArrowUpRight className="h-4 w-4" /> Upgrade to Enterprise
-          </button>
+          </Link>
         </div>
       </div>
 

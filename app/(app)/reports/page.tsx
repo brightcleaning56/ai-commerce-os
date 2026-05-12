@@ -171,6 +171,8 @@ export default function ReportsPage() {
           delta={delta != null ? `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%` : "—"}
           positive={delta == null || delta >= 0}
           Icon={TrendingUp}
+          href="/earnings"
+          cta="View earnings"
         />
         <Kpi
           label="Deals Closed (latest mo)"
@@ -178,6 +180,8 @@ export default function ReportsPage() {
           delta={lastMonth && prevMonth ? `${lastMonth.deals - prevMonth.deals >= 0 ? "+" : ""}${lastMonth.deals - prevMonth.deals}` : "—"}
           positive={!lastMonth || !prevMonth || lastMonth.deals >= prevMonth.deals}
           Icon={Workflow}
+          href="/transactions"
+          cta="See deals"
         />
         <Kpi
           label="Reply Rate"
@@ -185,6 +189,8 @@ export default function ReportsPage() {
           delta="vs sent"
           positive
           Icon={Activity}
+          href="/outreach"
+          cta="Open outreach"
         />
         <Kpi
           label="Total Closed Deals"
@@ -192,6 +198,8 @@ export default function ReportsPage() {
           delta="lifetime"
           positive
           Icon={Users}
+          href="/crm"
+          cta="View pipeline"
         />
       </div>
 
@@ -427,15 +435,19 @@ function Kpi({
   delta,
   positive,
   Icon,
+  href,
+  cta,
 }: {
   label: string;
   value: string;
   delta: string;
   positive?: boolean;
   Icon: React.ComponentType<{ className?: string }>;
+  href?: string;
+  cta?: string;
 }) {
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+  const inner = (
+    <>
       <div className="flex items-center justify-between">
         <div className="grid h-9 w-9 place-items-center rounded-lg bg-brand-500/15">
           <Icon className="h-4 w-4 text-brand-300" />
@@ -451,6 +463,26 @@ function Kpi({
       </div>
       <div className="mt-3 text-[11px] uppercase tracking-wider text-ink-tertiary">{label}</div>
       <div className="mt-1 text-2xl font-bold">{value}</div>
+      {href && cta && (
+        <div className="mt-2 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary group-hover:text-ink-primary transition-colors">
+          {cta} <TrendingUp className="h-3 w-3" />
+        </div>
+      )}
+    </>
+  );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="group block rounded-xl border border-bg-border bg-bg-card p-4 ring-1 ring-transparent transition-all hover:bg-bg-hover hover:ring-brand-500/40"
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }
