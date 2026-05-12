@@ -28,6 +28,7 @@ const LEADS_FILE = "leads.json";
 const INVITES_FILE = "invites.json";
 const API_KEYS_FILE = "api-keys.json";
 const BUSINESSES_FILE = "businesses.json";
+const SUPPLY_EDGES_FILE = "supply-edges.json";
 
 // ─── Backend selection ─────────────────────────────────────────────────────
 // STORE_BACKEND=blobs → Netlify Blobs (recommended for Netlify deploys)
@@ -779,6 +780,59 @@ export function isBusinessSuppressed(b: BusinessRecord): boolean {
   return false;
 }
 
+/**
+ * SupplyEdge — the relationship layer of the Commercial Intelligence
+ * Graph. One edge per (fromBusiness, toName, kind) triplet, deduped
+ * on upsert. The graph powers:
+ *
+ *   - "Who currently supplies this business?" (query by fromId)
+ *   - "Who buys from this brand?" (query by toName)
+ *   - "Where is this product distributed?" (query by kind=distributes_through)
+ *   - "Find better suppliers for businesses currently using X" (slice 5)
+ *
+ * Sources of edges:
+ *   - `ai_profile`: extracted from a business's homepage during the
+ *     Business Profile Agent scan. Confidence inherits from the scan's
+ *     overall confidence.
+ *   - `transaction`: observed when a real AVYN transaction releases or
+ *     completes. Highest signal — confidence=100. Wired in slice 5.
+ *   - `operator`: manually curated by the operator (future UI).
+ *   - `partner`: imported from a partner feed (future).
+ */
+export type SupplyEdgeKind =
+  | "sources_from"          // fromBusiness BUYS from toName (toName is their supplier)
+  | "distributes_through"   // fromBusiness SELLS through toName (Amazon, retailers, etc.)
+  | "competes_with"         // future: similar product mix
+  | "partners_with";        // future: explicit partnership
+
+export type SupplyEdgeSource = "ai_profile" | "transaction" | "operator" | "partner";
+
+export type SupplyEdge = {
+  id: string;                    // edge_<random>
+  fromBusinessId: string;        // BusinessRecord.id (always a real business in our directory)
+  fromBusinessName: string;      // denormalized for fast display
+  toName: string;                // brand/company name (may or may not have an id)
+  toBusinessId?: string;         // BusinessRecord.id if `toName` is also in the directory
+  kind: SupplyEdgeKind;
+  source: SupplyEdgeSource;
+  confidence: number;            // 0-100; transaction-observed = 100; ai_profile inherits scan confidence
+  evidence?: string;             // 1-line context ("homepage lists Brand X under 'partners'", "txn t_abc closed 2026-05-10")
+  observedAt: string;            // ISO; when this edge was first learned
+  lastSeenAt: string;            // ISO; updated on every re-observation (re-scan, repeat txn)
+  // Outbound discovery — when AVYN later finds a different (cheaper, faster,
+  // closer) supplier for the same product, we record that suggestion here.
+  // Operator UI can show "we found 3 alternatives" without re-querying.
+  alternativesFound?: number;
+};
+
+/**
+ * Composite dedup key for upserts. Lowercased + trimmed so "Brand X"
+ * and "brand x" don't double-write.
+ */
+function supplyEdgeDedupKey(e: Pick<SupplyEdge, "fromBusinessId" | "toName" | "kind">): string {
+  return `${e.fromBusinessId}|${e.toName.trim().toLowerCase()}|${e.kind}`;
+}
+
 export type ThreadMessage = {
   id: string;
   role: "agent" | "buyer";
@@ -1217,6 +1271,97 @@ export const store = {
 
     await getBackend().write(BUSINESSES_FILE, existing.slice(0, 100_000));
     return { inserted, updated, skipped };
+  },
+
+  // ─── Supply Edges (Commercial Intelligence Graph) ──────────────────────
+  async getSupplyEdges(): Promise<SupplyEdge[]> {
+    return getBackend().read<SupplyEdge[]>(SUPPLY_EDGES_FILE, []);
+  },
+  async getSupplyEdgesFromBusiness(businessId: string): Promise<SupplyEdge[]> {
+    const all = await store.getSupplyEdges();
+    return all.filter((e) => e.fromBusinessId === businessId);
+  },
+  async getSupplyEdgesByBrand(brandName: string): Promise<SupplyEdge[]> {
+    const norm = brandName.trim().toLowerCase();
+    if (!norm) return [];
+    const all = await store.getSupplyEdges();
+    return all.filter((e) => e.toName.trim().toLowerCase() === norm);
+  },
+  /**
+   * Idempotent upsert keyed on (fromBusinessId, toName, kind). Re-observing
+   * the same edge bumps lastSeenAt + raises confidence to the higher of
+   * the existing and incoming values. Source is preserved on the FIRST
+   * observation — transaction-observed edges (higher signal) stay tagged
+   * "transaction" even if a later ai_profile scan re-confirms.
+   */
+  async upsertSupplyEdge(
+    edge: Omit<SupplyEdge, "id" | "observedAt" | "lastSeenAt"> & { observedAt?: string },
+  ): Promise<SupplyEdge> {
+    const existing = await store.getSupplyEdges();
+    const now = new Date().toISOString();
+    const key = supplyEdgeDedupKey(edge);
+    const idx = existing.findIndex(
+      (e) => supplyEdgeDedupKey(e) === key,
+    );
+    if (idx === -1) {
+      const created: SupplyEdge = {
+        id: `edge_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`,
+        fromBusinessId: edge.fromBusinessId,
+        fromBusinessName: edge.fromBusinessName,
+        toName: edge.toName.trim(),
+        toBusinessId: edge.toBusinessId,
+        kind: edge.kind,
+        source: edge.source,
+        confidence: Math.max(0, Math.min(100, Math.round(edge.confidence))),
+        evidence: edge.evidence,
+        observedAt: edge.observedAt ?? now,
+        lastSeenAt: now,
+        alternativesFound: edge.alternativesFound,
+      };
+      // Cap at 500k edges to keep the file manageable. Drop oldest by
+      // lastSeenAt when capped (LRU-ish).
+      const all = [...existing, created].sort(
+        (a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime(),
+      ).slice(0, 500_000);
+      await getBackend().write(SUPPLY_EDGES_FILE, all);
+      return created;
+    }
+    const cur = existing[idx];
+    const merged: SupplyEdge = {
+      ...cur,
+      // Preserve original source attribution unless transaction edges
+      // upgrade an ai_profile edge — those replace.
+      source: cur.source === "transaction" ? cur.source : edge.source,
+      confidence: Math.max(cur.confidence, Math.round(edge.confidence)),
+      evidence: edge.evidence ?? cur.evidence,
+      lastSeenAt: now,
+      // Take higher of the two on alternativesFound
+      alternativesFound: Math.max(cur.alternativesFound ?? 0, edge.alternativesFound ?? 0) || undefined,
+      // Latest toBusinessId wins (we may not have known the id at first observation)
+      toBusinessId: edge.toBusinessId ?? cur.toBusinessId,
+    };
+    existing[idx] = merged;
+    await getBackend().write(SUPPLY_EDGES_FILE, existing);
+    return merged;
+  },
+  async deleteSupplyEdge(id: string): Promise<boolean> {
+    const existing = await store.getSupplyEdges();
+    const next = existing.filter((e) => e.id !== id);
+    if (next.length === existing.length) return false;
+    await getBackend().write(SUPPLY_EDGES_FILE, next);
+    return true;
+  },
+  /**
+   * Remove every edge originating from a business — used when an
+   * operator deletes the business OR re-scans and wants to start fresh.
+   * Doesn't touch inbound edges (edges where this business is the `to`).
+   */
+  async deleteSupplyEdgesFromBusiness(businessId: string): Promise<number> {
+    const existing = await store.getSupplyEdges();
+    const next = existing.filter((e) => e.fromBusinessId !== businessId);
+    const removed = existing.length - next.length;
+    if (removed > 0) await getBackend().write(SUPPLY_EDGES_FILE, next);
+    return removed;
   },
 
   // Pipeline runs (snapshots for /share/[id])

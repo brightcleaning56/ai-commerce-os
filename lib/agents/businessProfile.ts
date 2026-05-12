@@ -217,6 +217,52 @@ export async function runBusinessProfileScan(b: BusinessRecord): Promise<{
   // Persist onto the business record
   await store.updateBusiness(b.id, { aiProfile });
 
+  // ─── Seed the Commercial Intelligence Graph ───────────────────────────
+  // Every supplier brand the scan surfaced becomes a `sources_from` edge;
+  // every distribution channel becomes a `distributes_through` edge.
+  // Idempotent — re-scanning the same business updates lastSeenAt + can
+  // raise confidence but never duplicates. Only fires when the model was
+  // confident enough that the data isn't noise (>= 30) — same threshold
+  // the outreach agent uses to incorporate profile signals.
+  //
+  // We don't await individual edge writes blocking the response; they
+  // serialize through the same backend so finishing in-loop is fine.
+  if (aiProfile && aiProfile.confidence >= 30 && !aiProfile.usedFallback) {
+    const evidenceBase = `homepage scan ${new Date(aiProfile.scannedAt).toLocaleDateString()}`;
+    for (const brand of aiProfile.likelySupplierBrands) {
+      try {
+        await store.upsertSupplyEdge({
+          fromBusinessId: b.id,
+          fromBusinessName: b.name,
+          toName: brand,
+          kind: "sources_from",
+          source: "ai_profile",
+          confidence: aiProfile.confidence,
+          evidence: `${evidenceBase} · listed under suppliers/brands`,
+        });
+      } catch (err) {
+        // Edge write failures shouldn't fail the scan — graph is a
+        // derived index, the canonical signal is on the business record.
+        console.error("[businessProfile] upsertSupplyEdge failed", err);
+      }
+    }
+    for (const dist of aiProfile.likelyDistributors) {
+      try {
+        await store.upsertSupplyEdge({
+          fromBusinessId: b.id,
+          fromBusinessName: b.name,
+          toName: dist,
+          kind: "distributes_through",
+          source: "ai_profile",
+          confidence: aiProfile.confidence,
+          evidence: `${evidenceBase} · listed as a sales channel`,
+        });
+      } catch (err) {
+        console.error("[businessProfile] upsertSupplyEdge failed", err);
+      }
+    }
+  }
+
   const run: AgentRun = {
     id: runId,
     agent: "buyer-discovery",

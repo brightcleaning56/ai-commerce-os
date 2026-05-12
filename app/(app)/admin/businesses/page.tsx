@@ -5,6 +5,7 @@ import {
   Building2,
   CheckCircle2,
   Database,
+  GitBranch,
   Loader2,
   MapPin,
   Search,
@@ -34,6 +35,31 @@ type BusinessSource =
   | "data_axle"
   | "google_places"
   | "census";
+
+type SupplyEdgeKind = "sources_from" | "distributes_through" | "competes_with" | "partners_with";
+type SupplyEdgeSource = "ai_profile" | "transaction" | "operator" | "partner";
+
+type SupplyEdge = {
+  id: string;
+  fromBusinessId: string;
+  fromBusinessName: string;
+  toName: string;
+  toBusinessId?: string;
+  kind: SupplyEdgeKind;
+  source: SupplyEdgeSource;
+  confidence: number;
+  evidence?: string;
+  observedAt: string;
+  lastSeenAt: string;
+  alternativesFound?: number;
+};
+
+type EdgesPayload = {
+  businessId: string;
+  businessName: string;
+  totalEdges: number;
+  byKind: Record<SupplyEdgeKind, SupplyEdge[]>;
+};
 
 type AiProfile = {
   scannedAt: string;
@@ -164,6 +190,8 @@ export default function BusinessesPage() {
   const [draftingOutreach, setDraftingOutreach] = useState(false);
   const [scanningProfile, setScanningProfile] = useState<string | null>(null);
   const [batchScanning, setBatchScanning] = useState(false);
+  const [edges, setEdges] = useState<EdgesPayload | null>(null);
+  const [loadingEdges, setLoadingEdges] = useState(false);
   const { toast } = useToast();
 
   // Max batch size matches the endpoint's MAX_BUSINESSES_PER_BATCH.
@@ -202,6 +230,47 @@ export default function BusinessesPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Lazy-load edges for the selected business — keeps the list page fast
+  // (edges file can grow large) and gets fresh data after every profile scan.
+  useEffect(() => {
+    if (!selected) {
+      setEdges(null);
+      return;
+    }
+    let cancelled = false;
+    async function loadEdges(id: string) {
+      setLoadingEdges(true);
+      try {
+        const r = await fetch(`/api/admin/businesses/${id}/edges`, { cache: "no-store" });
+        if (!r.ok) return;
+        const d = (await r.json()) as EdgesPayload;
+        if (!cancelled) setEdges(d);
+      } catch {
+        // Silent — UI shows "no edges yet" if this fails.
+      } finally {
+        if (!cancelled) setLoadingEdges(false);
+      }
+    }
+    loadEdges(selected.id);
+    return () => { cancelled = true; };
+  }, [selected]);
+
+  async function deleteEdge(edgeId: string) {
+    if (!confirm("Delete this edge from the graph?")) return;
+    try {
+      const r = await fetch(`/api/admin/edges/${edgeId}`, { method: "DELETE" });
+      if (!r.ok) throw new Error(`Delete failed (${r.status})`);
+      toast("Edge deleted");
+      // Reload edges for current selection
+      if (selected) {
+        const re = await fetch(`/api/admin/businesses/${selected.id}/edges`, { cache: "no-store" });
+        if (re.ok) setEdges(await re.json());
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Edge delete failed", "error");
+    }
+  }
 
   async function submitImport() {
     if (!importCsv.trim() || importing) return;
@@ -848,6 +917,76 @@ export default function BusinessesPage() {
                 )}
               </div>
 
+              {/* Supply graph — observed + inferred relationships */}
+              <div className="rounded-lg border border-accent-cyan/30 bg-gradient-to-br from-accent-cyan/5 to-transparent p-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[11px] font-semibold text-accent-cyan">
+                    <GitBranch className="h-3.5 w-3.5" />
+                    Supply graph
+                    {edges && (
+                      <span className="text-[10px] font-normal text-ink-tertiary">
+                        · {edges.totalEdges} edge{edges.totalEdges === 1 ? "" : "s"}
+                      </span>
+                    )}
+                  </div>
+                  {loadingEdges && <Loader2 className="h-3 w-3 animate-spin text-ink-tertiary" />}
+                </div>
+
+                {!edges || edges.totalEdges === 0 ? (
+                  <p className="mt-2 text-[11px] text-ink-tertiary">
+                    {selected.aiProfile && selected.aiProfile.confidence >= 30
+                      ? "No edges yet — re-run the profile scan to seed."
+                      : <>No edges yet. Edges appear here when a Profile Scan extracts supplier/distributor signals (confidence ≥ 30) or when a real transaction closes on AVYN.</>
+                    }
+                  </p>
+                ) : (
+                  <div className="mt-2 space-y-2.5">
+                    {edges.byKind.sources_from.length > 0 && (
+                      <EdgeGroup
+                        title="Sources from"
+                        hint="Suppliers this business likely buys from"
+                        edges={edges.byKind.sources_from}
+                        onDelete={deleteEdge}
+                        kindTone="amber"
+                      />
+                    )}
+                    {edges.byKind.distributes_through.length > 0 && (
+                      <EdgeGroup
+                        title="Distributes through"
+                        hint="Channels this business sells through"
+                        edges={edges.byKind.distributes_through}
+                        onDelete={deleteEdge}
+                        kindTone="cyan"
+                      />
+                    )}
+                    {edges.byKind.partners_with.length > 0 && (
+                      <EdgeGroup
+                        title="Partners with"
+                        hint=""
+                        edges={edges.byKind.partners_with}
+                        onDelete={deleteEdge}
+                        kindTone="brand"
+                      />
+                    )}
+                    {edges.byKind.competes_with.length > 0 && (
+                      <EdgeGroup
+                        title="Competes with"
+                        hint=""
+                        edges={edges.byKind.competes_with}
+                        onDelete={deleteEdge}
+                        kindTone="ink"
+                      />
+                    )}
+                  </div>
+                )}
+                <div className="mt-2 text-[10px] text-ink-tertiary">
+                  Sources: <span className="text-accent-green">transaction</span> (highest signal),{" "}
+                  <span className="text-brand-200">operator</span>,{" "}
+                  <span className="text-ink-secondary">ai_profile</span>,{" "}
+                  <span className="text-ink-secondary">partner</span>
+                </div>
+              </div>
+
               {selected.notes && (
                 <div className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
                   <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Notes</div>
@@ -911,6 +1050,77 @@ function Field({ k, v }: { k: string; v: React.ReactNode }) {
     <div className="flex items-baseline justify-between gap-2">
       <span className="text-[10px] uppercase tracking-wider text-ink-tertiary">{k}</span>
       <span className="text-right text-[12px] text-ink-secondary">{v}</span>
+    </div>
+  );
+}
+
+function EdgeGroup({
+  title,
+  hint,
+  edges,
+  onDelete,
+  kindTone,
+}: {
+  title: string;
+  hint?: string;
+  edges: SupplyEdge[];
+  onDelete: (id: string) => void;
+  kindTone: "amber" | "cyan" | "brand" | "ink";
+}) {
+  const toneClass = {
+    amber: "bg-accent-amber/15 text-accent-amber",
+    cyan: "bg-accent-cyan/15 text-accent-cyan",
+    brand: "bg-brand-500/15 text-brand-200",
+    ink: "bg-bg-hover text-ink-secondary",
+  }[kindTone];
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <div className="text-[9px] uppercase tracking-wider text-ink-tertiary">{title}</div>
+        {hint && <div className="text-[9px] italic text-ink-tertiary">{hint}</div>}
+      </div>
+      <div className="mt-1 space-y-1">
+        {edges.map((e) => (
+          <div
+            key={e.id}
+            className="group flex items-center justify-between gap-2 rounded-md border border-bg-border bg-bg-card/40 px-2 py-1"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${toneClass}`}>
+                  {e.toName}
+                </span>
+                <span
+                  className={`text-[9px] font-mono ${
+                    e.source === "transaction"
+                      ? "text-accent-green"
+                      : e.source === "operator"
+                        ? "text-brand-200"
+                        : "text-ink-tertiary"
+                  }`}
+                  title={`Source: ${e.source} · evidence: ${e.evidence ?? "—"}`}
+                >
+                  {e.source}
+                </span>
+                <span className="text-[9px] text-ink-tertiary">{e.confidence}%</span>
+              </div>
+              {e.evidence && (
+                <div className="mt-0.5 truncate text-[9px] text-ink-tertiary" title={e.evidence}>
+                  {e.evidence}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => onDelete(e.id)}
+              className="opacity-0 transition group-hover:opacity-100 text-ink-tertiary hover:text-accent-red"
+              aria-label="Delete edge"
+              title="Delete this edge from the graph"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
