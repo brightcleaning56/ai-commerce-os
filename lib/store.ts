@@ -26,6 +26,7 @@ const TRANSACTIONS_FILE = "transactions.json";
 const REVENUE_LEDGER_FILE = "revenue-ledger.json";
 const LEADS_FILE = "leads.json";
 const INVITES_FILE = "invites.json";
+const API_KEYS_FILE = "api-keys.json";
 
 // ─── Backend selection ─────────────────────────────────────────────────────
 // STORE_BACKEND=blobs → Netlify Blobs (recommended for Netlify deploys)
@@ -624,6 +625,44 @@ export type Invite = {
   token: string;
 };
 
+/**
+ * Programmatic API key — bearer auth for /api/v1/* endpoints. Each key has
+ * an explicit scope set; requests are denied unless the key carries the
+ * scope the endpoint requires.
+ *
+ * Storage: we store ONLY the SHA-256 hash of the secret + a 12-char prefix
+ * (e.g. "sk_live_4f29ab"). The raw secret is shown to the operator exactly
+ * ONCE at creation time and is never recoverable — same model as Stripe /
+ * GitHub. Lookup is by hash so even a database leak doesn't expose live
+ * keys.
+ */
+export type ApiKeyScope =
+  | "read:health"          // /api/v1/health — minimal, useful for monitoring
+  | "read:insights"        // outreach insights aggregation
+  | "read:leads"           // list captured leads
+  | "read:campaigns"       // derived campaigns surface
+  | "write:leads";         // future: programmatic POST /api/v1/leads
+
+export type ApiKeyEnvironment = "Production" | "Test";
+export type ApiKeyStatus = "Active" | "Revoked";
+
+export type ApiKey = {
+  id: string;                        // key_<random>
+  name: string;                      // operator-supplied label
+  prefix: string;                    // first 12 chars of the secret (e.g. "sk_live_4f29")
+  hashedSecret: string;              // SHA-256 hex of the full secret
+  scopes: ApiKeyScope[];
+  environment: ApiKeyEnvironment;
+  status: ApiKeyStatus;
+  createdAt: string;                 // ISO
+  createdBy: string;                 // operator email at creation time
+  lastUsedAt?: string;               // ISO
+  revokedAt?: string;                // ISO if revoked
+  // Rolling 24h usage — array of ISO timestamps for each request, trimmed
+  // older-than-24h on each recordApiKeyUse() call. Reading uses .length.
+  usageWindow: string[];
+};
+
 export type ThreadMessage = {
   id: string;
   role: "agent" | "buyer";
@@ -869,6 +908,57 @@ export const store = {
     existing[idx] = { ...existing[idx], ...patch, id: existing[idx].id };
     await getBackend().write(INVITES_FILE, existing);
     return existing[idx];
+  },
+
+  // Programmatic API keys (Bearer auth for /api/v1/*)
+  async getApiKeys(): Promise<ApiKey[]> {
+    return getBackend().read<ApiKey[]>(API_KEYS_FILE, []);
+  },
+  async getApiKey(id: string): Promise<ApiKey | null> {
+    const all = await store.getApiKeys();
+    return all.find((k) => k.id === id) ?? null;
+  },
+  async getApiKeyByHash(hashedSecret: string): Promise<ApiKey | null> {
+    if (!hashedSecret) return null;
+    const all = await store.getApiKeys();
+    return all.find((k) => k.hashedSecret === hashedSecret) ?? null;
+  },
+  async addApiKey(key: ApiKey): Promise<void> {
+    const existing = await store.getApiKeys();
+    // Cap at 100 keys per workspace — operator hits this they're doing
+    // something weird and should rotate first.
+    const all = [key, ...existing].slice(0, 100);
+    await getBackend().write(API_KEYS_FILE, all);
+  },
+  async updateApiKey(id: string, patch: Partial<ApiKey>): Promise<ApiKey | null> {
+    const existing = await store.getApiKeys();
+    const idx = existing.findIndex((k) => k.id === id);
+    if (idx === -1) return null;
+    existing[idx] = { ...existing[idx], ...patch, id: existing[idx].id };
+    await getBackend().write(API_KEYS_FILE, existing);
+    return existing[idx];
+  },
+  /**
+   * Record one successful API call against the key — bumps lastUsedAt
+   * and appends to the rolling 24h usage window. Trims older-than-24h
+   * entries on every write to keep the file small.
+   */
+  async recordApiKeyUse(id: string): Promise<void> {
+    const existing = await store.getApiKeys();
+    const idx = existing.findIndex((k) => k.id === id);
+    if (idx === -1) return;
+    const now = Date.now();
+    const cutoff = now - 24 * 60 * 60 * 1000;
+    const trimmed = (existing[idx].usageWindow ?? []).filter(
+      (iso) => new Date(iso).getTime() >= cutoff,
+    );
+    trimmed.push(new Date(now).toISOString());
+    existing[idx] = {
+      ...existing[idx],
+      usageWindow: trimmed,
+      lastUsedAt: new Date(now).toISOString(),
+    };
+    await getBackend().write(API_KEYS_FILE, existing);
   },
 
   // Pipeline runs (snapshots for /share/[id])

@@ -4,37 +4,94 @@ import {
   Check,
   Code2,
   Copy,
-  ExternalLink,
   KeyRound,
-  Plug,
+  Loader2,
   Plus,
-  Sparkles,
   Trash2,
-  Webhook,
   X,
-  Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
-import { API_KEYS, ENDPOINTS, WEBHOOKS, type ApiKey, type Webhook as Hook } from "@/lib/apiKeys";
 
-const STATUS_TONE: Record<string, string> = {
-  Active: "bg-accent-green/15 text-accent-green",
-  Revoked: "bg-accent-red/15 text-accent-red",
-  Disabled: "bg-bg-hover text-ink-tertiary",
+type Scope =
+  | "read:health"
+  | "read:insights"
+  | "read:leads"
+  | "read:campaigns"
+  | "write:leads";
+
+type Environment = "Production" | "Test";
+type Status = "Active" | "Revoked";
+
+type ApiKey = {
+  id: string;
+  name: string;
+  prefix: string;
+  scopes: Scope[];
+  environment: Environment;
+  status: Status;
+  createdAt: string;
+  createdBy: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+  usageWindow: string[];
+  used24h: number;
 };
 
-const ENV_TONE: Record<string, string> = {
+const SCOPE_LABEL: Record<Scope, string> = {
+  "read:health": "read:health · proof-of-life check",
+  "read:insights": "read:insights · outreach leaderboards",
+  "read:leads": "read:leads · list captured leads",
+  "read:campaigns": "read:campaigns · derived campaigns",
+  "write:leads": "write:leads · POST programmatic leads (planned — endpoint not yet live)",
+};
+
+const SCOPE_ENABLED: Record<Scope, boolean> = {
+  "read:health": true,
+  "read:insights": true,
+  "read:leads": false,
+  "read:campaigns": false,
+  "write:leads": false,
+};
+
+const STATUS_TONE: Record<Status, string> = {
+  Active: "bg-accent-green/15 text-accent-green",
+  Revoked: "bg-accent-red/15 text-accent-red",
+};
+
+const ENV_TONE: Record<Environment, string> = {
   Production: "bg-brand-500/15 text-brand-200",
   Test: "bg-accent-amber/15 text-accent-amber",
 };
 
-const METHOD_TONE: Record<string, string> = {
-  GET: "bg-accent-green/15 text-accent-green",
-  POST: "bg-accent-blue/15 text-accent-blue",
-};
+// Endpoints actually live behind Bearer auth today. New ones get added
+// here as they ship — never advertise an endpoint until it's deployable.
+const LIVE_ENDPOINTS: { method: "GET" | "POST"; path: string; scope: Scope; description: string }[] = [
+  {
+    method: "GET",
+    path: "/api/v1/health",
+    scope: "read:health",
+    description: "Proof-of-life. Returns workspace + key environment + server time. Useful for synthetic monitoring.",
+  },
+  {
+    method: "GET",
+    path: "/api/v1/insights",
+    scope: "read:insights",
+    description: "Outreach insights — same leaderboards (channel, model, touch, subjects, cost) the in-app /outreach panel renders.",
+  },
+];
 
-function CopyChip({ text }: { text: string }) {
+function relativeTime(iso?: string): string {
+  if (!iso) return "Never";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
+  if (ms < 30 * 86_400_000) return `${Math.floor(ms / 86_400_000)}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -43,578 +100,424 @@ function CopyChip({ text }: { text: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1200);
       }}
-      className="grid h-6 w-6 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+      className="flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[11px] hover:bg-bg-hover"
     >
       {copied ? <Check className="h-3 w-3 text-accent-green" /> : <Copy className="h-3 w-3" />}
+      {label ?? "Copy"}
     </button>
   );
 }
 
 export default function ApiKeysPage() {
-  const [tab, setTab] = useState<"keys" | "endpoints" | "webhooks">("keys");
-  const [keys, setKeys] = useState<ApiKey[]>(API_KEYS);
-  const [hooks, setHooks] = useState<Hook[]>(WEBHOOKS);
+  const [keys, setKeys] = useState<ApiKey[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState<"keys" | "endpoints">("keys");
   const [createOpen, setCreateOpen] = useState(false);
-  const [hookOpen, setHookOpen] = useState(false);
-  const [revealedKey, setRevealedKey] = useState<{ id: string; secret: string } | null>(null);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeyEnv, setNewKeyEnv] = useState<Environment>("Test");
+  const [newKeyScopes, setNewKeyScopes] = useState<Scope[]>(["read:health"]);
+  const [submitting, setSubmitting] = useState(false);
+  const [revealedSecret, setRevealedSecret] = useState<{ keyName: string; secret: string } | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // Create-key form
-  const [newKeyName, setNewKeyName] = useState("");
-  const [newKeyEnv, setNewKeyEnv] = useState<"Production" | "Test">("Production");
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const r = await fetch("/api/admin/api-keys", { cache: "no-store" });
+      if (r.status === 401) {
+        setLoadError("Not signed in — visit /signin and try again.");
+        return;
+      }
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}));
+        setLoadError(`API returned ${r.status}: ${body.error ?? r.statusText}`);
+        return;
+      }
+      const d = await r.json();
+      setKeys(d.keys ?? []);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  // Add-webhook form
-  const [newHookUrl, setNewHookUrl] = useState("");
-  const [newHookEvents, setNewHookEvents] = useState("deal.closed_won");
+  useEffect(() => { load(); }, [load]);
 
-  function genSecret() {
-    return (
-      "sk_" +
-      (newKeyEnv === "Test" ? "test" : "live") +
-      "_" +
-      Math.random().toString(36).slice(2, 10) +
-      Math.random().toString(36).slice(2, 10)
+  function toggleScope(s: Scope) {
+    setNewKeyScopes((prev) =>
+      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
     );
   }
 
-  function handleCreateKey() {
+  async function submitCreate() {
     if (!newKeyName.trim()) {
       toast("Name your key first", "error");
       return;
     }
-    const secret = genSecret();
-    const id = `k${keys.length + 1}_${Date.now().toString(36)}`;
-    const newKey: ApiKey = {
-      id,
-      name: newKeyName,
-      prefix: secret.slice(0, 12),
-      scopes: ["read:products", "read:buyers"],
-      createdAt: new Date().toLocaleDateString(),
-      lastUsed: "Never",
-      rateLimit: 25_000,
-      used24h: 0,
-      status: "Active",
-      environment: newKeyEnv,
-    };
-    setKeys((prev) => [newKey, ...prev]);
-    setRevealedKey({ id, secret });
-    setNewKeyName("");
-    setCreateOpen(false);
-    toast(`Created "${newKey.name}" — copy the secret now, you won't see it again`);
-  }
-
-  function handleRevoke(k: ApiKey) {
-    setKeys((prev) => prev.map((x) => (x.id === k.id ? { ...x, status: "Revoked" } : x)));
-    toast(`Revoked "${k.name}"`);
-  }
-
-  function handleAddHook() {
-    if (!newHookUrl.trim().startsWith("http")) {
-      toast("Webhook URL must start with http(s)://", "error");
+    if (newKeyScopes.length === 0) {
+      toast("Pick at least one scope", "error");
       return;
     }
-    const id = `w${hooks.length + 1}_${Date.now().toString(36)}`;
-    const newHook: Hook = {
-      id,
-      url: newHookUrl,
-      events: newHookEvents.split(",").map((e) => e.trim()).filter(Boolean),
-      status: "Active",
-      successRate24h: 100,
+    setSubmitting(true);
+    try {
+      const r = await fetch("/api/admin/api-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newKeyName.trim(),
+          environment: newKeyEnv,
+          scopes: newKeyScopes,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Create failed (${r.status})`);
+      setRevealedSecret({ keyName: d.key.name, secret: d.secret });
+      setNewKeyName("");
+      setNewKeyScopes(["read:health"]);
+      setCreateOpen(false);
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Create failed", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function revoke(k: ApiKey) {
+    if (!confirm(`Revoke "${k.name}" (${k.prefix}…)?\nAny callers using this key will start getting 401s immediately.`)) return;
+    setRevokingId(k.id);
+    try {
+      const r = await fetch(`/api/admin/api-keys/${k.id}`, { method: "DELETE" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Revoke failed (${r.status})`);
+      toast(`Revoked "${k.name}"`, "success");
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Revoke failed", "error");
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
+  const counts = useMemo(() => {
+    const list = keys ?? [];
+    return {
+      total: list.length,
+      active: list.filter((k) => k.status === "Active").length,
+      revoked: list.filter((k) => k.status === "Revoked").length,
+      requests24h: list.reduce((sum, k) => sum + (k.used24h ?? 0), 0),
     };
-    setHooks((prev) => [newHook, ...prev]);
-    setNewHookUrl("");
-    setHookOpen(false);
-    toast(`Webhook added · ${newHook.url}`);
-  }
+  }, [keys]);
 
-  function handleDocs() {
-    toast("Opening API docs in a new tab — full reference at /admin/api-keys", "info");
-  }
-
-  const totalCalls24h = keys.reduce((s, k) => s + k.used24h, 0);
-  const totalLimit = keys.filter((k) => k.status === "Active").reduce((s, k) => s + k.rateLimit, 0);
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://avyncommerce.com";
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-brand shadow-glow">
-            <Plug className="h-5 w-5" />
+            <KeyRound className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">API &amp; Developer Portal</h1>
+            <h1 className="text-2xl font-bold">API Keys</h1>
             <p className="text-xs text-ink-secondary">
-              {keys.filter((k) => k.status === "Active").length} active keys ·{" "}
-              {totalCalls24h.toLocaleString()} calls in last 24h
+              {counts.active} active · {counts.revoked} revoked · {counts.requests24h.toLocaleString()} requests in last 24h
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleDocs}
-            className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
-          >
-            <ExternalLink className="h-4 w-4" /> Open Docs
-          </button>
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
-          >
-            <Plus className="h-4 w-4" /> Create Key
-          </button>
-        </div>
+        <button
+          onClick={() => setCreateOpen((v) => !v)}
+          className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
+        >
+          <Plus className="h-4 w-4" /> {createOpen ? "Close" : "Create key"}
+        </button>
       </div>
 
       <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
         <div className="flex items-start gap-3 text-[12px]">
           <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
-            <Plug className="h-3.5 w-3.5 text-accent-amber" />
+            <AlertCircle className="h-3.5 w-3.5 text-accent-amber" />
           </div>
           <div className="flex-1 text-ink-secondary">
-            <span className="font-semibold text-accent-amber">Public API preview</span>
-            {" "}
-            — Key generation + rotation UI works locally; the gateway middleware that authenticates
-            external API calls against these keys ships in a follow-up. For now, server-to-server
-            calls into AVYN go through the operator{" "}
-            <code className="rounded bg-bg-hover px-1 text-[10px]">ADMIN_TOKEN</code>{" "}
-            (see PRODUCTION.md → Step 2).
+            <span className="font-semibold text-accent-amber">Real keys, real auth</span>
+            {" "}— keys created here authenticate against{" "}
+            <code className="rounded bg-bg-hover px-1 text-[10px]">/api/v1/*</code>.
+            Secrets are SHA-256 hashed at rest and shown ONCE on creation —
+            we cannot recover them. Use the Endpoints tab to see what&apos;s live;
+            we never advertise a route that isn&apos;t actually deployed.
           </div>
         </div>
       </div>
 
+      {loadError && (
+        <div className="rounded-xl border border-accent-red/40 bg-accent-red/5 px-4 py-3 text-xs text-accent-red">
+          <strong className="font-semibold">Couldn&apos;t load keys:</strong> {loadError}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Active Keys" value={keys.filter((k) => k.status === "Active").length} />
-        <Stat label="Calls 24h" value={totalCalls24h.toLocaleString()} />
-        <Stat label="Rate Limit Total" value={totalLimit.toLocaleString() + "/day"} />
-        <Stat label="Endpoints" value={ENDPOINTS.length} />
+        <Tile k="Active" v={counts.active} />
+        <Tile k="Revoked" v={counts.revoked} hint="kept for audit" />
+        <Tile k="Live endpoints" v={LIVE_ENDPOINTS.length} />
+        <Tile k="Requests 24h" v={counts.requests24h.toLocaleString()} />
       </div>
 
-      <div className="flex items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs">
-        {(
-          [
-            ["keys", "API Keys", keys.length, KeyRound],
-            ["endpoints", "Endpoints", ENDPOINTS.length, Code2],
-            ["webhooks", "Webhooks", hooks.length, Webhook],
-          ] as const
-        ).map(([k, label, n, Icon]) => (
+      {/* One-time secret reveal */}
+      {revealedSecret && (
+        <div className="rounded-xl border-2 border-accent-green/40 bg-accent-green/5 p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-accent-green">
+                <Check className="h-4 w-4" /> &ldquo;{revealedSecret.keyName}&rdquo; created — copy the secret now
+              </div>
+              <p className="mt-1 text-[11px] text-ink-secondary">
+                This secret will <strong>never</strong> be shown again. Store it in your secrets manager
+                immediately. If you lose it, revoke + recreate.
+              </p>
+            </div>
+            <button
+              onClick={() => setRevealedSecret(null)}
+              className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+              aria-label="Dismiss"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card p-3 font-mono text-xs">
+            <span className="flex-1 truncate">{revealedSecret.secret}</span>
+            <CopyButton text={revealedSecret.secret} label="Copy secret" />
+          </div>
+          <div className="mt-3 text-[11px] text-ink-secondary">
+            Test it:
+            <CopyButton
+              text={`curl ${origin}/api/v1/health -H "Authorization: Bearer ${revealedSecret.secret}"`}
+              label="Copy curl"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Create form */}
+      {createOpen && (
+        <div className="rounded-xl border border-brand-500/40 bg-gradient-to-br from-brand-500/5 to-transparent p-5">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-semibold">Create a new key</div>
+            <button
+              onClick={() => setCreateOpen(false)}
+              className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+              aria-label="Close"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr_180px]">
+            <input
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              placeholder="Name (e.g. &quot;Slack bot&quot; or &quot;Looker dashboard&quot;)"
+              maxLength={80}
+              className="h-10 rounded-lg border border-bg-border bg-bg-card px-3 text-sm focus:border-brand-500 focus:outline-none"
+            />
+            <select
+              value={newKeyEnv}
+              onChange={(e) => setNewKeyEnv(e.target.value as Environment)}
+              className="h-10 rounded-lg border border-bg-border bg-bg-card px-3 text-sm"
+            >
+              {(["Test", "Production"] as Environment[]).map((e) => (
+                <option key={e} value={e}>{e}</option>
+              ))}
+            </select>
+          </div>
+          <div className="mt-3">
+            <div className="mb-1.5 text-[11px] uppercase tracking-wider text-ink-tertiary">Scopes</div>
+            <div className="space-y-1.5">
+              {(Object.keys(SCOPE_LABEL) as Scope[]).map((s) => {
+                const enabled = SCOPE_ENABLED[s];
+                const checked = newKeyScopes.includes(s);
+                return (
+                  <label
+                    key={s}
+                    className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] ${
+                      enabled ? "cursor-pointer hover:bg-bg-hover" : "cursor-not-allowed opacity-50"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={!enabled}
+                      onChange={() => enabled && toggleScope(s)}
+                      className="accent-brand-500"
+                    />
+                    <span className={enabled ? "" : "italic"}>{SCOPE_LABEL[s]}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
           <button
-            key={k}
-            onClick={() => setTab(k)}
-            className={`flex items-center gap-2 rounded-md px-3 py-1.5 ${
-              tab === k
-                ? "bg-brand-500/15 text-brand-200"
-                : "text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+            onClick={submitCreate}
+            disabled={submitting || !newKeyName.trim() || newKeyScopes.length === 0}
+            className="mt-4 flex items-center gap-2 rounded-lg bg-gradient-brand px-4 py-2 text-sm font-semibold shadow-glow disabled:opacity-60"
+          >
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            Create &amp; reveal secret
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs">
+        {(["keys", "endpoints"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`rounded-md px-3 py-1.5 ${
+              tab === t ? "bg-brand-500/15 text-brand-200" : "text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
             }`}
           >
-            <Icon className="h-3.5 w-3.5" />
-            {label}
-            <span
-              className={`rounded ${
-                tab === k ? "bg-brand-500/20" : "bg-bg-hover"
-              } px-1.5 text-[10px]`}
-            >
-              {n}
-            </span>
+            {t === "keys" ? "Keys" : `Endpoints (${LIVE_ENDPOINTS.length})`}
           </button>
         ))}
       </div>
 
-      {tab === "keys" && (
+      {tab === "keys" ? (
         <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
-          <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
-              <tr className="border-b border-bg-border">
-                <th className="px-5 py-2.5 text-left font-medium">Name</th>
-                <th className="px-3 py-2.5 text-left font-medium">Key</th>
-                <th className="px-3 py-2.5 text-left font-medium">Env</th>
-                <th className="px-3 py-2.5 text-left font-medium">Scopes</th>
-                <th className="px-3 py-2.5 text-left font-medium">Usage 24h</th>
-                <th className="px-3 py-2.5 text-left font-medium">Last Used</th>
-                <th className="px-5 py-2.5 text-right font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {keys.map((k) => {
-                const pct = Math.min(100, (k.used24h / k.rateLimit) * 100);
-                const near = pct > 80;
-                return (
-                  <tr key={k.id} className="border-t border-bg-border hover:bg-bg-hover/30">
-                    <td className="px-5 py-3">
-                      <div className="font-medium">{k.name}</div>
-                      <div className="text-[11px] text-ink-tertiary">Created {k.createdAt}</div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-2 font-mono text-xs">
-                        {k.prefix}_••••
-                        <CopyChip text={`${k.prefix}••••••••••••••••`} />
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${ENV_TONE[k.environment]}`}>
-                        {k.environment}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {k.scopes.slice(0, 2).map((s) => (
-                          <span
-                            key={s}
-                            className="rounded-md bg-bg-hover/60 px-1.5 py-0.5 text-[10px] text-ink-secondary"
-                          >
-                            {s}
-                          </span>
-                        ))}
-                        {k.scopes.length > 2 && (
-                          <span className="rounded-md bg-bg-hover/60 px-1.5 py-0.5 text-[10px] text-ink-tertiary">
-                            +{k.scopes.length - 2}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 w-44">
-                      <div className="text-xs">
-                        {k.used24h.toLocaleString()}{" "}
-                        <span className="text-ink-tertiary">
-                          / {k.rateLimit.toLocaleString()}
+          {keys === null && !loadError ? (
+            <div className="px-5 py-12 text-center text-xs text-ink-tertiary">
+              <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />
+              Loading…
+            </div>
+          ) : keys && keys.length === 0 ? (
+            <div className="px-5 py-12 text-center text-xs text-ink-tertiary">
+              <KeyRound className="mx-auto mb-2 h-6 w-6" />
+              <div className="text-sm font-semibold text-ink-primary">No keys yet</div>
+              <p className="mt-1">Create your first key above to start hitting <code className="rounded bg-bg-hover px-1">/api/v1/*</code>.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
+                  <tr className="border-b border-bg-border">
+                    <th className="px-5 py-2.5 text-left font-medium">Key</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Scopes</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Env</th>
+                    <th className="px-3 py-2.5 text-left font-medium">24h calls</th>
+                    <th className="px-3 py-2.5 text-left font-medium">Last used</th>
+                    <th className="px-5 py-2.5 text-left font-medium">Status</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(keys ?? []).map((k) => (
+                    <tr key={k.id} className="border-t border-bg-border hover:bg-bg-hover/30">
+                      <td className="px-5 py-3">
+                        <div className="font-medium">{k.name}</div>
+                        <div className="font-mono text-[11px] text-ink-tertiary">
+                          {k.prefix}…{" "}
+                          <span className="ml-1 text-[10px] text-ink-tertiary">created {relativeTime(k.createdAt)}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {k.scopes.map((s) => (
+                            <span key={s} className="rounded bg-bg-hover px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary">
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${ENV_TONE[k.environment]}`}>
+                          {k.environment}
                         </span>
-                      </div>
-                      <div className="mt-1 h-1 overflow-hidden rounded-full bg-bg-hover">
-                        <div
-                          className={`h-full ${near ? "bg-accent-amber" : "bg-gradient-brand"}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-ink-secondary">{k.lastUsed}</td>
-                    <td className="px-5 py-3 text-right">
-                      <div className="inline-flex items-center gap-1.5">
+                      </td>
+                      <td className="px-3 py-3 text-ink-secondary">{(k.used24h ?? 0).toLocaleString()}</td>
+                      <td className="px-3 py-3 text-ink-secondary">{relativeTime(k.lastUsedAt)}</td>
+                      <td className="px-5 py-3">
                         <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[k.status]}`}>
                           {k.status}
                         </span>
-                        {k.status === "Active" && (
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        {k.status === "Active" ? (
                           <button
-                            onClick={() => handleRevoke(k)}
-                            className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-accent-red/10 hover:text-accent-red"
-                            aria-label="Revoke key"
+                            onClick={() => revoke(k)}
+                            disabled={revokingId === k.id}
+                            className="inline-flex items-center gap-1 text-[11px] text-ink-tertiary hover:text-accent-red disabled:opacity-60"
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
+                            {revokingId === k.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                            Revoke
                           </button>
+                        ) : (
+                          <span className="text-[11px] text-ink-tertiary">—</span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      )}
-
-      {tab === "endpoints" && (
+      ) : (
         <div className="space-y-3">
-          {ENDPOINTS.map((e) => (
-            <div
-              key={e.path}
-              className="overflow-hidden rounded-xl border border-bg-border bg-bg-card"
-            >
-              <div className="flex items-center gap-3 border-b border-bg-border px-5 py-3">
+          {LIVE_ENDPOINTS.map((ep) => (
+            <div key={ep.path} className="rounded-xl border border-bg-border bg-bg-card p-4">
+              <div className="flex items-start gap-3">
                 <span
-                  className={`rounded-md px-2 py-0.5 text-[10px] font-mono font-bold ${METHOD_TONE[e.method]}`}
+                  className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                    ep.method === "GET" ? "bg-accent-green/15 text-accent-green" : "bg-accent-blue/15 text-accent-blue"
+                  }`}
                 >
-                  {e.method}
+                  {ep.method}
                 </span>
-                <span className="font-mono text-sm">{e.path}</span>
-                <span className="ml-auto rounded-md bg-bg-hover/60 px-2 py-0.5 text-[10px] text-ink-secondary">
-                  scope: {e.scope}
-                </span>
-              </div>
-              <p className="px-5 py-3 text-xs text-ink-secondary">{e.description}</p>
-              <div className="border-t border-bg-border bg-bg-panel px-5 py-3">
-                <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider text-ink-tertiary">
-                    cURL
-                  </span>
-                  <CopyChip text={e.example} />
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="font-mono text-sm font-semibold">{ep.path}</code>
+                    <span className="rounded bg-bg-hover px-1.5 py-0.5 font-mono text-[10px] text-ink-secondary">
+                      requires {ep.scope}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[12px] text-ink-secondary">{ep.description}</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <code className="flex-1 truncate rounded-md bg-bg-app/50 px-2 py-1 font-mono text-[11px] text-ink-secondary">
+                      curl {origin}{ep.path} -H &quot;Authorization: Bearer sk_…&quot;
+                    </code>
+                    <CopyButton
+                      text={`curl ${origin}${ep.path} -H "Authorization: Bearer YOUR_KEY"`}
+                    />
+                  </div>
                 </div>
-                <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-ink-secondary">
-{e.example}
-                </pre>
               </div>
             </div>
           ))}
-        </div>
-      )}
-
-      {tab === "webhooks" && (
-        <div className="overflow-hidden rounded-xl border border-bg-border bg-bg-card">
-          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
-            <div className="text-sm font-semibold">Outbound Webhooks</div>
-            <button
-              onClick={() => setHookOpen(true)}
-              className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-hover/40 px-2 py-1 text-xs text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
-            >
-              <Plus className="h-3 w-3" /> Add webhook
-            </button>
-          </div>
-          <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
-              <tr>
-                <th className="px-5 py-2.5 text-left font-medium">URL</th>
-                <th className="px-3 py-2.5 text-left font-medium">Events</th>
-                <th className="px-3 py-2.5 text-left font-medium">Success 24h</th>
-                <th className="px-5 py-2.5 text-left font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {hooks.map((w) => (
-                <tr key={w.id} className="border-t border-bg-border hover:bg-bg-hover/30">
-                  <td className="px-5 py-3 font-mono text-xs">{w.url}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {w.events.map((ev) => (
-                        <span
-                          key={ev}
-                          className="rounded-md bg-brand-500/10 px-1.5 py-0.5 text-[10px] text-brand-200"
-                        >
-                          {ev}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-3 py-3">
-                    <span
-                      className={
-                        w.successRate24h > 99 ? "text-accent-green" :
-                        w.successRate24h > 90 ? "text-accent-amber" :
-                        "text-accent-red"
-                      }
-                    >
-                      {w.successRate24h.toFixed(1)}%
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${STATUS_TONE[w.status]}`}>
-                      {w.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-brand-500/30 bg-brand-500/5 p-5">
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-lg bg-brand-500/20">
-              <Sparkles className="h-5 w-5 text-brand-200" />
-            </div>
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-brand-200">
-                API as a revenue stream
+          <div className="rounded-xl border border-bg-border bg-bg-card p-4 text-[12px] text-ink-tertiary">
+            <div className="flex items-start gap-2">
+              <Code2 className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                Need an endpoint that&apos;s not here yet (e.g. <code className="rounded bg-bg-hover px-1">read:leads</code>,
+                {" "}<code className="rounded bg-bg-hover px-1">read:campaigns</code>,
+                {" "}<code className="rounded bg-bg-hover px-1">write:leads</code>)? They&apos;re scoped but not yet
+                routed — ping the operator and they&apos;ll prioritize. We never list a route here until it&apos;s
+                actually deployable.
               </div>
-              <p className="mt-1 text-xs text-ink-secondary">
-                Resell read access to product / buyer / supplier data to your own customers. Per-request billing or fixed tiers — track by API key.
-              </p>
             </div>
           </div>
         </div>
-
-        <div className="rounded-xl border border-bg-border bg-bg-card p-5">
-          <div className="flex items-start gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-lg bg-accent-amber/15">
-              <AlertCircle className="h-5 w-5 text-accent-amber" />
-            </div>
-            <div className="flex-1">
-              <div className="text-sm font-semibold">Rate limits per plan</div>
-              <p className="mt-1 text-xs text-ink-secondary">
-                Starter: 0 calls · Growth: 100K/day · Enterprise: unlimited.
-                Need more? Contact sales for custom volume pricing.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {createOpen && (
-        <Modal title="Create API key" onClose={() => setCreateOpen(false)}>
-          <div className="space-y-3 px-5 py-4">
-            <label className="block">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-                Name
-              </div>
-              <input
-                value={newKeyName}
-                onChange={(e) => setNewKeyName(e.target.value)}
-                placeholder="e.g. Internal dashboard"
-                className="h-10 w-full rounded-lg border border-bg-border bg-bg-card px-3 text-sm focus:border-brand-500 focus:outline-none"
-              />
-            </label>
-            <label className="block">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-                Environment
-              </div>
-              <div className="flex gap-2">
-                {(["Production", "Test"] as const).map((env) => (
-                  <button
-                    key={env}
-                    onClick={() => setNewKeyEnv(env)}
-                    className={`flex-1 rounded-md border px-3 py-2 text-xs ${
-                      newKeyEnv === env
-                        ? "border-brand-500/60 bg-brand-500/10 text-brand-200"
-                        : "border-bg-border bg-bg-card hover:bg-bg-hover"
-                    }`}
-                  >
-                    {env}
-                  </button>
-                ))}
-              </div>
-            </label>
-          </div>
-          <div className="flex items-center justify-end gap-2 border-t border-bg-border px-5 py-3">
-            <button
-              onClick={() => setCreateOpen(false)}
-              className="rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleCreateKey}
-              className="rounded-lg bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow"
-            >
-              Create key
-            </button>
-          </div>
-        </Modal>
-      )}
-
-      {revealedKey && (
-        <Modal title="Copy your secret now" onClose={() => setRevealedKey(null)}>
-          <div className="space-y-3 px-5 py-4">
-            <div className="rounded-lg border border-accent-amber/40 bg-accent-amber/5 p-3 text-[11px] text-ink-secondary">
-              <AlertCircle className="mr-1 inline h-3.5 w-3.5 text-accent-amber" />
-              You will not see this secret again. Store it in your secret manager.
-            </div>
-            <div className="rounded-lg border border-bg-border bg-bg-panel p-3">
-              <div className="flex items-center justify-between gap-2">
-                <code className="flex-1 break-all font-mono text-xs">{revealedKey.secret}</code>
-                <button
-                  onClick={() => {
-                    navigator.clipboard?.writeText(revealedKey.secret);
-                    toast("Secret copied to clipboard");
-                  }}
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-bg-border bg-bg-card text-ink-secondary hover:text-ink-primary"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center justify-end border-t border-bg-border px-5 py-3">
-            <button
-              onClick={() => setRevealedKey(null)}
-              className="rounded-lg bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow"
-            >
-              I&apos;ve copied it
-            </button>
-          </div>
-        </Modal>
-      )}
-
-      {hookOpen && (
-        <Modal title="Add webhook" onClose={() => setHookOpen(false)}>
-          <div className="space-y-3 px-5 py-4">
-            <label className="block">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-                Endpoint URL
-              </div>
-              <input
-                value={newHookUrl}
-                onChange={(e) => setNewHookUrl(e.target.value)}
-                placeholder="https://yourdomain.com/webhooks/aicos"
-                className="h-10 w-full rounded-lg border border-bg-border bg-bg-card px-3 font-mono text-xs focus:border-brand-500 focus:outline-none"
-              />
-            </label>
-            <label className="block">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-                Events (comma separated)
-              </div>
-              <input
-                value={newHookEvents}
-                onChange={(e) => setNewHookEvents(e.target.value)}
-                placeholder="deal.closed_won, forecast.published"
-                className="h-10 w-full rounded-lg border border-bg-border bg-bg-card px-3 font-mono text-xs focus:border-brand-500 focus:outline-none"
-              />
-            </label>
-          </div>
-          <div className="flex items-center justify-end gap-2 border-t border-bg-border px-5 py-3">
-            <button
-              onClick={() => setHookOpen(false)}
-              className="rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleAddHook}
-              className="rounded-lg bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow"
-            >
-              Add webhook
-            </button>
-          </div>
-        </Modal>
       )}
     </div>
   );
 }
 
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md overflow-hidden rounded-xl border border-bg-border bg-bg-panel shadow-2xl"
-      >
-        <div className="flex items-center justify-between border-b border-bg-border px-5 py-4">
-          <div className="text-sm font-semibold">{title}</div>
-          <button
-            onClick={onClose}
-            className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string | number }) {
+function Tile({ k, v, hint }: { k: string; v: string | number; hint?: string }) {
   return (
     <div className="rounded-xl border border-bg-border bg-bg-card p-4">
-      <div className="flex items-center gap-2">
-        <Zap className="h-3.5 w-3.5 text-brand-300" />
-        <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">
-          {label}
-        </div>
-      </div>
-      <div className="mt-1 text-2xl font-bold">{value}</div>
+      <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{k}</div>
+      <div className="mt-1 text-2xl font-bold">{v}</div>
+      {hint && <div className="text-[10px] text-ink-tertiary">{hint}</div>}
     </div>
   );
 }

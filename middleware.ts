@@ -55,6 +55,7 @@ const PUBLIC_PREFIXES = [
   "/api/invites/",           // /api/invites/[token] + /accept — token-gated
   "/api/webhooks/",
   "/api/cron/",
+  "/api/v1/",                // /api/v1/* — Bearer API-key auth via lib/apiAuth
   "/_next/",
 ];
 
