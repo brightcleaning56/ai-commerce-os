@@ -26,6 +26,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import Drawer from "@/components/ui/Drawer";
 import { useToast } from "@/components/Toast";
 import { SAMPLE_SEQUENCE, type Campaign } from "@/lib/outreach";
@@ -1728,29 +1729,91 @@ export default function OutreachPage() {
             </p>
           </div>
         </div>
-        <button
-          onClick={handleNewCampaign}
+        <Link
+          href="/pipeline"
           className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
+          title="Start a new outreach campaign — pipeline discovers buyers + drafts personalized emails"
         >
           <Plus className="h-4 w-4" /> New Campaign
-        </button>
+        </Link>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {[
-          { l: "Total Sent", v: liveStats ? liveStats.sent.toLocaleString() : "—" },
-          { l: "Opened", v: liveStats ? (liveStats.sent > 0 ? `${liveStats.openRatePct.toFixed(1)}%` : "—") : "—" },
-          { l: "Replied", v: liveStats ? (liveStats.sent > 0 ? `${liveStats.replyRatePct.toFixed(1)}%` : "—") : "—" },
-          { l: "Meetings Booked", v: liveStats ? liveStats.meetingsBooked : "—" },
-          { l: "Closed Deals", v: liveStats ? liveStats.closedDeals : "—" },
-        ].map((s) => (
-          <div key={s.l} className="rounded-xl border border-bg-border bg-bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">
-              {s.l}
-            </div>
-            <div className="mt-1 text-2xl font-bold">{s.v}</div>
-          </div>
-        ))}
+          {
+            l: "Total Sent",
+            v: liveStats ? liveStats.sent.toLocaleString() : "—",
+            href: "#drafts-queue",
+            tone: "brand" as const,
+            cta: "View drafts ↓",
+          },
+          {
+            l: "Opened",
+            v: liveStats ? (liveStats.sent > 0 ? `${liveStats.openRatePct.toFixed(1)}%` : "—") : "—",
+            href: "/share-activity",
+            tone: "cyan" as const,
+            cta: "Open Share Activity →",
+          },
+          {
+            l: "Replied",
+            v: liveStats ? (liveStats.sent > 0 ? `${liveStats.replyRatePct.toFixed(1)}%` : "—") : "—",
+            href: "#drafts-queue",
+            tone: "blue" as const,
+            cta: "Scan thread replies ↓",
+          },
+          {
+            l: "Meetings Booked",
+            v: liveStats ? liveStats.meetingsBooked : "—",
+            href: "/transactions",
+            tone: "amber" as const,
+            cta: "Open Transactions →",
+          },
+          {
+            l: "Closed Deals",
+            v: liveStats ? liveStats.closedDeals : "—",
+            href: "/earnings",
+            tone: "green" as const,
+            cta: "Open Earnings →",
+          },
+        ].map((s) => {
+          const ringTone = {
+            brand: "hover:border-brand-500/50",
+            cyan: "hover:border-accent-cyan/50",
+            blue: "hover:border-accent-blue/50",
+            amber: "hover:border-accent-amber/50",
+            green: "hover:border-accent-green/50",
+          }[s.tone];
+          const textTone = {
+            brand: "text-brand-300",
+            cyan: "text-accent-cyan",
+            blue: "text-accent-blue",
+            amber: "text-accent-amber",
+            green: "text-accent-green",
+          }[s.tone];
+          return (
+            <Link
+              key={s.l}
+              href={s.href}
+              className={`group block rounded-xl border border-bg-border bg-bg-card p-4 transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${ringTone} hover:bg-bg-hover/30`}
+              title={s.cta}
+            >
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">
+                  {s.l}
+                </div>
+                <span className={`text-[10px] font-semibold opacity-0 transition group-hover:opacity-100 ${textTone}`}>
+                  Open
+                </span>
+              </div>
+              <div className="mt-1 text-2xl font-bold">{s.v}</div>
+              <div className="mt-2 text-right">
+                <span className={`text-[10px] opacity-60 transition group-hover:opacity-100 ${textTone}`}>
+                  {s.cta}
+                </span>
+              </div>
+            </Link>
+          );
+        })}
       </div>
 
       {liveStats && !liveStats.hasAnyData && (
@@ -1761,16 +1824,19 @@ export default function OutreachPage() {
           <div className="flex-1 text-ink-secondary">
             <span className="font-semibold text-accent-amber">No outreach activity yet</span>
             {" "}— the tiles above start populating once you send your first draft. Generate one from the{" "}
-            <a href="/pipeline" className="text-brand-300 hover:text-brand-200 underline">pipeline</a>{" "}
+            <Link href="/pipeline" className="text-brand-300 hover:text-brand-200 underline">pipeline</Link>{" "}
             or{" "}
-            <a href="/products" className="text-brand-300 hover:text-brand-200 underline">products</a>{" "}
-            page. The campaigns table below uses sample data so the layout is visible.
+            <Link href="/products" className="text-brand-300 hover:text-brand-200 underline">products</Link>{" "}
+            page. The Campaigns table below is derived from real drafts — it&apos;s empty until your first product gets a buyer.
           </div>
         </div>
       )}
 
       {drafts.length > 0 && (
-        <div className="rounded-xl border border-brand-500/30 bg-gradient-to-br from-brand-500/5 to-transparent">
+        <div
+          id="drafts-queue"
+          className="scroll-mt-4 rounded-xl border border-brand-500/30 bg-gradient-to-br from-brand-500/5 to-transparent"
+        >
           <div className="flex items-center justify-between border-b border-brand-500/20 px-5 py-3.5">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <Sparkles className="h-4 w-4 text-brand-300" /> AI-generated drafts queue

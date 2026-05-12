@@ -181,22 +181,57 @@ export default function AgentsPage() {
         </div>
       </div>
 
-      {/* Summary strip */}
+      {/* Summary strip — clickable to drill into agent runs */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: "Running", v: running, tone: "text-accent-green" },
-          { label: "Tasks (24h)", v: totalTasks.toLocaleString(), tone: "text-brand-200" },
-          { label: "Tokens used", v: fmtTokens(totalTokens), tone: "text-ink-primary" },
+          {
+            label: "Running",
+            v: running,
+            tone: "text-accent-green",
+            href: "/agent-runs",
+            cta: "View live runs →",
+          },
+          {
+            label: "Tasks (24h)",
+            v: totalTasks.toLocaleString(),
+            tone: "text-brand-200",
+            href: "/agent-runs",
+            cta: "Run history →",
+          },
+          {
+            label: "Tokens used",
+            v: fmtTokens(totalTokens),
+            tone: "text-ink-primary",
+            href: "/admin",
+            cta: "Spend ledger →",
+          },
           {
             label: "Avg success rate",
             v: totalRuns === 0 ? "—" : `${weightedSuccessRate.toFixed(1)}%`,
             tone: "text-accent-green",
+            href: "/admin",
+            cta: "AI health →",
           },
         ].map((s) => (
-          <div key={s.label} className="rounded-xl border border-bg-border bg-bg-card p-4">
-            <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{s.label}</div>
+          <Link
+            key={s.label}
+            href={s.href}
+            title={s.cta}
+            className="group block rounded-xl border border-bg-border bg-bg-card p-4 transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 hover:border-brand-500/50 hover:bg-bg-hover/30"
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{s.label}</div>
+              <span className={`text-[10px] font-semibold opacity-0 transition group-hover:opacity-100 ${s.tone}`}>
+                Open
+              </span>
+            </div>
             <div className={`mt-1 text-2xl font-bold ${s.tone}`}>{s.v}</div>
-          </div>
+            <div className="mt-2 text-right">
+              <span className={`text-[10px] opacity-60 transition group-hover:opacity-100 ${s.tone}`}>
+                {s.cta}
+              </span>
+            </div>
+          </Link>
         ))}
       </div>
 

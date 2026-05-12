@@ -1,6 +1,5 @@
 "use client";
 import {
-  Bookmark,
   Linkedin,
   Mail,
   Search,
@@ -111,12 +110,15 @@ export default function BuyersPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm">
-            <Bookmark className="h-4 w-4" /> Watchlist
-          </button>
-          <button className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow">
+          {/* Watchlist button removed — no saved-buyers backend exists.
+              Re-add as a real Link when the watchlist feature ships. */}
+          <a
+            href="/pipeline"
+            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
+            title="Run the pipeline — Buyer Discovery agent surfaces new buyers per product"
+          >
             <Sparkles className="h-4 w-4" /> Find New Buyers
-          </button>
+          </a>
         </div>
       </div>
 

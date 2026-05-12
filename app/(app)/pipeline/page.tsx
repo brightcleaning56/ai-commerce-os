@@ -528,15 +528,35 @@ export default function PipelinePage() {
         )}
       </div>
 
-      {/* Today's totals */}
+      {/* Today's totals — clickable */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Pipelines (session)" v={totalRunsToday} Icon={Workflow} />
-        <Stat label="Products surfaced" v={totalProductsToday} Icon={Package} />
-        <Stat label="Outreach drafts" v={totalDraftsToday} Icon={Send} />
+        <Stat
+          label="Pipelines (session)"
+          v={totalRunsToday}
+          Icon={Workflow}
+          href="/agent-runs"
+          cta="Run history →"
+        />
+        <Stat
+          label="Products surfaced"
+          v={totalProductsToday}
+          Icon={Package}
+          href="/products"
+          cta="Open Products →"
+        />
+        <Stat
+          label="Outreach drafts"
+          v={totalDraftsToday}
+          Icon={Send}
+          href="/outreach"
+          cta="Open Outreach →"
+        />
         <Stat
           label="Total cost"
           v={totalCostToday > 0 ? `$${totalCostToday.toFixed(4)}` : "$0.00"}
           Icon={DollarSign}
+          href="/admin"
+          cta="Spend ledger →"
         />
       </div>
 
@@ -1598,12 +1618,47 @@ function Mini({
   );
 }
 
-function Stat({ label, v, Icon }: { label: string; v: string | number; Icon: React.ComponentType<{ className?: string }> }) {
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+function Stat({
+  label,
+  v,
+  Icon,
+  href,
+  cta,
+}: {
+  label: string;
+  v: string | number;
+  Icon: React.ComponentType<{ className?: string }>;
+  href?: string;
+  cta?: string;
+}) {
+  const inner = (
+    <>
       <Icon className="h-4 w-4 text-brand-300" />
       <div className="mt-2 text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
       <div className="mt-1 text-2xl font-bold">{v}</div>
+      {href && cta && (
+        <div className="mt-2 text-right">
+          <span className="text-[10px] text-brand-300 opacity-60 transition group-hover:opacity-100">
+            {cta}
+          </span>
+        </div>
+      )}
+    </>
+  );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        title={cta}
+        className="group block rounded-xl border border-bg-border bg-bg-card p-4 transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 hover:border-brand-500/50 hover:bg-bg-hover/30"
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }

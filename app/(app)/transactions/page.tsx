@@ -333,6 +333,8 @@ export default function TransactionsPage() {
           sub="Held by platform until release"
           tone="amber"
           Icon={Landmark}
+          href="/escrow"
+          cta="Open Escrow Center →"
         />
         <StatCard
           label="Net Platform Revenue"
@@ -340,6 +342,8 @@ export default function TransactionsPage() {
           sub={stats ? `${fmtCents(stats.totalPlatformFeesCents)} platform + ${fmtCents(stats.totalEscrowFeesCents)} escrow` : ""}
           tone="green"
           Icon={DollarSign}
+          href="/earnings"
+          cta="Open Earnings →"
         />
         <StatCard
           label="Active Deals"
@@ -347,6 +351,8 @@ export default function TransactionsPage() {
           sub={`${counts.disputed} disputed · ${counts.completed} completed`}
           tone={counts.disputed > 0 ? "red" : "brand"}
           Icon={Zap}
+          href="/crm"
+          cta="Open CRM →"
         />
         <StatCard
           label="Supplier Payouts"
@@ -354,6 +360,8 @@ export default function TransactionsPage() {
           sub={stats ? `${fmtCents(stats.totalRefundsCents)} refunded` : ""}
           tone="default"
           Icon={Banknote}
+          href="/earnings"
+          cta="Open Earnings →"
         />
       </div>
 
@@ -858,13 +866,17 @@ function ActionPanel({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function StatCard({
-  label, value, sub, tone = "default", Icon,
+  label, value, sub, tone = "default", Icon, href, cta,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: "default" | "brand" | "green" | "red" | "amber";
   Icon: React.ComponentType<{ className?: string }>;
+  /** When set, the whole card becomes a navigation link. */
+  href?: string;
+  /** Hover hint shown bottom-right when href is set. */
+  cta?: string;
 }) {
   const valueClass =
     tone === "brand" ? "text-brand-200" :
@@ -872,14 +884,51 @@ function StatCard({
     tone === "red"   ? "text-accent-red" :
     tone === "amber" ? "text-accent-amber" :
     "";
-  return (
-    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+  const ringClass =
+    tone === "brand" ? "hover:border-brand-500/50" :
+    tone === "green" ? "hover:border-accent-green/50" :
+    tone === "red"   ? "hover:border-accent-red/50" :
+    tone === "amber" ? "hover:border-accent-amber/50" :
+    "hover:border-bg-border";
+  const ctaClass =
+    tone === "brand" ? "text-brand-300" :
+    tone === "green" ? "text-accent-green" :
+    tone === "red"   ? "text-accent-red" :
+    tone === "amber" ? "text-accent-amber" :
+    "text-ink-secondary";
+
+  const inner = (
+    <>
       <div className="flex items-center justify-between">
         <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
         <Icon className="h-3.5 w-3.5 text-ink-tertiary" />
       </div>
       <div className={`mt-1 text-2xl font-bold ${valueClass}`}>{value}</div>
       {sub && <div className="mt-0.5 text-[11px] text-ink-tertiary">{sub}</div>}
+      {href && cta && (
+        <div className="mt-2 text-right">
+          <span className={`text-[10px] opacity-60 transition group-hover:opacity-100 ${ctaClass}`}>
+            {cta}
+          </span>
+        </div>
+      )}
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        title={cta}
+        className={`group block rounded-xl border border-bg-border bg-bg-card p-4 transition focus:outline-none focus:ring-2 focus:ring-brand-500/40 ${ringClass} hover:bg-bg-hover/30`}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      {inner}
     </div>
   );
 }
