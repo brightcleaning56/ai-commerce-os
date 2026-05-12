@@ -56,7 +56,10 @@ export async function GET(req: NextRequest) {
       ssoConfigured: !!process.env.SSO_PROVIDER,
       scimConfigured: !!process.env.SCIM_TOKEN,
       twoFactorTracked: false,
-      acceptanceFlow: false,           // /invites/[token] not yet shipped
+      // Public /invite/[token] page + accept endpoint are live. Invitee can
+      // confirm + the operator gets notified. Per-user sign-in is still
+      // pending so it's "soft accept" not "logged-in accept".
+      acceptanceFlow: true,
     },
   });
 }

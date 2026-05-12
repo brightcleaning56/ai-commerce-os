@@ -614,9 +614,13 @@ export type Invite = {
   expiresAt: string;                // ISO (createdAt + INVITE_EXPIRY_DAYS)
   invitedBy: string;                // operator name/email at create time
   acceptedAt?: string;              // ISO if accepted
+  acceptedName?: string;            // display name the invitee provided on accept
   cancelledAt?: string;             // ISO if cancelled
-  // Single-use token for the future acceptance flow. Not surfaced to the
-  // operator UI today; held so the next slice can wire /invites/[token].
+  // Single-use token for the public acceptance flow at /invite/[token].
+  // The token IS the auth — anyone with it can view + accept the invite,
+  // so it's high-entropy (24 random bytes base64url) and the link is sent
+  // only to the invited email address. NEVER include this token in any
+  // operator-facing surface (admin UI, audit log, etc).
   token: string;
 };
 
@@ -846,6 +850,12 @@ export const store = {
     if (!norm) return null;
     const all = await store.getInvites();
     return all.find((i) => i.email === norm && i.status === "pending") ?? null;
+  },
+  async getInviteByToken(token: string): Promise<Invite | null> {
+    const trimmed = (token ?? "").trim();
+    if (!trimmed) return null;
+    const all = await store.getInvites();
+    return all.find((i) => i.token === trimmed) ?? null;
   },
   async addInvite(invite: Invite): Promise<void> {
     const existing = await getBackend().read<Invite[]>(INVITES_FILE, []);

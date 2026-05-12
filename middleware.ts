@@ -49,8 +49,10 @@ const PUBLIC_PATHS = [
 const PUBLIC_PREFIXES = [
   "/share/",
   "/quote/",
+  "/invite/",                // /invite/[token] — token IS the auth
   "/api/share/",
   "/api/quotes/",
+  "/api/invites/",           // /api/invites/[token] + /accept — token-gated
   "/api/webhooks/",
   "/api/cron/",
   "/_next/",

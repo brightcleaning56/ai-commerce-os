@@ -83,10 +83,12 @@ export async function POST(req: NextRequest) {
   await store.addInvite(invite);
 
   // Best-effort notify — don't block the operator's response on email
-  // delivery. The acceptance URL is a placeholder until the next slice
-  // ships /invite/[token]; for now the email tells the invitee they've
-  // been added and that the onboarding flow is coming.
+  // delivery. The acceptance URL is the public /invite/[token] landing
+  // page; the token IS the auth (high-entropy, sent only to the invited
+  // email). Per-user sign-in isn't wired yet, so the page tells the
+  // invitee they're confirming-but-not-logging-in today.
   const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://avyncommerce.com";
+  const acceptUrl = `${origin}/invite/${invite.token}`;
   await sendEmail({
     to: rawEmail,
     subject: `${op.name} invited you to ${op.company} on AVYN Commerce`,
@@ -96,9 +98,15 @@ export async function POST(req: NextRequest) {
       `${op.name} (${op.email}) invited you to join the ${op.company} workspace`,
       `on AVYN Commerce as a ${invite.role}.`,
       ``,
-      `The invite acceptance flow is being finalized — once it ships you'll`,
-      `receive a follow-up with a sign-in link. This invite expires`,
-      `${expires.toDateString()}.`,
+      `Accept your invite:`,
+      `${acceptUrl}`,
+      ``,
+      `This link expires ${expires.toDateString()}.`,
+      ``,
+      `(Heads up: per-user sign-in is still being finalized, so accepting`,
+      `today confirms you're joining and tells ${op.name.split(" ")[0]} to expect you.`,
+      `You'll get a follow-up with the actual sign-in link when it ships —`,
+      `nothing for you to set up in the meantime.)`,
       ``,
       `Questions? Reply to this email and ${op.name} will get it directly.`,
       ``,

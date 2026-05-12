@@ -286,8 +286,11 @@ export default function UsersPage() {
         </button>
       </div>
 
-      {/* Honest capability banner — only render once we know what's wired. */}
-      {data && !data.capabilities.acceptanceFlow && (
+      {/* Honest capability banner — anchored to per-user-auth status, not
+          acceptance status. Acceptance now works (invitees can confirm via
+          /invite/[token]) but per-user sign-in + role enforcement is the
+          remaining gap. */}
+      {data && !data.capabilities.perUserAuth && (
         <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
           <div className="flex items-start gap-3 text-[12px]">
             <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
@@ -296,8 +299,11 @@ export default function UsersPage() {
             <div className="flex-1 text-ink-secondary">
               <span className="font-semibold text-accent-amber">Single-operator mode</span>
               {" "}
-              — invites you create here are <strong>real</strong> (persisted, emailed, cancellable),
-              but the per-user sign-in flow that lets invitees actually accept ships in a follow-up.
+              — invites are <strong>real</strong>:
+              {data.capabilities.acceptanceFlow
+                ? " they're persisted, emailed with a working accept link, and the invitee can confirm via /invite/[token]."
+                : " they're persisted, emailed, and cancellable."}
+              {" "}Per-user sign-in + role enforcement ship in the next slice.
               Today the workspace has one privileged identity: the owner email above.
               Roles you assign are stored so the next slice can enforce them.
             </div>
