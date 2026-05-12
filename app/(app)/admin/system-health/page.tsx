@@ -132,6 +132,45 @@ export default function SystemHealthPage() {
     if (opEmail && opEmail !== "MISSING" && !testEmailTo) setTestEmailTo(opEmail);
   }, [data, testEmailTo]);
 
+  // Per-cron manual trigger -- proxies through /api/admin/cron-trigger which
+  // signs the internal request with CRON_SECRET. Pipeline is intentionally
+  // not triggerable here; /pipeline page has its own Run Pipeline button.
+  const [triggering, setTriggering] = useState<string | null>(null);
+  async function triggerCron(kind: string) {
+    setTriggering(kind);
+    try {
+      const r = await fetch("/api/admin/cron-trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ kind }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        throw new Error(d.error ?? `Trigger failed (${r.status})`);
+      }
+      // The cron handler's response is in d.payload — extract its summary
+      // line so the toast tells the operator exactly what happened.
+      const p = d.payload ?? {};
+      const skipped = p.skipped === true;
+      const sentCount = p.sent ?? p.generated ?? p.promoted ?? p.processedThisTick ?? 0;
+      const summary = skipped
+        ? `Skipped — ${p.reason ?? "no-op"}`
+        : sentCount > 0
+          ? `Sent ${sentCount}`
+          : p.candidateCount === 0 || p.scanned === 0 || p.idle
+            ? "No candidates"
+            : "Done";
+      toast(`${kind} · ${summary} (${d.durationMs}ms)`, p.ok === false ? "error" : "success");
+      // Reload the cron status so the new row appears in the activity panel.
+      await load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Trigger failed", "error");
+    } finally {
+      setTriggering(null);
+    }
+  }
+
   async function sendTest(channel: "email" | "sms") {
     const to = channel === "email" ? testEmailTo.trim() : testSmsTo.trim();
     if (!to) {
@@ -350,11 +389,8 @@ export default function SystemHealthPage() {
           </div>
 
           {/* Recent cron activity — shows what actually fired vs the
-              schedule. /api/cron/status only records pipeline-cron runs
-              today, so other crons (lead-followups, outreach-jobs,
-              auto-promote-sweep, followups, daily-digest) won't show
-              here yet. When they do (slice to capture cron-run records
-              from those endpoints), this panel reads them automatically. */}
+              schedule. All 6 crons now record CronRun objects, so each
+              kind appears here as soon as it fires (or skips). */}
           {cronStatus && (
             <div className="rounded-xl border border-bg-border bg-bg-card">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-bg-border px-5 py-3.5">
@@ -367,6 +403,40 @@ export default function SystemHealthPage() {
                     <> · next {new Date(cronStatus.nextRunAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</>
                   )}
                 </div>
+              </div>
+
+              {/* Manual trigger row — fires the cron handler immediately via
+                  /api/admin/cron-trigger (which signs the call with CRON_SECRET
+                  server-side, never exposing the secret to the client).
+                  Pipeline is intentionally absent -- /pipeline page has its own
+                  Run Pipeline button with proper config inputs. */}
+              <div className="flex flex-wrap items-center gap-2 border-b border-bg-border bg-bg-hover/30 px-5 py-3">
+                <span className="text-[10px] uppercase tracking-wider text-ink-tertiary">Trigger now:</span>
+                {(
+                  [
+                    { kind: "daily-digest", label: "Daily Digest", hint: "Send the morning email summary right now" },
+                    { kind: "lead-followups", label: "Lead Followups", hint: "Run the day-N nudge pass for inbound leads" },
+                    { kind: "auto-promote-sweep", label: "Auto-Promote", hint: "Rescore + promote any hot leads that escaped the sync path" },
+                    { kind: "outreach-jobs", label: "Outreach Jobs", hint: "Process the next batch of the bulk-draft queue" },
+                    { kind: "followups", label: "Draft Followups", hint: "Generate followup drafts for buyers who haven't engaged" },
+                  ] as const
+                ).map((c) => (
+                  <button
+                    key={c.kind}
+                    type="button"
+                    onClick={() => triggerCron(c.kind)}
+                    disabled={triggering === c.kind}
+                    title={c.hint}
+                    className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-card px-2.5 py-1 text-[11px] font-semibold text-ink-secondary transition hover:border-brand-500/40 hover:bg-bg-hover hover:text-brand-200 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {triggering === c.kind ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Send className="h-3 w-3" />
+                    )}
+                    {c.label}
+                  </button>
+                ))}
               </div>
               {cronStatus.recentRuns.length === 0 ? (
                 <div className="px-5 py-8 text-center text-[11px] text-ink-tertiary">
