@@ -212,13 +212,24 @@ export default function PipelinePage() {
   }
 
   async function run() {
-    // Respect global kill-switch
+    // Server-authoritative kill switch check — was localStorage before
+    // which only blocked THIS button; now the API is the source of truth
+    // and the server-side /api/pipeline/run also gates on it. Belt-and-
+    // suspenders: this check just gives the operator a friendlier error
+    // than waiting for the 503.
     try {
-      if (typeof window !== "undefined" && localStorage.getItem("aicos:kill-switch") === "1") {
-        setError("Pipeline blocked — global kill-switch is active. Deactivate it from Super Admin.");
-        return;
+      const r = await fetch("/api/admin/kill-switch", { cache: "no-store", credentials: "include" });
+      if (r.ok) {
+        const ks = await r.json();
+        if (ks?.active) {
+          setError("Pipeline blocked — global kill-switch is active. Deactivate it from Super Admin.");
+          return;
+        }
       }
-    } catch {}
+    } catch {
+      // Kill-switch check failed (network, 401). Let the request proceed —
+      // the server side will gate it if needed.
+    }
 
     setRunning(true);
     setError(null);

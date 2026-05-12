@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth";
 import { findLeadFollowupCandidates, runLeadFollowup } from "@/lib/leadFollowup";
+import { checkKillSwitch } from "@/lib/killSwitch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,19 @@ export async function GET(req: NextRequest) {
       ok: true,
       skipped: true,
       reason: "CRON_ENABLED=false",
+    });
+  }
+
+  // Respect server-authoritative kill switch — operator hit "Activate
+  // kill-switch" on /admin. Cron returns ok:true so the platform doesn't
+  // mark this as a failed schedule; we just no-op until they deactivate.
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: "kill-switch-active",
+      killSwitch: ks.state,
     });
   }
 

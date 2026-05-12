@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { describeSchedule, PIPELINE_CRON_SCHEDULE, nextCronFire } from "@/lib/cron";
+import { getKillSwitch } from "@/lib/killSwitch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -224,6 +225,28 @@ export async function GET(req: NextRequest) {
       : { fixHint: "Optional. Set BOOKING_URL to your Calendly / Cal.com / SavvyCal link. Lead-followup agent will weave it into the body." },
   };
 
+  // ── Kill switch — surfaces the global pause so the operator sees it
+  // at the top of every health snapshot, not buried in /admin.
+  const killSwitchState = await getKillSwitch();
+  const killSwitch = {
+    // "ok" here means NOT killed — green icon when agents are running normally,
+    // amber when the operator has explicitly paused everything.
+    ok: !killSwitchState.active,
+    severity: "warning" as const,
+    affects: [
+      "All agent paths skip while active: cron pipeline, lead followup cron, outreach jobs, lead AI auto-reply, manual retry-stuck, per-lead Send AI now",
+    ],
+    detail: killSwitchState.active
+      ? {
+          active: true,
+          activatedAt: killSwitchState.activatedAt,
+          activatedBy: killSwitchState.activatedBy ?? "(unknown)",
+          reason: killSwitchState.reason ?? "(no reason given)",
+          fixHint: "Deactivate at /admin Super Admin to resume agents",
+        }
+      : { active: false },
+  };
+
   // ── Roll-up ───────────────────────────────────────────────────────────
   const checks = {
     anthropic,
@@ -232,6 +255,7 @@ export async function GET(req: NextRequest) {
     compliance,
     postmarkWebhook,
     cron,
+    killSwitch,
     auth: authConfig,
     booking,
   };

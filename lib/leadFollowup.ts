@@ -1,5 +1,6 @@
 import { generateLeadFollowup } from "@/lib/agents/lead-followup";
 import { sendEmail } from "@/lib/email";
+import { checkKillSwitch } from "@/lib/killSwitch";
 import { store, type Lead } from "@/lib/store";
 
 /**
@@ -60,6 +61,17 @@ export async function runLeadFollowup(lead: Lead): Promise<{
   estCostUsd?: number;
   errorMessage?: string;
 }> {
+  // Same kill-switch pattern as runLeadFirstReply -- gate every entry path
+  // (daily cron + manual "Send AI followup now" button) uniformly.
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    return {
+      ok: false,
+      status: "skipped",
+      errorMessage: `Kill switch active${ks.state.reason ? ` — ${ks.state.reason}` : ""}`,
+    };
+  }
+
   const followupNumber = (lead.aiFollowups?.length ?? 0) + 1;
   const daysSinceCreated = Math.floor(
     (Date.now() - new Date(lead.createdAt).getTime()) / (24 * 60 * 60 * 1000),

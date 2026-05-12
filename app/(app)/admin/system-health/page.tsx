@@ -8,6 +8,7 @@ import {
   Clock,
   Loader2,
   Mail,
+  Power,
   RefreshCw,
   Send,
   ShieldCheck,
@@ -49,6 +50,7 @@ type HealthResponse = {
     compliance: CheckResult;
     postmarkWebhook: CheckResult;
     cron: CheckResult;
+    killSwitch: CheckResult;
     auth: CheckResult;
     booking: CheckResult;
   };
@@ -64,6 +66,7 @@ const ROW_META: Record<
   compliance: { label: "CAN-SPAM compliance footer", Icon: ShieldCheck },
   postmarkWebhook: { label: "Postmark bounce / complaint webhook", Icon: Webhook },
   cron: { label: "Cron / scheduled work", Icon: Clock },
+  killSwitch: { label: "Global agent kill-switch", Icon: Power },
   auth: { label: "Admin auth", Icon: ShieldCheck },
   booking: { label: "Booking link (BOOKING_URL)", Icon: Activity },
 };

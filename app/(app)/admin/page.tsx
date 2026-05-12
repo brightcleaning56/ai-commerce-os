@@ -81,15 +81,25 @@ type Health = {
 
 export default function AdminPage() {
   const [killActive, setKillActive] = useState(false);
+  const [killActivatedAt, setKillActivatedAt] = useState<string | null>(null);
+  const [killSaving, setKillSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [operator, setOperator] = useState<{ name: string; company: string; email: string } | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    try {
-      setKillActive(localStorage.getItem("aicos:kill-switch") === "1");
-    } catch {}
+    // Server-authoritative kill switch — read from /api/admin/kill-switch.
+    // We do NOT fall back to localStorage anymore; that gave a false sense
+    // of safety because crons + agents ignored the localStorage flag.
+    fetch("/api/admin/kill-switch", { cache: "no-store", credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setKillActive(!!d.active);
+        setKillActivatedAt(d.activatedAt ?? null);
+      })
+      .catch(() => {});
     fetch("/api/operator")
       .then((r) => r.json())
       .then((d) => { if (d?.name) setOperator(d); })
@@ -105,19 +115,35 @@ export default function AdminPage() {
     return () => clearInterval(id);
   }, []);
 
-  function handleConfirmKill() {
+  async function handleConfirmKill() {
     const next = !killActive;
-    setKillActive(next);
+    setKillSaving(true);
     try {
-      localStorage.setItem("aicos:kill-switch", next ? "1" : "0");
-    } catch {}
-    setConfirmOpen(false);
-    toast(
-      next
-        ? "Kill-switch ACTIVE — all agents paused workspace-wide"
-        : "Kill-switch deactivated — agents resuming",
-      next ? "error" : "success"
-    );
+      const r = await fetch("/api/admin/kill-switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          active: next,
+          activatedBy: operator?.name ?? "operator",
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? `Toggle failed (${r.status})`);
+      setKillActive(!!d.active);
+      setKillActivatedAt(d.activatedAt ?? null);
+      setConfirmOpen(false);
+      toast(
+        next
+          ? "Kill-switch ACTIVE — every agent path now skips until you deactivate"
+          : "Kill-switch deactivated — agents resuming",
+        next ? "error" : "success",
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Toggle failed", "error");
+    } finally {
+      setKillSaving(false);
+    }
   }
 
   return (
@@ -439,18 +465,26 @@ export default function AdminPage() {
             </div>
             <p className="mt-1 text-xs text-ink-secondary">
               {killActive
-                ? "All agents are paused workspace-wide. Trend Hunter, Buyer Discovery, Outreach, and the Pipeline are blocked until this is deactivated."
-                : "Pauses every agent across the workspace. Use for incidents (data leak, runaway prompt loop, false-positive risk alerts). Resumes from this same control."}
+                ? "All server-side agent paths are now skipping until you deactivate. Cron pipeline, lead-followup cron, outreach jobs, lead AI auto-reply, manual retry-stuck, and per-lead Send AI now all gate on this."
+                : "Stops every server-side agent path workspace-wide — cron + manual. Use for incidents (data leak, runaway prompt loop, false-positive risk alerts). Server-authoritative: applies even if the operator's browser is closed."}
             </p>
+            {killActive && killActivatedAt && (
+              <p className="mt-1 text-[10px] text-accent-red/80">
+                Active since {new Date(killActivatedAt).toLocaleString()}
+              </p>
+            )}
             <button
               onClick={() => setConfirmOpen(true)}
-              className={`mt-3 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold ${
+              disabled={killSaving}
+              className={`mt-3 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold disabled:opacity-60 ${
                 killActive
                   ? "bg-accent-green/15 text-accent-green hover:bg-accent-green/25 border border-accent-green/30"
                   : "border border-accent-red/30 bg-accent-red/10 text-accent-red hover:bg-accent-red/15"
               }`}
             >
-              {killActive ? (
+              {killSaving ? (
+                <><Power className="h-4 w-4 animate-pulse" /> Saving…</>
+              ) : killActive ? (
                 <><Play className="h-4 w-4" /> Deactivate kill-switch</>
               ) : (
                 <><Power className="h-4 w-4" /> Activate kill-switch</>

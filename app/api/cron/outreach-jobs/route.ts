@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth";
 import { runBusinessOutreach } from "@/lib/agents/businessOutreach";
+import { checkKillSwitch } from "@/lib/killSwitch";
 import { isBusinessSuppressed, store, type OutreachJobOutcome } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -30,6 +31,19 @@ export async function GET(req: NextRequest) {
 
   if (process.env.CRON_ENABLED === "false") {
     return NextResponse.json({ ok: true, skipped: true, reason: "CRON_ENABLED=false" });
+  }
+
+  // Global kill switch: skip the tick rather than fail the schedule.
+  // Outreach jobs ship LLM-generated email -- exactly the kind of thing
+  // operators expect a kill switch to halt during an incident.
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: "kill-switch-active",
+      killSwitch: ks.state,
+    });
   }
 
   const tickStart = Date.now();

@@ -1,5 +1,6 @@
 import { generateLeadFollowup } from "@/lib/agents/lead-followup";
 import { sendEmail } from "@/lib/email";
+import { checkKillSwitch } from "@/lib/killSwitch";
 import { sendSms } from "@/lib/sms";
 import { store, type Lead } from "@/lib/store";
 
@@ -32,6 +33,27 @@ export async function runLeadFirstReply(lead: Lead): Promise<{
   body?: string;
   errorMessage?: string;
 }> {
+  // Server-authoritative kill switch: every caller (form-submit auto-reply,
+  // operator's "Send AI reply now" button, bulk retry-stuck) routes through
+  // here, so one gate at the top stops everything uniformly.
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    await store.updateLead(lead.id, {
+      aiReply: {
+        status: "skipped",
+        at: new Date().toISOString(),
+        channel: [],
+        errorMessage: `Kill switch active${ks.state.reason ? ` — ${ks.state.reason}` : ""}`,
+      },
+    });
+    return {
+      ok: false,
+      status: "skipped",
+      channels: [],
+      errorMessage: "Kill switch active",
+    };
+  }
+
   const startedAt = new Date().toISOString();
   // Mark pending immediately so the operator UI shows "AI follow-up in flight"
   // even if the generation/send takes a few seconds.

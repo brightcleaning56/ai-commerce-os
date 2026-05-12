@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findFollowupCandidates, runFollowup } from "@/lib/agents/followup";
 import { requireCron } from "@/lib/auth";
+import { checkKillSwitch } from "@/lib/killSwitch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,6 +23,16 @@ export async function GET(req: NextRequest) {
       ok: true,
       skipped: true,
       reason: "CRON_ENABLED=false",
+    });
+  }
+
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: "kill-switch-active",
+      killSwitch: ks.state,
     });
   }
 

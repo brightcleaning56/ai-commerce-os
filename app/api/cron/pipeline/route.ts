@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runPipeline } from "@/lib/agents/pipeline";
 import { requireCron } from "@/lib/auth";
+import { checkKillSwitch } from "@/lib/killSwitch";
 import { store, type CronRun } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -23,6 +24,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       skipped: true,
       reason: "CRON_ENABLED=false in env",
+    });
+  }
+
+  // Server-authoritative kill switch (toggle from /admin). Same semantics as
+  // CRON_ENABLED=false: ack the tick and skip. We don't write a cron-run
+  // record on skip so the cron-run history stays honest about what fired.
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    return NextResponse.json({
+      skipped: true,
+      reason: "kill-switch-active",
+      killSwitch: ks.state,
     });
   }
 

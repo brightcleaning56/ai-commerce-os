@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCron } from "@/lib/auth";
+import { checkKillSwitch } from "@/lib/killSwitch";
 import { autoPromoteIfHot } from "@/lib/leadAutoPromote";
 import { store } from "@/lib/store";
 
@@ -36,6 +37,16 @@ export async function GET(req: NextRequest) {
       ok: true,
       skipped: true,
       reason: "CRON_ENABLED=false",
+    });
+  }
+
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: "kill-switch-active",
+      killSwitch: ks.state,
     });
   }
 
