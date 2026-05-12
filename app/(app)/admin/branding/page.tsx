@@ -9,7 +9,6 @@ import {
   RotateCcw,
   Search,
   Sparkles,
-  Upload,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -219,12 +218,19 @@ export default function BrandingPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[80px_1fr]">
               <div>
                 <Label>Logo</Label>
-                <button className="grid aspect-square w-20 place-items-center rounded-xl border-2 border-dashed border-bg-border bg-bg-hover/40 text-3xl hover:border-brand-500/60">
+                {/* Display-only preview — emoji is the actual saved value
+                    via the quick-pick row to the right. File upload isn't
+                    wired (no storage backend), so we don't pretend by
+                    showing a clickable upload button. */}
+                <div
+                  className="grid aspect-square w-20 place-items-center rounded-xl border-2 border-dashed border-bg-border bg-bg-hover/40 text-3xl"
+                  aria-label="Current logo emoji"
+                >
                   {logoEmoji}
-                </button>
-                <button className="mt-2 inline-flex items-center gap-1 text-[11px] text-brand-300 hover:text-brand-200">
-                  <Upload className="h-3 w-3" /> Upload
-                </button>
+                </div>
+                <div className="mt-2 text-[10px] text-ink-tertiary">
+                  Logo upload ships with the next release. Pick an emoji →
+                </div>
               </div>
               <div className="space-y-3">
                 <FieldInline label="Product Name" value={productName} onChange={setProductName} />
@@ -382,15 +388,25 @@ export default function BrandingPage() {
               </div>
               <div className="mt-2 text-2xl font-bold">{t.price}</div>
               <p className="mt-2 text-xs text-ink-secondary">{t.desc}</p>
-              <button
-                className={`mt-4 w-full rounded-lg py-2.5 text-sm font-semibold ${
-                  t.popular
-                    ? "bg-gradient-brand shadow-glow"
-                    : "border border-bg-border bg-bg-hover/40 hover:bg-bg-hover"
-                }`}
-              >
-                {t.id === "include" ? "Activate" : "Talk to sales"}
-              </button>
+              {t.id === "include" ? (
+                // Included tier doesn't need an "Activate" click -- it's
+                // tied to the Enterprise subscription. Showing a noop
+                // button was a lie about what would happen.
+                <div className="mt-4 grid w-full place-items-center rounded-lg border border-accent-green/30 bg-accent-green/5 py-2.5 text-sm font-semibold text-accent-green">
+                  Included with Enterprise plan
+                </div>
+              ) : (
+                <a
+                  href={`mailto:hello@avyncommerce.com?subject=${encodeURIComponent(`White-label tier: ${t.name}`)}`}
+                  className={`mt-4 grid w-full place-items-center rounded-lg py-2.5 text-sm font-semibold ${
+                    t.popular
+                      ? "bg-gradient-brand shadow-glow"
+                      : "border border-bg-border bg-bg-hover/40 hover:bg-bg-hover"
+                  }`}
+                >
+                  Talk to sales
+                </a>
+              )}
             </div>
           ))}
         </div>

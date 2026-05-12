@@ -21,6 +21,13 @@ type Stats = {
 
 type Operator = { name?: string; email?: string };
 
+// Subset of the /api/admin/system-health response we actually care about
+// for the checklist. Just the overall traffic light + the blocking count.
+type HealthSummary = {
+  overall?: "green" | "yellow" | "red";
+  blockingFailures?: number;
+};
+
 type Step = {
   key: string;
   title: string;
@@ -34,6 +41,7 @@ const DISMISS_KEY = "avyn:setup-checklist-dismissed";
 export default function SetupChecklist() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [op, setOp] = useState<Operator | null>(null);
+  const [health, setHealth] = useState<HealthSummary | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
@@ -45,10 +53,17 @@ export default function SetupChecklist() {
     Promise.all([
       fetch("/api/dashboard/stats", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch("/api/operator", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ]).then(([s, o]) => {
+      // Health endpoint is admin-only — if the user lacks the cookie they get
+      // 401 which we catch and treat as "unknown health" (step stays pending
+      // but won't crash the checklist).
+      fetch("/api/admin/system-health", { cache: "no-store", credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]).then(([s, o, h]) => {
       if (cancelled) return;
       if (s) setStats(s);
       if (o) setOp(o);
+      if (h) setHealth(h);
     });
     return () => {
       cancelled = true;
@@ -58,6 +73,16 @@ export default function SetupChecklist() {
   if (dismissed || !stats) return null;
 
   const steps: Step[] = [
+    {
+      key: "providers",
+      // Goes first because every downstream step (pipeline, outreach, lead
+      // followups, etc.) depends on the env being wired. Without this the
+      // operator clicks "Run Pipeline" and wonders why nothing happens.
+      title: "Wire your API keys & compliance settings",
+      hint: "Anthropic, Postmark/Resend, Twilio, CAN-SPAM, cron — System Health verifies each",
+      done: health?.overall === "green" || (health != null && (health.blockingFailures ?? 0) === 0),
+      cta: { label: "Open System Health", href: "/admin/system-health" },
+    },
     {
       key: "operator",
       title: "Set up your operator profile",
