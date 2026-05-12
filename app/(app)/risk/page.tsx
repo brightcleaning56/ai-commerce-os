@@ -194,6 +194,7 @@ export default function RiskPage() {
   const [showResolved, setShowResolved] = useState(false);
   const [liveFlags, setLiveFlags] = useState<LiveFlag[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(false);
   const { toast } = useToast();
 
   // Hydrate actions from localStorage
@@ -248,7 +249,9 @@ export default function RiskPage() {
     toast(`Snoozed 7 days · "${title}"`);
   }
 
-  // Merge: live agent flags first (most recent), then static
+  // Live flags from the Risk Agent — these are the operator's real risks.
+  // Sample patterns are kept separate (rendered below in a Pattern Catalog
+  // section) so they never inflate counts or get treated as actionable.
   const liveAsRisks: RiskItem[] = liveFlags.map((f) => ({
     id: f.id,
     title: f.title,
@@ -260,21 +263,32 @@ export default function RiskPage() {
     recommended: f.recommended,
     isLive: true,
   }));
-  const allRisks: RiskItem[] = [...liveAsRisks, ...RISKS];
 
-  const filtered = allRisks.filter(
+  // Filtered LIVE flags only — tiles + sidebar + main list reflect real risk.
+  const filtered = liveAsRisks.filter(
     (r) =>
       (filterSev === "All" || r.severity === filterSev) &&
       (filterCat === "All" || r.category === filterCat) &&
       (showResolved || !actions[r.id])
   );
 
+  // Counts derive from LIVE flags only — never inflated by sample catalog.
   const counts = {
-    Critical: allRisks.filter((r) => r.severity === "Critical").length,
-    High: allRisks.filter((r) => r.severity === "High").length,
-    Medium: allRisks.filter((r) => r.severity === "Medium").length,
-    Low: allRisks.filter((r) => r.severity === "Low").length,
+    Critical: liveAsRisks.filter((r) => r.severity === "Critical").length,
+    High: liveAsRisks.filter((r) => r.severity === "High").length,
+    Medium: liveAsRisks.filter((r) => r.severity === "Medium").length,
+    Low: liveAsRisks.filter((r) => r.severity === "Low").length,
   };
+
+  // Sample pattern catalog is also filterable by category/severity (educational
+  // value), but always renders in its own section below the live flags.
+  const filteredSamples = RISKS.filter(
+    (r) =>
+      (filterSev === "All" || r.severity === filterSev) &&
+      (filterCat === "All" || r.category === filterCat),
+  );
+
+
 
   return (
     <div className="space-y-5">
@@ -287,9 +301,9 @@ export default function RiskPage() {
             <h1 className="text-2xl font-bold">Risk Center</h1>
             <p className="text-xs text-ink-secondary">
               {liveFlags.length > 0 ? (
-                <><span className="text-brand-300">{liveFlags.length} live flag{liveFlags.length === 1 ? "" : "s"}</span> from Risk Agent · {RISKS.length} sample patterns below · trigger a scan to surface new flags</>
+                <><span className="text-brand-300">{liveFlags.length} live flag{liveFlags.length === 1 ? "" : "s"}</span> from the Risk Agent · run another scan to refresh</>
               ) : (
-                <>{RISKS.length} sample patterns shown · trigger a scan to surface real flags</>
+                <>No live risk flags yet — run a scan to evaluate your suppliers, buyers, and SKUs</>
               )}
             </p>
           </div>
@@ -355,11 +369,11 @@ export default function RiskPage() {
             }`}
           >
             <span>All categories</span>
-            <span className="text-ink-tertiary">{RISKS.length}</span>
+            <span className="text-ink-tertiary">{liveAsRisks.length}</span>
           </button>
           {CATEGORIES.map((c) => {
             const Icon = CAT_ICON[c];
-            const n = RISKS.filter((r) => r.category === c).length;
+            const n = liveAsRisks.filter((r) => r.category === c).length;
             return (
               <button
                 key={c}
@@ -384,8 +398,16 @@ export default function RiskPage() {
           {filtered.length === 0 ? (
             <div className="rounded-xl border border-bg-border bg-bg-card p-10 text-center">
               <ShieldCheck className="mx-auto h-8 w-8 text-accent-green" />
-              <div className="mt-2 text-sm font-medium">No risks in this slice</div>
-              <div className="text-xs text-ink-tertiary">Looking good — nothing flagged.</div>
+              <div className="mt-2 text-sm font-medium">
+                {liveAsRisks.length === 0
+                  ? "No live risks yet"
+                  : "No risks in this slice"}
+              </div>
+              <div className="text-xs text-ink-tertiary">
+                {liveAsRisks.length === 0
+                  ? "Click Run Risk Scan above. The catalog below shows what kinds of patterns the agent looks for."
+                  : "Looking good — nothing flagged in the current filters."}
+              </div>
             </div>
           ) : (
             filtered.map((r) => {
@@ -479,6 +501,72 @@ export default function RiskPage() {
               );
             })
           )}
+
+          {/* Pattern catalog — educational. View-only, no Apply/Dismiss.
+               Always rendered below live flags so it can never inflate
+               operator-facing risk counts. Collapsed by default. */}
+          <div className="mt-6 overflow-hidden rounded-xl border border-bg-border bg-bg-card">
+            <button
+              onClick={() => setShowCatalog((v) => !v)}
+              className="flex w-full items-center justify-between border-b border-bg-border px-5 py-3 text-left hover:bg-bg-hover/30"
+            >
+              <div>
+                <div className="text-sm font-semibold">
+                  Risk Pattern Catalog
+                  <span className="ml-2 rounded bg-bg-hover px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-tertiary">
+                    Reference · {filteredSamples.length}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-ink-tertiary">
+                  Patterns the Risk Agent looks for during a scan. Not real flags — never affects counts above.
+                </p>
+              </div>
+              <span className="text-[11px] text-ink-tertiary">
+                {showCatalog ? "Hide ▲" : "Show ▼"}
+              </span>
+            </button>
+            {showCatalog && (
+              <div className="space-y-2 p-4">
+                {filteredSamples.length === 0 ? (
+                  <div className="text-center text-[11px] text-ink-tertiary">
+                    No catalog patterns match the current filters.
+                  </div>
+                ) : (
+                  filteredSamples.map((r) => {
+                    const tone = SEV_TONE[r.severity];
+                    const Icon = CAT_ICON[r.category];
+                    return (
+                      <div
+                        key={r.id}
+                        className="rounded-lg border border-bg-border bg-bg-hover/20 p-3 opacity-90"
+                      >
+                        <div className="flex items-start gap-2">
+                          <div className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${tone.bg}`}>
+                            <Icon className={`h-3 w-3 ${tone.text}`} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-semibold ${tone.bg} ${tone.text}`}>
+                                {r.severity}
+                              </span>
+                              <span className="rounded-md bg-bg-hover/60 px-1.5 py-0.5 text-[9px] text-ink-tertiary">
+                                {r.category}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-xs font-semibold text-ink-secondary">{r.title}</div>
+                            <p className="mt-0.5 text-[11px] text-ink-tertiary">{r.detail}</p>
+                            <p className="mt-1 text-[11px] text-ink-tertiary">
+                              <span className="font-semibold">If matched:</span> {r.recommended}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
