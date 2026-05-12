@@ -551,8 +551,10 @@ export type Lead = {
   budget?: string;
   // Step 2 — Solutions
   message?: string;
-  // Operator-side
-  source: "contact-form" | "signup-form";
+  // Operator-side. "operator-add" is set when the lead was created
+  // manually from /leads (e.g. captured from a phone call or referral)
+  // rather than from the public /contact form.
+  source: "contact-form" | "signup-form" | "operator-add";
   status: LeadStatus;
   notes?: string;           // internal operator notes
   // Light fingerprint for spam triage
@@ -597,7 +599,7 @@ export type Lead = {
   // - longer            → entry with the changed fields and a fresh AI reply
   resubmissions?: Array<{
     at: string;
-    source: "contact-form" | "signup-form";
+    source: "contact-form" | "signup-form" | "operator-add";
     changedFields: string[];          // names of fields that received new values
     newMessage?: string;               // if a new message body was provided
     triggeredAiReply: boolean;

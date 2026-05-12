@@ -10,6 +10,7 @@ import {
   Loader2,
   Mail,
   Phone,
+  Plus,
   RefreshCw,
   Search,
   Send,
@@ -17,6 +18,7 @@ import {
   Sparkles,
   ThermometerSun,
   UserPlus,
+  X,
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -48,7 +50,7 @@ type AiFollowup = {
 };
 type Resubmission = {
   at: string;
-  source: "contact-form" | "signup-form";
+  source: "contact-form" | "signup-form" | "operator-add";
   changedFields: string[];
   newMessage?: string;
   triggeredAiReply: boolean;
@@ -67,7 +69,7 @@ type Lead = {
   timeline?: string;
   budget?: string;
   message?: string;
-  source: "contact-form" | "signup-form";
+  source: "contact-form" | "signup-form" | "operator-add";
   status: LeadStatus;
   notes?: string;
   aiReply?: AiReply;
@@ -281,6 +283,78 @@ export default function LeadsPage() {
 
   const [bulkRetrying, setBulkRetrying] = useState(false);
 
+  // ─── Manual add lead ──────────────────────────────────────────────
+  // When the operator gets a phone-call referral, captures someone at
+  // an event, etc. Posts to /api/admin/leads which mirrors the public
+  // submit endpoint but tags source="operator-add" and lets the operator
+  // choose whether to fire the AI welcome.
+  const [addOpen, setAddOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [addForm, setAddForm] = useState({
+    name: "",
+    email: "",
+    company: "",
+    phone: "",
+    industry: "",
+    timeline: "",
+    budget: "",
+    message: "",
+    triggerAiReply: true,
+  });
+  function resetAddForm() {
+    setAddForm({
+      name: "",
+      email: "",
+      company: "",
+      phone: "",
+      industry: "",
+      timeline: "",
+      budget: "",
+      message: "",
+      triggerAiReply: true,
+    });
+  }
+  async function submitAddLead() {
+    if (!addForm.name.trim() || !addForm.email.trim() || !addForm.company.trim()) {
+      toast("name, email, and company are required", "error");
+      return;
+    }
+    setAdding(true);
+    try {
+      const r = await fetch("/api/admin/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(addForm),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        throw new Error(d.error ?? `Add failed (${r.status})`);
+      }
+      // Refresh list so the new lead shows up + select it so the operator
+      // can immediately add notes / promote / etc.
+      await load();
+      if (d.lead) setSelected(d.lead);
+      const aiNote = addForm.triggerAiReply
+        ? d.aiReply?.status === "sent"
+          ? " · AI welcome sent"
+          : d.aiReply?.status === "skipped"
+            ? " · AI welcome skipped (provider issue)"
+            : ""
+        : " · skipped AI welcome";
+      const dedupeNote = d.deduped
+        ? ` · merged into existing lead${d.changedFields?.length ? ` (added ${d.changedFields.join(", ")})` : ""}`
+        : "";
+      const promoteNote = d.autoPromoted ? " · auto-promoted to buyer" : "";
+      toast(`Lead saved${aiNote}${dedupeNote}${promoteNote}`, "success");
+      setAddOpen(false);
+      resetAddForm();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Add failed", "error");
+    } finally {
+      setAdding(false);
+    }
+  }
+
   /**
    * Drain the "stuck" queue — every lead in "new" status whose aiReply is
    * missing / errored / skipped / pending. Server processes 20 per click
@@ -394,8 +468,89 @@ export default function LeadsPage() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
           </button>
+          <button
+            onClick={() => setAddOpen(true)}
+            title="Add a lead from a phone call, referral, or trade-show capture"
+            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
+          >
+            <Plus className="h-4 w-4" /> Add lead
+          </button>
         </div>
       </div>
+
+      {/* Manual add lead — inline form panel. Same shape as /api/leads
+          POST minus IP rate limit + with operator opt-out for the AI
+          welcome. Required fields: name, email, company. */}
+      {addOpen && (
+        <div className="rounded-xl border border-brand-500/40 bg-gradient-to-br from-brand-500/5 to-transparent p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <UserPlus className="h-4 w-4 text-brand-200" /> Add a lead manually
+            </div>
+            <button
+              onClick={() => { setAddOpen(false); resetAddForm(); }}
+              className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+              aria-label="Close add form"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <p className="mt-1 text-[11px] text-ink-tertiary">
+            For phone-call referrals, trade-show captures, or anyone the public form didn&apos;t catch.
+            Tagged <code className="rounded bg-bg-hover px-1">source: operator-add</code>. Same dedupe + auto-promote rules as a public submission.
+          </p>
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <AddField label="Name *" value={addForm.name} onChange={(v) => setAddForm((f) => ({ ...f, name: v }))} />
+            <AddField label="Email *" value={addForm.email} onChange={(v) => setAddForm((f) => ({ ...f, email: v }))} type="email" />
+            <AddField label="Company *" value={addForm.company} onChange={(v) => setAddForm((f) => ({ ...f, company: v }))} />
+            <AddField label="Phone" value={addForm.phone} onChange={(v) => setAddForm((f) => ({ ...f, phone: v }))} type="tel" />
+            <AddField label="Industry" value={addForm.industry} onChange={(v) => setAddForm((f) => ({ ...f, industry: v }))} />
+            <AddField label="Timeline" value={addForm.timeline} onChange={(v) => setAddForm((f) => ({ ...f, timeline: v }))} placeholder="e.g. within 2 weeks" />
+            <AddField label="Budget" value={addForm.budget} onChange={(v) => setAddForm((f) => ({ ...f, budget: v }))} placeholder="e.g. $5K–$25K" />
+          </div>
+          <div className="mt-2">
+            <label className="text-[10px] uppercase tracking-wider text-ink-tertiary">Message / context</label>
+            <textarea
+              value={addForm.message}
+              onChange={(e) => setAddForm((f) => ({ ...f, message: e.target.value }))}
+              placeholder="What did they say? What do they want? Internal context welcome — feeds the AI welcome if you fire it."
+              rows={3}
+              maxLength={5000}
+              className="mt-1 w-full resize-y rounded-md border border-bg-border bg-bg-card p-2 text-xs placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+            />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <label className="flex cursor-pointer items-center gap-2 text-[11px] text-ink-secondary">
+              <input
+                type="checkbox"
+                checked={addForm.triggerAiReply}
+                onChange={(e) => setAddForm((f) => ({ ...f, triggerAiReply: e.target.checked }))}
+                className="h-3.5 w-3.5 accent-brand-500"
+              />
+              Fire AI welcome email (uncheck if you&apos;ll personally reach out)
+            </label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setAddOpen(false); resetAddForm(); }}
+                className="rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-xs hover:bg-bg-hover"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitAddLead}
+                disabled={adding}
+                className="flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 py-1.5 text-xs font-semibold shadow-glow disabled:opacity-60"
+              >
+                {adding ? (
+                  <><Loader2 className="h-3 w-3 animate-spin" /> Saving…</>
+                ) : (
+                  <><Plus className="h-3 w-3" /> Save lead</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* How AI outreach to leads works — explainer banner. Operators land
           here from a "Inbound Leads · LIVE" nav badge and need to know what
@@ -982,5 +1137,32 @@ export default function LeadsPage() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function AddField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  placeholder?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="mt-1 h-9 w-full rounded-md border border-bg-border bg-bg-card px-2 text-xs placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+      />
+    </label>
   );
 }
