@@ -31,6 +31,7 @@ import {
   ScrollText,
   ArrowLeftRight,
   Inbox,
+  Stethoscope,
 } from "lucide-react";
 
 export type NavItem = {
@@ -121,6 +122,7 @@ export const PRIMARY_NAV: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items);
 
 export const ADMIN_NAV: NavItem[] = [
   { label: "Super Admin", href: "/admin", icon: ShieldCheck },
+  { label: "System Health", href: "/admin/system-health", icon: Stethoscope, badge: "NEW" },
   { label: "Users & Roles", href: "/admin/users", icon: Users },
   { label: "Billing & Plans", href: "/admin/billing", icon: FileText },
   { label: "API Keys", href: "/admin/api-keys", icon: Plug },
