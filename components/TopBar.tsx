@@ -61,8 +61,32 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const [runs, setRuns] = useState<AgentRunPreview[]>([]);
   const [drafts, setDrafts] = useState<DraftPreview[]>([]);
   const [operator, setOperator] = useState<OperatorProfile>({ name: "", title: "", initials: "" });
+  // Reflect the operator's actual saved "Default mode" from /settings instead
+  // of hardcoding "FULLY AUTONOMOUS" -- that was a lie because the default
+  // setting is "Auto with approval queue". Reads from the same localStorage
+  // key /settings writes to, so the two views stay in sync.
+  const [automationMode, setAutomationMode] = useState<string>("Auto with approval queue");
   const bellRef = useRef<HTMLDivElement>(null);
   const mailRef = useRef<HTMLDivElement>(null);
+
+  // Sync automation mode from localStorage on mount + on storage events
+  // (so changing it on /settings updates the topbar without a refresh).
+  useEffect(() => {
+    function syncFromStorage() {
+      try {
+        const raw = localStorage.getItem("aicos:settings:v1");
+        if (!raw) return;
+        const s = JSON.parse(raw) as { defaultMode?: string };
+        if (s.defaultMode) setAutomationMode(s.defaultMode);
+      } catch {}
+    }
+    syncFromStorage();
+    function onStorage(e: StorageEvent) {
+      if (e.key === "aicos:settings:v1") syncFromStorage();
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   useEffect(() => {
     if (typeof navigator !== "undefined") {
@@ -178,15 +202,26 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
       </button>
 
       <Link
-        href="/pipeline"
+        href="/settings"
+        title="Change the default automation mode in Settings"
         className="hidden items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-1.5 hover:bg-bg-hover lg:flex"
       >
         <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">
           Automation Mode
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-accent-green shadow-[0_0_8px_#22c55e]" />
-          <span className="text-xs font-semibold text-accent-green">FULLY AUTONOMOUS</span>
+          <span
+            className={`h-1.5 w-1.5 rounded-full shadow-[0_0_8px_currentColor] ${
+              automationMode.toLowerCase().includes("auto") ? "bg-accent-green text-accent-green" : "bg-accent-amber text-accent-amber"
+            }`}
+          />
+          <span
+            className={`text-xs font-semibold uppercase ${
+              automationMode.toLowerCase().includes("auto") ? "text-accent-green" : "text-accent-amber"
+            }`}
+          >
+            {automationMode}
+          </span>
           <ChevronDown className="h-3.5 w-3.5 text-ink-tertiary" />
         </div>
       </Link>

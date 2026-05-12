@@ -6,7 +6,6 @@ import {
   Calendar,
   DollarSign,
   Download,
-  Filter,
   Flame,
   Inbox,
   MailX,
@@ -197,12 +196,12 @@ export default function ReportsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm">
+          {/* Display-only chip — the window is fixed at 7 months in /api/reports.
+              Was previously a <button> with no onClick, which pretended to be
+              a date picker. */}
+          <span className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm text-ink-secondary">
             <Calendar className="h-4 w-4" /> Last 7 months
-          </button>
-          <button className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm">
-            <Filter className="h-4 w-4" /> Filters
-          </button>
+          </span>
           <button
             onClick={handleExport}
             className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
