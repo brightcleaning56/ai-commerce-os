@@ -2,10 +2,18 @@
 import {
   Activity,
   BarChart3,
+  Bot,
   Calendar,
+  DollarSign,
   Download,
   Filter,
+  Flame,
+  Inbox,
+  MailX,
+  Snowflake,
   Sparkles,
+  Telescope,
+  ThermometerSun,
   TrendingDown,
   TrendingUp,
   Users,
@@ -18,12 +26,16 @@ import { useToast } from "@/components/Toast";
 import { downloadCSV } from "@/lib/csv";
 import {
   Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
   ComposedChart,
+  Legend,
   Line,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -37,6 +49,33 @@ type ReportsData = {
   funnel: { stage: string; value: number; fill: string }[];
   cohorts: { week: string; contacted: number; replied: number; meetings: number; closed: number }[];
   categoryRevenue: { name: string; value: number }[];
+  // ── New sections (added with the reports expansion)
+  leadFunnel: { stage: string; value: number; fill: string }[];
+  leadsByTier: { tier: string; count: number; fill: string }[];
+  leadsBySource: { source: string; count: number }[];
+  leadStats: {
+    total: number;
+    aiReplied: number;
+    followedUp: number;
+    promoted: number;
+    autoPromoted: number;
+    qualified: number;
+    won: number;
+  };
+  aiSpendByDay: { d: string; cost: number; calls: number }[];
+  aiSpendByAgent: { agent: string; cost: number; calls: number }[];
+  aiSpendStats: { total14dUsd: number; calls14d: number; dailyBudgetUsd: number | null };
+  discoveryByDay: { d: string; products: number; buyers: number; suppliers: number }[];
+  discoveryStats: { products: number; buyers: number; suppliers: number };
+  complianceSummary: {
+    suppressionTotal: number;
+    bySource: { source: string; count: number }[];
+    bounces: number;
+    complaints: number;
+    unsubscribes: number;
+    manualAdds: number;
+    imports: number;
+  };
   headline: { totalRevenue: number; totalDeals: number; lastMonthRevenue: number; prevMonthRevenue: number };
 };
 
@@ -69,12 +108,21 @@ export default function ReportsPage() {
       toast("Nothing to export yet — run a pipeline first.", "info");
       return;
     }
+    // Every section the page renders is also a row group in the CSV.
+    // `section` is the first column so the export is grep-able / pivot-able.
     const rows = [
       ...data.revenueByMonth.map((m) => ({ section: "revenue_by_month", month: m.m, revenue_usd: m.revenue, deals: m.deals })),
       ...data.agentROI.map((a) => ({ section: "agent_roi", agent: a.agent, spend_usd: a.spend, revenue_usd: a.revenue, roi_pct: a.roi })),
       ...data.funnel.map((f) => ({ section: "outreach_funnel", stage: f.stage, count: f.value })),
       ...data.cohorts.map((c) => ({ section: "weekly_cohorts", week: c.week, contacted: c.contacted, replied: c.replied, meetings: c.meetings, closed: c.closed })),
       ...data.categoryRevenue.map((c) => ({ section: "category_revenue", category: c.name, revenue_usd: c.value })),
+      ...data.leadFunnel.map((f) => ({ section: "lead_funnel", stage: f.stage, count: f.value })),
+      ...data.leadsByTier.map((t) => ({ section: "leads_by_tier", tier: t.tier, count: t.count })),
+      ...data.leadsBySource.map((s) => ({ section: "leads_by_source", source: s.source, count: s.count })),
+      ...data.aiSpendByDay.map((d) => ({ section: "ai_spend_by_day", day: d.d, cost_usd: d.cost, calls: d.calls })),
+      ...data.aiSpendByAgent.map((a) => ({ section: "ai_spend_by_agent", agent: a.agent, cost_usd: a.cost, calls: a.calls })),
+      ...data.discoveryByDay.map((d) => ({ section: "discovery_by_day", day: d.d, products: d.products, buyers: d.buyers, suppliers: d.suppliers })),
+      ...data.complianceSummary.bySource.map((s) => ({ section: "suppressions_by_source", source: s.source, count: s.count })),
     ];
     if (rows.length === 0) {
       toast("Nothing to export — your store is empty.", "info");
@@ -413,6 +461,282 @@ export default function ReportsPage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* ── Lead pipeline reports ─────────────────────────────────────── */}
+      <div className="flex items-center gap-2 pt-2 text-[11px] uppercase tracking-wider text-ink-tertiary">
+        <span className="h-px flex-1 bg-bg-border" />
+        <Inbox className="h-3 w-3" /> Lead pipeline
+        <span className="h-px flex-1 bg-bg-border" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {/* Lead Funnel */}
+        <div className="lg:col-span-2 rounded-xl border border-bg-border bg-bg-card">
+          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Inbox className="h-4 w-4 text-brand-300" /> Lead Funnel
+            </div>
+            <div className="text-[11px] text-ink-tertiary">
+              {data?.leadStats.total ?? 0} total ·{" "}
+              <Link href="/leads" className="text-brand-300 hover:text-brand-200">
+                open /leads
+              </Link>
+            </div>
+          </div>
+          <div className="h-64 px-3 py-3">
+            {(data?.leadFunnel?.reduce((s, f) => s + f.value, 0) ?? 0) === 0 ? (
+              <ChartEmpty line="Leads land here when someone submits /contact or /signup. Wire the form first." />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data!.leadFunnel} margin={{ top: 4, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="stage" tick={{ fill: c.axis, fontSize: 10 }} axisLine={false} tickLine={false} interval={0} />
+                  <YAxis tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8 }} labelStyle={{ color: c.tooltipLabel }} />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                    {data!.leadFunnel.map((s, i) => <Cell key={i} fill={s.fill} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-2 border-t border-bg-border px-5 py-3 text-[11px] sm:grid-cols-4">
+            <Pct label="AI-reply rate" num={data?.leadStats.aiReplied} den={data?.leadStats.total} />
+            <Pct label="Followed up" num={data?.leadStats.followedUp} den={data?.leadStats.aiReplied} />
+            <Pct label="Promotion rate" num={data?.leadStats.promoted} den={data?.leadStats.total} />
+            <Pct label="Win rate" num={data?.leadStats.won} den={data?.leadStats.promoted} />
+          </div>
+        </div>
+
+        {/* Lead tier donut */}
+        <div className="rounded-xl border border-bg-border bg-bg-card">
+          <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
+            <span className="flex items-center gap-2">
+              <Flame className="h-4 w-4 text-accent-red" /> Lead temperature
+            </span>
+          </div>
+          <div className="h-56 px-3 py-3">
+            {(data?.leadsByTier?.reduce((s, t) => s + t.count, 0) ?? 0) === 0 ? (
+              <ChartEmpty line="Lead scoring runs on every submission. Hot=70+, Warm=40+, Cold=below." />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={data!.leadsByTier}
+                    dataKey="count"
+                    nameKey="tier"
+                    innerRadius={45}
+                    outerRadius={75}
+                    paddingAngle={2}
+                  >
+                    {data!.leadsByTier.map((t, i) => <Cell key={i} fill={t.fill} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8 }} labelStyle={{ color: c.tooltipLabel }} />
+                  <Legend
+                    wrapperStyle={{ fontSize: 11 }}
+                    iconType="circle"
+                    formatter={(v: string) => {
+                      const t = data?.leadsByTier.find((x) => x.tier === v);
+                      return `${v} · ${t?.count ?? 0}`;
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+          <div className="grid grid-cols-3 border-t border-bg-border text-center text-[11px]">
+            {data?.leadsByTier.map((t) => {
+              const Icon = t.tier === "Hot" ? Flame : t.tier === "Warm" ? ThermometerSun : Snowflake;
+              return (
+                <div key={t.tier} className="border-r border-bg-border px-2 py-2 last:border-r-0">
+                  <Icon className="mx-auto h-3 w-3" style={{ color: t.fill }} />
+                  <div className="mt-0.5 font-semibold">{t.count}</div>
+                  <div className="text-[10px] text-ink-tertiary">{t.tier.toLowerCase()}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* ── AI spend reports ─────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 pt-2 text-[11px] uppercase tracking-wider text-ink-tertiary">
+        <span className="h-px flex-1 bg-bg-border" />
+        <Bot className="h-3 w-3" /> AI spend &amp; agent productivity
+        <span className="h-px flex-1 bg-bg-border" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2 rounded-xl border border-bg-border bg-bg-card">
+          <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <DollarSign className="h-4 w-4 text-accent-green" /> Anthropic spend · last 14 days
+            </div>
+            <div className="text-[11px] text-ink-tertiary">
+              ${(data?.aiSpendStats.total14dUsd ?? 0).toFixed(4)} · {data?.aiSpendStats.calls14d ?? 0} calls
+              {data?.aiSpendStats.dailyBudgetUsd != null && <> · budget ${data.aiSpendStats.dailyBudgetUsd}/day</>}
+            </div>
+          </div>
+          <div className="h-56 px-3 py-3">
+            {(data?.aiSpendByDay?.length ?? 0) === 0 || data!.aiSpendByDay.every((d) => d.cost === 0) ? (
+              <ChartEmpty line="Anthropic spend posts here as agents run. Set ANTHROPIC_API_KEY to start the meter." />
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={data!.aiSpendByDay} margin={{ top: 4, right: 20, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="aiSpend" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#22c55e" stopOpacity={0.5} />
+                      <stop offset="100%" stopColor="#22c55e" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="d" tick={{ fill: c.axis, fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
+                  <Tooltip
+                    contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8 }}
+                    labelStyle={{ color: c.tooltipLabel }}
+                    formatter={(v: number, n: string) => (n === "cost" ? `$${v.toFixed(4)}` : v)}
+                  />
+                  <Area type="monotone" dataKey="cost" stroke="#22c55e" strokeWidth={2} fill="url(#aiSpend)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-bg-border bg-bg-card">
+          <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
+            <span className="flex items-center gap-2">
+              <Bot className="h-4 w-4 text-brand-300" /> Spend by agent
+            </span>
+          </div>
+          <div className="space-y-2 px-5 py-3">
+            {(data?.aiSpendByAgent?.length ?? 0) === 0 ? (
+              <div className="py-6 text-center text-[11px] text-ink-tertiary">
+                No agent calls yet. Run a pipeline to see costs.
+              </div>
+            ) : (
+              data!.aiSpendByAgent.map((a) => {
+                const max = Math.max(1, ...data!.aiSpendByAgent.map((x) => x.cost));
+                return (
+                  <div key={a.agent} className="text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-ink-secondary">{a.agent}</span>
+                      <span className="font-mono font-semibold">${a.cost.toFixed(4)}</span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-bg-hover">
+                      <div className="h-full bg-gradient-brand" style={{ width: `${(a.cost / max) * 100}%` }} />
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-ink-tertiary">{a.calls.toLocaleString()} calls</div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Discovery output ─────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 pt-2 text-[11px] uppercase tracking-wider text-ink-tertiary">
+        <span className="h-px flex-1 bg-bg-border" />
+        <Telescope className="h-3 w-3" /> Top-of-funnel discovery
+        <span className="h-px flex-1 bg-bg-border" />
+      </div>
+
+      <div className="rounded-xl border border-bg-border bg-bg-card">
+        <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Telescope className="h-4 w-4 text-brand-300" /> Discovery output · last 14 days
+          </div>
+          <div className="text-[11px] text-ink-tertiary">
+            {data?.discoveryStats.products ?? 0} products · {data?.discoveryStats.buyers ?? 0} buyers ·{" "}
+            {data?.discoveryStats.suppliers ?? 0} suppliers
+          </div>
+        </div>
+        <div className="h-56 px-3 py-3">
+          {(data?.discoveryByDay?.reduce(
+            (s, d) => s + d.products + d.buyers + d.suppliers,
+            0,
+          ) ?? 0) === 0 ? (
+            <ChartEmpty line="Trend Hunter, Buyer Discovery, and Supplier Finder posts to this chart as agents run." />
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data!.discoveryByDay} margin={{ top: 4, right: 20, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="d" tick={{ fill: c.axis, fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: c.axis, fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8 }} labelStyle={{ color: c.tooltipLabel }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" />
+                <Bar dataKey="products" stackId="d" fill="#a87dff" />
+                <Bar dataKey="buyers" stackId="d" fill="#22c55e" />
+                <Bar dataKey="suppliers" stackId="d" fill="#3b82f6" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+
+      {/* ── Compliance ────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 pt-2 text-[11px] uppercase tracking-wider text-ink-tertiary">
+        <span className="h-px flex-1 bg-bg-border" />
+        <MailX className="h-3 w-3" /> Compliance &amp; deliverability
+        <span className="h-px flex-1 bg-bg-border" />
+      </div>
+
+      <div className="rounded-xl border border-bg-border bg-bg-card">
+        <div className="flex items-center justify-between border-b border-bg-border px-5 py-3.5">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <MailX className="h-4 w-4 text-accent-amber" /> Suppression list breakdown
+          </div>
+          <Link href="/admin/suppressions" className="text-[11px] text-brand-300 hover:text-brand-200">
+            Open suppressions →
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 gap-3 px-5 py-4 sm:grid-cols-5">
+          <ComplianceTile label="Total suppressed" value={data?.complianceSummary.suppressionTotal ?? 0} tone="default" />
+          <ComplianceTile label="Bounces" value={data?.complianceSummary.bounces ?? 0} tone="red" hint="hard bounces" />
+          <ComplianceTile label="Complaints" value={data?.complianceSummary.complaints ?? 0} tone="red" hint="spam reports" />
+          <ComplianceTile label="Unsubscribes" value={data?.complianceSummary.unsubscribes ?? 0} tone="amber" hint="opt-outs" />
+          <ComplianceTile label="Manual / import" value={(data?.complianceSummary.manualAdds ?? 0) + (data?.complianceSummary.imports ?? 0)} tone="default" hint="operator-added" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ComplianceTile({
+  label,
+  value,
+  tone,
+  hint,
+}: {
+  label: string;
+  value: number;
+  tone: "default" | "red" | "amber";
+  hint?: string;
+}) {
+  const valueClass =
+    tone === "red" ? "text-accent-red" : tone === "amber" ? "text-accent-amber" : "";
+  return (
+    <div className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
+      <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
+      <div className={`mt-1 text-2xl font-bold ${valueClass}`}>{value.toLocaleString()}</div>
+      {hint && <div className="text-[10px] text-ink-tertiary">{hint}</div>}
+    </div>
+  );
+}
+
+function Pct({ label, num, den }: { label: string; num: number | undefined; den: number | undefined }) {
+  const pct = den && den > 0 ? ((num ?? 0) / den) * 100 : null;
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
+      <div className="mt-0.5 font-mono text-sm font-semibold">
+        {pct == null ? "—" : `${pct.toFixed(0)}%`}
+      </div>
+      <div className="text-[10px] text-ink-tertiary">
+        {num ?? 0} of {den ?? 0}
       </div>
     </div>
   );

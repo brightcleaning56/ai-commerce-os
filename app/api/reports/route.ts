@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { store } from "@/lib/store";
 import { getRevenueStats } from "@/lib/transactions";
+import { scoreLead } from "@/lib/leadScore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -136,12 +137,141 @@ export async function GET() {
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value);
 
+  // ── Lead funnel — submission to won, every meaningful gate in between ─
+  // Distinct from the outreach funnel (which is buyer-side). This one
+  // measures the inbound-lead pipeline so the operator can see attrition
+  // and AI-reply effectiveness in one chart.
+  const leads = await store.getLeads();
+  const leadAiReplied = leads.filter((l) => l.aiReply?.status === "sent").length;
+  const leadFollowedUp = leads.filter((l) => (l.aiFollowups?.length ?? 0) > 0).length;
+  const leadPromoted = leads.filter((l) => !!l.promotedToBuyerId).length;
+  const leadAutoPromoted = leads.filter((l) => l.promotedBy === "auto").length;
+  const leadQualified = leads.filter((l) => l.status === "qualified" || l.status === "won").length;
+  const leadWon = leads.filter((l) => l.status === "won").length;
+  const leadFunnel = [
+    { stage: "Submitted", value: leads.length, fill: "#7c3aed" },
+    { stage: "AI replied", value: leadAiReplied, fill: "#a87dff" },
+    { stage: "Auto-followed up", value: leadFollowedUp, fill: "#3b82f6" },
+    { stage: "Promoted to buyer", value: leadPromoted, fill: "#06b6d4" },
+    { stage: "Qualified", value: leadQualified, fill: "#22c55e" },
+    { stage: "Won", value: leadWon, fill: "#10b981" },
+  ];
+
+  // ── Lead tier distribution — hot/warm/cold counts driven by leadScore ─
+  let hot = 0;
+  let warm = 0;
+  let cold = 0;
+  for (const l of leads) {
+    const s = scoreLead(l);
+    if (s.tier === "hot") hot++;
+    else if (s.tier === "warm") warm++;
+    else cold++;
+  }
+  const leadsByTier = [
+    { tier: "Hot", count: hot, fill: "#ef4444" },
+    { tier: "Warm", count: warm, fill: "#f59e0b" },
+    { tier: "Cold", count: cold, fill: "#64748b" },
+  ];
+
+  // ── Lead source distribution — contact-form vs signup-form ────────────
+  const leadsBySource = [
+    { source: "contact-form", count: leads.filter((l) => l.source === "contact-form").length },
+    { source: "signup-form", count: leads.filter((l) => l.source === "signup-form").length },
+  ].filter((s) => s.count > 0);
+
+  // ── AI spend — daily totals (last 14 days) + lifetime by agent ──────
+  const spendLedger = await store.getSpendLedger();
+  // Ledger is stored newest-first and capped at 90 days; take 14 most recent.
+  const last14Days = spendLedger.slice(0, 14).reverse();
+  const aiSpendByDay = last14Days.map((e) => ({
+    d: e.date.slice(5), // MM-DD for compact x-axis labels
+    cost: +e.totalCostUsd.toFixed(4),
+    calls: e.callCount,
+  }));
+  // Aggregate byAgent across all retained days
+  const agentSpendMap = new Map<string, { cost: number; calls: number }>();
+  for (const day of spendLedger) {
+    for (const [agent, v] of Object.entries(day.byAgent)) {
+      const cur = agentSpendMap.get(agent) ?? { cost: 0, calls: 0 };
+      cur.cost += v.cost;
+      cur.calls += v.calls;
+      agentSpendMap.set(agent, cur);
+    }
+  }
+  const aiSpendByAgent = Array.from(agentSpendMap.entries())
+    .map(([agent, v]) => ({
+      agent: AGENT_LABEL[agent] ?? agent,
+      cost: +v.cost.toFixed(4),
+      calls: v.calls,
+    }))
+    .sort((a, b) => b.cost - a.cost);
+  const aiSpendTotal14d = aiSpendByDay.reduce((s, d) => s + d.cost, 0);
+  const aiCallsTotal14d = aiSpendByDay.reduce((s, d) => s + d.calls, 0);
+
+  // ── Discovery output — how many products / buyers / suppliers the
+  // pipeline discovered, by day (last 14 days). Drives a chart showing
+  // whether the system is producing new top-of-funnel.
+  const discoveredBuyers = await store.getDiscoveredBuyers();
+  const discoveredSuppliers = await store.getDiscoveredSuppliers();
+  function bucketByDay<T extends { createdAt?: string; discoveredAt?: string }>(items: T[]): Map<string, number> {
+    const m = new Map<string, number>();
+    for (const it of items) {
+      const ts = it.discoveredAt ?? it.createdAt;
+      if (!ts) continue;
+      const d = ts.slice(0, 10);
+      m.set(d, (m.get(d) ?? 0) + 1);
+    }
+    return m;
+  }
+  const productCounts = bucketByDay(products);
+  const buyerCounts = bucketByDay(discoveredBuyers);
+  const supplierCounts = bucketByDay(discoveredSuppliers);
+  const today = new Date();
+  const discoveryByDay = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - (13 - i));
+    const key = d.toISOString().slice(0, 10);
+    return {
+      d: key.slice(5),
+      products: productCounts.get(key) ?? 0,
+      buyers: buyerCounts.get(key) ?? 0,
+      suppliers: supplierCounts.get(key) ?? 0,
+    };
+  });
+  const discoveryTotal14d = discoveryByDay.reduce(
+    (acc, d) => ({
+      products: acc.products + d.products,
+      buyers: acc.buyers + d.buyers,
+      suppliers: acc.suppliers + d.suppliers,
+    }),
+    { products: 0, buyers: 0, suppliers: 0 },
+  );
+
+  // ── Compliance summary — suppression list breakdown for CAN-SPAM
+  // visibility. Bounces + complaints come from Postmark webhook,
+  // unsubscribes from /api/unsubscribe, manual from operator.
+  const suppressions = await store.getEmailSuppressions();
+  const suppressionsBySource = new Map<string, number>();
+  for (const s of suppressions) {
+    suppressionsBySource.set(s.source, (suppressionsBySource.get(s.source) ?? 0) + 1);
+  }
+  const complianceSummary = {
+    suppressionTotal: suppressions.length,
+    bySource: Array.from(suppressionsBySource.entries()).map(([source, count]) => ({ source, count })),
+    bounces: suppressionsBySource.get("hard_bounce") ?? 0,
+    complaints: suppressionsBySource.get("complaint") ?? 0,
+    unsubscribes: suppressionsBySource.get("unsubscribe") ?? 0,
+    manualAdds: suppressionsBySource.get("operator") ?? 0,
+    imports: suppressionsBySource.get("import") ?? 0,
+  };
+
   const hasAnyData =
     revenueByMonth.length > 0 ||
     agentROI.length > 0 ||
     contacted > 0 ||
     closedWon > 0 ||
-    transactions.length > 0;
+    transactions.length > 0 ||
+    leads.length > 0;
 
   return NextResponse.json({
     hasAnyData,
@@ -150,6 +280,33 @@ export async function GET() {
     funnel,
     cohorts,
     categoryRevenue,
+    // New sections — every report now shipped lives here so the page
+    // can render them and the CSV export can include them.
+    leadFunnel,
+    leadsByTier,
+    leadsBySource,
+    leadStats: {
+      total: leads.length,
+      aiReplied: leadAiReplied,
+      followedUp: leadFollowedUp,
+      promoted: leadPromoted,
+      autoPromoted: leadAutoPromoted,
+      qualified: leadQualified,
+      won: leadWon,
+    },
+    aiSpendByDay,
+    aiSpendByAgent,
+    aiSpendStats: {
+      total14dUsd: +aiSpendTotal14d.toFixed(4),
+      calls14d: aiCallsTotal14d,
+      dailyBudgetUsd:
+        process.env.ANTHROPIC_DAILY_BUDGET_USD === "0"
+          ? null
+          : Number(process.env.ANTHROPIC_DAILY_BUDGET_USD ?? 50),
+    },
+    discoveryByDay,
+    discoveryStats: discoveryTotal14d,
+    complianceSummary,
     headline: {
       totalRevenue: revenueByMonth.reduce((s, m) => s + m.revenue, 0),
       totalDeals: closedWon,
