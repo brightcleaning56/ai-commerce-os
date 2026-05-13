@@ -67,9 +67,15 @@ export async function POST(
   }
 
   const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://avyncommerce.com";
+  // Magic-link variant — pre-fills the token so the supplier just
+  // clicks once instead of pasting. Token still in the URL (plain
+  // text), so prefer the manual paste flow when the link will land
+  // somewhere it might get logged (forwarded email, etc.).
+  const magicLink = `${origin}/signin?t=${encodeURIComponent(token)}&next=${encodeURIComponent("/portal")}`;
   return NextResponse.json({
     ok: true,
     token,
+    magicLink,
     signinUrl: `${origin}/signin`,
     portalUrl: `${origin}/portal`,
     email,

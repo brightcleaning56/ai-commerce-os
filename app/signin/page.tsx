@@ -38,12 +38,14 @@ function SignInForm() {
   const router = useRouter();
   const params = useSearchParams();
   const next = params.get("next") || "/";
-  const [token, setToken] = useState("");
+  const queryToken = params.get("t") ?? "";
+  const [token, setToken] = useState(queryToken);
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [whileAway, setWhileAway] = useState<StatItem[]>(STATIC_WHILE_AWAY);
   const [activity, setActivity] = useState<ActivityItem[]>(STATIC_ACTIVITY);
+  const [autoSubmitted, setAutoSubmitted] = useState(false);
 
   useEffect(() => {
     fetch("/api/signin-summary")
@@ -55,15 +57,33 @@ function SignInForm() {
       .catch(() => {/* keep static fallback */});
   }, []);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  // Magic-link sign-in: when ?t=<token> is present, auto-submit so the
+  // user doesn't have to copy-paste a 200-char HMAC token. Strip the
+  // token from the URL after submit so it doesn't sit in browser
+  // history. We only fire ONCE per mount (autoSubmitted guard).
+  useEffect(() => {
+    if (autoSubmitted) return;
+    if (!queryToken) return;
+    setAutoSubmitted(true);
+    void doSignIn(queryToken);
+    // Drop the ?t= from the URL — pushState avoids re-rendering the
+    // route. Best-effort: ignore errors in non-browser environments.
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("t");
+      window.history.replaceState({}, "", url.toString());
+    } catch { /* noop */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryToken]);
+
+  async function doSignIn(submittedToken: string) {
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/auth/signin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token: submittedToken }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -75,6 +95,11 @@ function SignInForm() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    await doSignIn(token);
   }
 
   return (

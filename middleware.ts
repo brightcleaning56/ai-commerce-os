@@ -45,11 +45,13 @@ const PUBLIC_PATHS = [
   "/contact",
   "/privacy",
   "/terms",
+  "/portal/signup",         // public supplier self-registration page
   "/api/operator",          // public profile (name+email — same info we sign emails with)
   "/api/auth/signin",       // sign-in form submits here
   "/api/signin-summary",    // public aggregate stats for the sign-in right panel
   "/api/leads",             // public POST from /contact form (handler gates GET via requireAdmin)
   "/api/unsubscribe",       // CAN-SPAM: public POST, token-verified server-side
+  "/api/portal/signup",     // public supplier signup POST (rate-limited + honeypot)
 ];
 const PUBLIC_PREFIXES = [
   "/share/",

@@ -199,6 +199,7 @@ export default function AdminSuppliersPage() {
   const [openCreate, setOpenCreate] = useState(false);
   const [portalToken, setPortalToken] = useState<{
     token: string;
+    magicLink: string;
     portalUrl: string;
     email: string;
     supplierName: string;
@@ -213,6 +214,7 @@ export default function AdminSuppliersPage() {
       if (!r.ok) throw new Error(d.error ?? `Mint failed (${r.status})`);
       setPortalToken({
         token: d.token,
+        magicLink: d.magicLink ?? `${d.portalUrl}`,
         portalUrl: d.portalUrl,
         email: d.email,
         supplierName: s.legalName,
@@ -526,11 +528,12 @@ export default function AdminSuppliersPage() {
       {portalToken && (
         <PortalTokenModal
           token={portalToken.token}
+          magicLink={portalToken.magicLink}
           email={portalToken.email}
           portalUrl={portalToken.portalUrl}
           supplierName={portalToken.supplierName}
           onClose={() => setPortalToken(null)}
-          onCopied={() => toast(`Token copied — send it to ${portalToken.email}`, "success")}
+          onCopied={(what) => toast(`${what} copied — send it to ${portalToken.email}`, "success")}
         />
       )}
 
@@ -986,6 +989,7 @@ function ScoreBucket({
 
 function PortalTokenModal({
   token,
+  magicLink,
   email,
   portalUrl,
   supplierName,
@@ -993,23 +997,34 @@ function PortalTokenModal({
   onCopied,
 }: {
   token: string;
+  magicLink: string;
   email: string;
   portalUrl: string;
   supplierName: string;
   onClose: () => void;
-  onCopied: () => void;
+  onCopied: (what: string) => void;
 }) {
   const [show, setShow] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<"token" | "magic" | null>(null);
 
-  async function copy() {
+  async function copyToken() {
     try {
       await navigator.clipboard.writeText(token);
-      setCopied(true);
-      onCopied();
-      setTimeout(() => setCopied(false), 1800);
+      setCopiedKey("token");
+      onCopied("Token");
+      setTimeout(() => setCopiedKey(null), 1800);
     } catch {
       setShow(true);
+    }
+  }
+  async function copyMagicLink() {
+    try {
+      await navigator.clipboard.writeText(magicLink);
+      setCopiedKey("magic");
+      onCopied("Sign-in link");
+      setTimeout(() => setCopiedKey(null), 1800);
+    } catch {
+      // Fallback handled inline below
     }
   }
 
@@ -1037,10 +1052,35 @@ function PortalTokenModal({
           </div>
         </div>
 
-        <div className="mt-4 rounded-lg border border-bg-border bg-bg-app p-3">
+        {/* Magic link — primary path. One click signs them in. */}
+        <div className="mt-4 rounded-lg border border-brand-500/30 bg-brand-500/5 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-brand-200">
+              One-click sign-in link (recommended)
+            </div>
+            <button
+              type="button"
+              onClick={copyMagicLink}
+              className="inline-flex items-center gap-1 rounded-md border border-brand-500/40 bg-brand-500/15 px-2 py-0.5 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/25"
+            >
+              <Copy className="h-3 w-3" />
+              {copiedKey === "magic" ? "Copied" : "Copy link"}
+            </button>
+          </div>
+          <div className="mt-2 break-all rounded-md border border-bg-border bg-bg-app px-3 py-2 font-mono text-[10px] text-ink-primary">
+            {magicLink}
+          </div>
+          <div className="mt-1 text-[10px] text-ink-tertiary">
+            Sending in an email? Use this — they click once and land in /portal. The token is in
+            the URL though, so don&apos;t paste this in a public channel.
+          </div>
+        </div>
+
+        {/* Raw token — fallback for paste-into-portal flow */}
+        <div className="mt-3 rounded-lg border border-bg-border bg-bg-app p-3">
           <div className="flex items-center justify-between gap-2">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
-              Sign-in token (180-day expiry)
+              Raw token (for paste at /signin)
             </div>
             <button
               type="button"
@@ -1062,11 +1102,11 @@ function PortalTokenModal({
         <div className="mt-3 flex items-center gap-2">
           <button
             type="button"
-            onClick={copy}
+            onClick={copyToken}
             className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-bg-border bg-bg-hover/40 px-3 py-2 text-[12px] font-medium text-ink-primary hover:bg-bg-hover"
           >
             <Copy className="h-3.5 w-3.5" />
-            {copied ? "Copied" : "Copy token"}
+            {copiedKey === "token" ? "Copied" : "Copy raw token"}
           </button>
           <a
             href={portalUrl}
