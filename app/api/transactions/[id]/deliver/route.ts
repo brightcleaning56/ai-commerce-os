@@ -1,7 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { store } from "@/lib/store";
 import { transitionTransaction } from "@/lib/transactions";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     confirmedBy = "buyer_confirmed";
   } else {
     // Operator path: require bearer/cookie auth
-    const auth = await requireAdmin(req);
+    const auth = await requireCapability(req, "transactions:write");
     if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
     confirmedBy =
       body.confirmedBy === "carrier"

@@ -2,7 +2,7 @@
 import crypto from "node:crypto";
 import { store, type Lead } from "@/lib/store";
 import { sendEmail } from "@/lib/email";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { autoPromoteIfHot } from "@/lib/leadAutoPromote";
 import { runLeadFirstReply } from "@/lib/leadFirstReply";
 
@@ -240,7 +240,7 @@ export async function POST(req: NextRequest) {
  * GET â€” operator-only list of leads. Used by /leads admin page.
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "leads:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const leads = await store.getLeads();
   return NextResponse.json({ leads });

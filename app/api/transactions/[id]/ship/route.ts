@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { transitionTransaction } from "@/lib/transactions";
 import type { Carrier } from "@/lib/shipping";
 
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  * Transitions: escrow_held â†’ shipped.
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "transactions:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: { carrier?: Carrier; trackingNumber?: string; carrierName?: string } = {};

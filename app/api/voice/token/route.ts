@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getOperator } from "@/lib/operator";
 import { mintAccessToken } from "@/lib/twilioVoice";
 
@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * with a clear message so the client can fall back to tel: links.
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "voice:write");
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }

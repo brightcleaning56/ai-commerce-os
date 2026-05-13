@@ -1,6 +1,6 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { autoPromoteIfHot } from "@/lib/leadAutoPromote";
 import { runLeadFirstReply } from "@/lib/leadFirstReply";
 import { store, type Lead } from "@/lib/store";
@@ -44,7 +44,7 @@ function trimArray(v: unknown, max = 50, perItem = 100): string[] {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "leads:write");
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }

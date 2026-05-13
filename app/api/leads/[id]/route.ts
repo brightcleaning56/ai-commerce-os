@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { store, type LeadStatus } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 const VALID_STATUSES: LeadStatus[] = ["new", "contacted", "qualified", "won", "lost"];
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "leads:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const { id } = await params;
   const lead = await store.getLead(id);
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "leads:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const { id } = await params;
   const body = await req.json().catch(() => ({}));

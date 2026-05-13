@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { observeTransactionEdge } from "@/lib/businessFromTransaction";
 import { store } from "@/lib/store";
 
@@ -25,7 +25,7 @@ export const maxDuration = 60;
 const MAX_PER_RUN = 500;
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "system:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const startedAt = new Date().toISOString();

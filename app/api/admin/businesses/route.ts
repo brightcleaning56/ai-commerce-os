@@ -1,6 +1,6 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import {
   store,
   type BusinessRecord,
@@ -39,7 +39,7 @@ const VALID_STATUSES: BusinessStatus[] = [
  * Returns: { businesses, total, filteredTotal, counts: { byStatus, byState } }
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "leads:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const sp = req.nextUrl.searchParams;
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
  * Body: BusinessRecord-shaped fields except id/createdAt/updatedAt.
  */
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "leads:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: Record<string, unknown> = {};

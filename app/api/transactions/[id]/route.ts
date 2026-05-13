@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { store } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 
   // Otherwise require admin
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "transactions:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   return NextResponse.json({ transaction: txn, viewer: "operator", autoReleaseHours });
 }

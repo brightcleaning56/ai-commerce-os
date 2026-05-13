@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { createAccountLink, createConnectedAccount, retrieveConnectedAccount } from "@/lib/payments";
 import { store } from "@/lib/store";
 
@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
  *   { url, accountId, mode, alreadyConnected, status: ConnectedAccount }
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "transactions:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const txn = await store.getTransaction(params.id);
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
  * Used by the operator UI to display chargesEnabled / payoutsEnabled / due-fields.
  */
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "transactions:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const txn = await store.getTransaction(params.id);

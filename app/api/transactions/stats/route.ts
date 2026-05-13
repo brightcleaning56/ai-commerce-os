@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getRevenueStats } from "@/lib/transactions";
 import { getPaymentInfo } from "@/lib/payments";
 import { getContractMode } from "@/lib/contracts";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  * Returns aggregate revenue/escrow stats plus the configured payment/contract/shipping modes.
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "transactions:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const stats = await getRevenueStats();

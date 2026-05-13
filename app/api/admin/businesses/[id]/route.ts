@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { store, type BusinessRecord, type BusinessStatus } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -33,7 +33,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "leads:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const { id } = await params;
   const business = await store.getBusiness(id);
@@ -49,7 +49,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "leads:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id } = await params;
@@ -100,7 +100,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "leads:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const { id } = await params;
   const ok = await store.deleteBusiness(id);

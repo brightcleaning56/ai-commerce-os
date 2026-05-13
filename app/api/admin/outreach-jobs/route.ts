@@ -1,6 +1,6 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getOperator } from "@/lib/operator";
 import { store, type OutreachJob } from "@/lib/store";
 
@@ -15,7 +15,7 @@ const DEFAULT_BATCH_SIZE = 25;
  * (active jobs always pinned to top via store sort order).
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "outreach:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const jobs = await store.getOutreachJobs();
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
  * Returns the created job. Cron picks it up within ~5 min.
  */
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "outreach:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: {

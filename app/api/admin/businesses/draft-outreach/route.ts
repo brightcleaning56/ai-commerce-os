@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { runBusinessOutreach } from "@/lib/agents/businessOutreach";
 import { checkKillSwitch } from "@/lib/killSwitch";
 import { isBusinessSuppressed, store } from "@/lib/store";
@@ -36,7 +36,7 @@ type PerBusinessOutcome =
  * each request well under the 60s function timeout.
  */
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "outreach:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const ks = await checkKillSwitch();

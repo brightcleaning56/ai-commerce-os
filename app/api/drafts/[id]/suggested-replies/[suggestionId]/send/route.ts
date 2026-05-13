@@ -1,6 +1,6 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { store, type ThreadMessage } from "@/lib/store";
 
@@ -25,7 +25,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; suggestionId: string }> },
 ) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "outreach:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id, suggestionId } = await params;
@@ -143,7 +143,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; suggestionId: string }> },
 ) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "outreach:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id, suggestionId } = await params;
