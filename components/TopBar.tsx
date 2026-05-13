@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useCommandPalette } from "./CommandPalette";
 import ThemeToggle from "./ThemeToggle";
+import VoiceStatusBadge from "./voice/VoiceStatusBadge";
 
 type OperatorProfile = { name: string; title: string; initials: string };
 
@@ -225,6 +226,11 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           <ChevronDown className="h-3.5 w-3.5 text-ink-tertiary" />
         </div>
       </Link>
+
+      {/* Voice status pill — green when Twilio Device is registered, red
+          when mic is denied / not configured, blue while a call is in
+          flight. Click for the specific reason + a one-click fix. */}
+      <VoiceStatusBadge />
 
       <div ref={bellRef} className="relative">
         <button

@@ -578,6 +578,9 @@ function TaskDetail({
 }) {
   // Destructure for cleaner reads inside placeCall/cancelCall/saveAttempt
   const { deviceRef, currentCallRef, currentCallSidRef, twilioReady, twilioInFlight, setTwilioInFlight } = voice;
+  // Direct context read for diagnostic-surface fields. Avoids piping the
+  // failReason / requestMicPermission through the voice prop API.
+  const { failReason: voiceFailReason, requestMicPermission } = useVoice();
   const { toast } = useToast();
   const [notesDraft, setNotesDraft] = useState(task.notes ?? "");
   const [notesDirty, setNotesDirty] = useState(false);
@@ -1021,6 +1024,75 @@ function TaskDetail({
                 ? "Calls via Twilio Voice in your browser — never leaves the page. Outcome + notes get logged after."
                 : "Opens your device dialer. Outcome + notes get logged after the call. Configure VOICE_PROVIDER=twilio in env to dial in-browser."}
             </div>
+
+            {/* Specific failure surface — when voice isn't ready, tell the
+                operator EXACTLY why and offer a one-click fix where possible.
+                Prevents silent failures like denied mic that look like
+                "calls just don't work". */}
+            {!twilioReady && voiceFailReason && (
+              <div className="mt-3 rounded-md border border-accent-amber/30 bg-accent-amber/5 p-3 text-[11px]">
+                {voiceFailReason === "not-configured" && (
+                  <>
+                    <div className="font-semibold text-accent-amber">In-browser calling isn&apos;t configured</div>
+                    <p className="mt-0.5 text-ink-secondary">
+                      Set <code className="rounded bg-bg-hover px-1">VOICE_PROVIDER=twilio</code> + Twilio API keys + TwiML App SID in env.
+                    </p>
+                    <Link
+                      href="/admin/system-health"
+                      className="mt-2 inline-block rounded-md bg-gradient-brand px-2.5 py-1 text-[10px] font-semibold shadow-glow"
+                    >
+                      Open System Health →
+                    </Link>
+                  </>
+                )}
+                {voiceFailReason === "mic-denied" && (
+                  <>
+                    <div className="font-semibold text-accent-red">Microphone permission denied</div>
+                    <p className="mt-0.5 text-ink-secondary">
+                      Calls need mic access. Click below to prompt the browser; if no prompt, click the lock icon in your address bar.
+                    </p>
+                    <button
+                      onClick={requestMicPermission}
+                      className="mt-2 inline-block rounded-md bg-gradient-brand px-2.5 py-1 text-[10px] font-semibold shadow-glow"
+                    >
+                      Request mic permission
+                    </button>
+                  </>
+                )}
+                {voiceFailReason === "mic-error" && (
+                  <>
+                    <div className="font-semibold text-accent-red">No microphone detected</div>
+                    <p className="mt-0.5 text-ink-secondary">
+                      Plug in a mic / check your audio device.
+                    </p>
+                  </>
+                )}
+                {voiceFailReason === "token-fetch-failed" && (
+                  <>
+                    <div className="font-semibold text-accent-amber">Couldn&apos;t fetch voice token</div>
+                    <p className="mt-0.5 text-ink-secondary">
+                      Sign out + back in and reload. If it persists, check the browser console.
+                    </p>
+                  </>
+                )}
+                {voiceFailReason === "sdk-load-failed" && (
+                  <>
+                    <div className="font-semibold text-accent-amber">Voice SDK didn&apos;t load</div>
+                    <p className="mt-0.5 text-ink-secondary">
+                      Build issue. Make sure <code className="rounded bg-bg-hover px-1">@twilio/voice-sdk</code> is installed.
+                    </p>
+                  </>
+                )}
+                {voiceFailReason === "register-failed" && (
+                  <>
+                    <div className="font-semibold text-accent-amber">Twilio Device didn&apos;t register</div>
+                    <p className="mt-0.5 text-ink-secondary">
+                      Verify API key + TwiML App SID match your account. Check the browser console for the specific error.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="mt-3 space-y-3">

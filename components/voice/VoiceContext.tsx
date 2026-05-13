@@ -22,6 +22,21 @@ import { useToast } from "@/components/Toast";
 
 type CallInFlight = "idle" | "connecting" | "ringing" | "open";
 
+/**
+ * Why voice isn't ready. Used by the UI to surface a specific fix
+ * instead of "voice not ready" black-box silence. `null` means we
+ * either ARE ready, or we're still initializing.
+ */
+export type VoiceFailReason =
+  | "not-configured"      // /api/voice/token returned 503 (Twilio env missing)
+  | "token-fetch-failed"  // network error or non-503 failure on /api/voice/token
+  | "sdk-load-failed"     // dynamic import of @twilio/voice-sdk threw
+  | "mic-denied"          // browser permission denied
+  | "mic-error"           // mic device error (no device, hardware fault)
+  | "register-failed";    // Twilio Device.register() threw
+
+export type MicPermission = "unknown" | "granted" | "denied" | "prompt";
+
 export type VoiceContextValue = {
   // Refs (stable across renders)
   deviceRef: React.MutableRefObject<unknown>;
@@ -31,6 +46,15 @@ export type VoiceContextValue = {
   twilioReady: boolean;
   twilioInFlight: CallInFlight;
   setTwilioInFlight: React.Dispatch<React.SetStateAction<CallInFlight>>;
+  // Diagnostic state — drives the "Voice not ready: <reason>" UI
+  failReason: VoiceFailReason | null;
+  micPermission: MicPermission;
+  /**
+   * Explicitly prompt the browser for mic access. Returns true if granted.
+   * Useful from a "Request mic" button so the operator can recover from
+   * a denied permission without digging into browser settings.
+   */
+  requestMicPermission: () => Promise<boolean>;
   // Inbound state (consumed by IncomingCallWidget)
   incomingFrom: string | null;
   /**
@@ -62,6 +86,65 @@ export default function VoiceProvider({ children }: { children: React.ReactNode 
   const [twilioReady, setTwilioReady] = useState(false);
   const [twilioInFlight, setTwilioInFlight] = useState<CallInFlight>("idle");
   const [incomingFrom, setIncomingFrom] = useState<string | null>(null);
+  const [failReason, setFailReason] = useState<VoiceFailReason | null>(null);
+  const [micPermission, setMicPermission] = useState<MicPermission>("unknown");
+
+  // Probe mic permission state on mount. Permissions API is widely
+  // supported but Safari historically didn't expose 'microphone' --
+  // catch + treat as unknown so we never crash the provider.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.permissions) return;
+    let cancelled = false;
+    navigator.permissions
+      .query({ name: "microphone" as PermissionName })
+      .then((status) => {
+        if (cancelled) return;
+        setMicPermission(status.state as MicPermission);
+        status.onchange = () => {
+          setMicPermission(status.state as MicPermission);
+        };
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * Explicit mic permission request. Operator hits this when they hit
+   * a "denied" state and want to grant. Triggers the browser's native
+   * permission prompt (or a no-op if already granted).
+   */
+  const requestMicPermission = useCallback(async (): Promise<boolean> => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices) {
+      toast("Browser has no microphone API", "error");
+      return false;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Release the test stream immediately -- we just wanted permission.
+      // Twilio Device manages its own audio stream internally.
+      stream.getTracks().forEach((t) => t.stop());
+      setMicPermission("granted");
+      // If we previously failed because of mic-denied, clear the fail
+      // and trigger a Device re-init by toggling failReason. The next
+      // render's useEffect re-runs with permission now granted.
+      if (failReason === "mic-denied" || failReason === "mic-error") {
+        setFailReason(null);
+      }
+      toast("Microphone access granted", "success");
+      return true;
+    } catch (err) {
+      const e = err as { name?: string; message?: string };
+      if (e.name === "NotAllowedError") {
+        setMicPermission("denied");
+        toast("Microphone permission denied — grant it in your browser address bar", "error");
+      } else {
+        toast(`Microphone error: ${e.message ?? e.name ?? "unknown"}`, "error");
+      }
+      return false;
+    }
+  }, [failReason, toast]);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,13 +152,36 @@ export default function VoiceProvider({ children }: { children: React.ReactNode 
 
     async function initDevice() {
       try {
-        const r = await fetch("/api/voice/token", { credentials: "include" });
-        if (!r.ok) return;
+        let r: Response;
+        try {
+          r = await fetch("/api/voice/token", { credentials: "include" });
+        } catch (e) {
+          if (!cancelled) setFailReason("token-fetch-failed");
+          console.info("[voice] token fetch failed:", e instanceof Error ? e.message : e);
+          return;
+        }
+        if (r.status === 503) {
+          if (!cancelled) setFailReason("not-configured");
+          return;
+        }
+        if (!r.ok) {
+          if (!cancelled) setFailReason("token-fetch-failed");
+          return;
+        }
         const d = await r.json();
-        if (!d?.token) return;
+        if (!d?.token) {
+          if (!cancelled) setFailReason("token-fetch-failed");
+          return;
+        }
 
-        const mod: { Device: new (token: string, opts?: Record<string, unknown>) => unknown } =
-          await import("@twilio/voice-sdk");
+        let mod: { Device: new (token: string, opts?: Record<string, unknown>) => unknown };
+        try {
+          mod = await import("@twilio/voice-sdk");
+        } catch (e) {
+          if (!cancelled) setFailReason("sdk-load-failed");
+          console.info("[voice] SDK load failed:", e instanceof Error ? e.message : e);
+          return;
+        }
         if (cancelled) return;
 
         const Device = mod.Device;
@@ -130,15 +236,34 @@ export default function VoiceProvider({ children }: { children: React.ReactNode 
           });
         });
 
-        await device.register();
+        try {
+          await device.register();
+        } catch (e) {
+          // register() can throw on mic denial OR network/SIP errors --
+          // peek at the error name to distinguish.
+          const err = e as { name?: string; message?: string };
+          if (err?.name === "NotAllowedError" || /permission/i.test(err?.message ?? "")) {
+            if (!cancelled) setFailReason("mic-denied");
+            setMicPermission("denied");
+          } else if (err?.name === "NotFoundError" || /no.*microphone/i.test(err?.message ?? "")) {
+            if (!cancelled) setFailReason("mic-error");
+          } else {
+            if (!cancelled) setFailReason("register-failed");
+          }
+          console.info("[voice] register failed:", err?.message ?? err?.name ?? e);
+          device.destroy();
+          return;
+        }
         if (cancelled) {
           device.destroy();
           return;
         }
         setTwilioReady(true);
+        setFailReason(null);
         cleanup = () => device.destroy();
       } catch (e) {
         console.info("[voice] not active:", e instanceof Error ? e.message : e);
+        if (!cancelled) setFailReason("register-failed");
       }
     }
     initDevice();
@@ -148,7 +273,9 @@ export default function VoiceProvider({ children }: { children: React.ReactNode 
       deviceRef.current = null;
       currentCallRef.current = null;
     };
-  }, [toast]);
+    // micPermission in deps so we retry registration after the operator
+    // grants mic access via requestMicPermission (or out-of-band browser settings)
+  }, [toast, micPermission]);
 
   const answerIncoming = useCallback((): string | null => {
     const call = incomingCallRef.current as
@@ -195,6 +322,9 @@ export default function VoiceProvider({ children }: { children: React.ReactNode 
     twilioReady,
     twilioInFlight,
     setTwilioInFlight,
+    failReason,
+    micPermission,
+    requestMicPermission,
     incomingFrom,
     answerIncoming,
     declineIncoming,
