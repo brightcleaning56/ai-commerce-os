@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { describeSchedule, PIPELINE_CRON_SCHEDULE, nextCronFire } from "@/lib/cron";
 import { getKillSwitch } from "@/lib/killSwitch";
+import { getVoiceProvider } from "@/lib/voice";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -211,6 +212,38 @@ export async function GET(req: NextRequest) {
       : { fixHint: "Set ADMIN_TOKEN (random hex). Every admin route requires this." },
   };
 
+  // ── Voice / phone calls ────────────────────────────────────────────
+  // Surfaces which provider is configured (if any) so the operator sees
+  // whether /tasks is using tel:-fallback or a real browser dialer + AI
+  // outbound capability.
+  const voiceInfo = getVoiceProvider();
+  const voice = {
+    ok: voiceInfo.configured,
+    severity: "warning" as const,
+    affects: [
+      "Operator browser calling from /tasks call session (tel: fallback works without)",
+      "AI agent placing outbound calls (Vapi / Bland only — Twilio needs extra wiring)",
+    ],
+    detail: voiceInfo.configured
+      ? {
+          provider: voiceInfo.provider,
+          supportsAiOutbound: voiceInfo.supportsAiOutbound,
+          supportsBrowserCalls: voiceInfo.supportsBrowserCalls,
+          ...voiceInfo.detail,
+        }
+      : voiceInfo.provider === "fallback"
+        ? {
+            currentMode: "tel: fallback (device dialer)",
+            fixHint:
+              "Set VOICE_PROVIDER=vapi (recommended -- single vendor for AI + operator) and VAPI_PRIVATE_KEY + VAPI_PHONE_NUMBER_ID. Or VOICE_PROVIDER=twilio for operator-only browser dialer (~$0.0085/min).",
+          }
+        : {
+            provider: voiceInfo.provider,
+            ...voiceInfo.detail,
+            fixHint: `Set the matching env vars for ${voiceInfo.provider} -- see .env.local.example.`,
+          },
+  };
+
   // ── Booking link for AI reply CTA ─────────────────────────────────────
   const bookingUrl = process.env.BOOKING_URL || null;
   const booking = {
@@ -252,6 +285,7 @@ export async function GET(req: NextRequest) {
     anthropic,
     email,
     sms,
+    voice,
     compliance,
     postmarkWebhook,
     cron,

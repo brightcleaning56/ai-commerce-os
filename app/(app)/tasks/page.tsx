@@ -306,8 +306,14 @@ function TasksInner() {
               <li>Pick the outcome (Connected / Voicemail / No answer / Wrong number / Callback scheduled), add notes, save.</li>
               <li>Every attempt is logged to the task — you (and tomorrow-morning you) can see the full call history.</li>
             </ol>
-            <p className="mt-1">
-              <span className="font-semibold text-accent-amber">AI placing the calls</span> (Twilio Voice / Vapi / Bland with a script) ships next; the call session UI here is the surface it&apos;ll plug into.
+            <p className="mt-2 text-[11px]">
+              <span className="font-semibold text-accent-amber">In-browser calling + AI calls</span> ship via{" "}
+              <a href="https://vapi.ai" target="_blank" rel="noreferrer noopener" className="text-brand-300 underline">Vapi</a>{" "}
+              (recommended — single vendor for both, Anthropic-native, ~$0.05/min) or{" "}
+              <a href="https://www.twilio.com/en-us/voice" target="_blank" rel="noreferrer noopener" className="text-brand-300 underline">Twilio Voice JS SDK</a>{" "}
+              (operator-only, ~$0.0085/min). Set <code className="rounded bg-bg-hover px-1">VOICE_PROVIDER</code> +
+              the matching keys in env to upgrade — see <Link href="/admin/system-health" className="text-brand-300 underline">/admin/system-health</Link>.
+              Until then, tel: links + the call-session UI here cover the human dialing leg.
             </p>
           </div>
         </div>

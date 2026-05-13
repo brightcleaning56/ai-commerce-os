@@ -8,6 +8,7 @@ import {
   Clock,
   Loader2,
   Mail,
+  PhoneCall,
   Power,
   RefreshCw,
   Send,
@@ -84,6 +85,7 @@ type HealthResponse = {
     anthropic: CheckResult;
     email: CheckResult;
     sms: CheckResult;
+    voice: CheckResult;
     compliance: CheckResult;
     postmarkWebhook: CheckResult;
     cron: CheckResult;
@@ -100,6 +102,7 @@ const ROW_META: Record<
   anthropic: { label: "Anthropic / AI generation", Icon: Bot },
   email: { label: "Outbound email (Postmark / Resend)", Icon: Mail },
   sms: { label: "Outbound SMS (Twilio)", Icon: Smartphone },
+  voice: { label: "Voice / phone (Vapi / Twilio Voice / Bland)", Icon: PhoneCall },
   compliance: { label: "CAN-SPAM compliance footer", Icon: ShieldCheck },
   postmarkWebhook: { label: "Postmark bounce / complaint webhook", Icon: Webhook },
   cron: { label: "Cron / scheduled work", Icon: Clock },
