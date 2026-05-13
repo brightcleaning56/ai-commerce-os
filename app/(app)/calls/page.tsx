@@ -78,6 +78,8 @@ type VoicemailRecord = {
   durationSec: number;
   recordedAt: string;
   read: boolean;
+  transcription?: string;
+  transcriptionStatus?: "pending" | "completed" | "failed";
 };
 
 type FlatRow = {
@@ -370,48 +372,72 @@ export default function CallsPage() {
             {voicemails.map((vm) => (
               <li
                 key={vm.id}
-                className={`flex flex-wrap items-center gap-3 px-5 py-3 ${vm.read ? "" : "bg-accent-amber/5"}`}
+                className={`px-5 py-3 ${vm.read ? "" : "bg-accent-amber/5"}`}
               >
-                <button
-                  onClick={() => toggleVoicemailRead(vm.id, !vm.read)}
-                  title={vm.read ? "Mark unread" : "Mark read"}
-                  className={`grid h-7 w-7 shrink-0 place-items-center rounded-md border ${
-                    vm.read
-                      ? "border-bg-border text-ink-tertiary hover:bg-bg-hover"
-                      : "border-accent-amber/40 bg-accent-amber/15 text-accent-amber hover:bg-accent-amber/25"
-                  }`}
-                >
-                  {vm.read ? <CheckCircle2 className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}
-                </button>
-                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-amber/15 text-accent-amber">
-                  <Voicemail className="h-4 w-4" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className={`text-sm font-medium ${vm.read ? "text-ink-secondary" : ""}`}>
-                    Voicemail from <span className="font-mono">{vm.from}</span>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => toggleVoicemailRead(vm.id, !vm.read)}
+                    title={vm.read ? "Mark unread" : "Mark read"}
+                    className={`grid h-7 w-7 shrink-0 place-items-center rounded-md border ${
+                      vm.read
+                        ? "border-bg-border text-ink-tertiary hover:bg-bg-hover"
+                        : "border-accent-amber/40 bg-accent-amber/15 text-accent-amber hover:bg-accent-amber/25"
+                    }`}
+                  >
+                    {vm.read ? <CheckCircle2 className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}
+                  </button>
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-amber/15 text-accent-amber">
+                    <Voicemail className="h-4 w-4" />
                   </div>
-                  <div className="text-[11px] text-ink-tertiary">
-                    {new Date(vm.recordedAt).toLocaleString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })} · {fmtDuration(vm.durationSec)}
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-sm font-medium ${vm.read ? "text-ink-secondary" : ""}`}>
+                      Voicemail from <span className="font-mono">{vm.from}</span>
+                    </div>
+                    <div className="text-[11px] text-ink-tertiary">
+                      {new Date(vm.recordedAt).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })} · {fmtDuration(vm.durationSec)}
+                    </div>
                   </div>
+                  <audio
+                    controls
+                    preload="none"
+                    src={`/api/voice/recording-proxy/${vm.recordingSid}`}
+                    className="h-7 max-w-xs"
+                  />
+                  <a
+                    href={`tel:${vm.from}`}
+                    title={`Call ${vm.from} back`}
+                    className="flex items-center gap-1.5 rounded-md bg-accent-green/15 px-2.5 py-1 text-[11px] font-semibold text-accent-green hover:bg-accent-green/25"
+                  >
+                    <PhoneCall className="h-3 w-3" /> Call back
+                  </a>
                 </div>
-                <audio
-                  controls
-                  preload="none"
-                  src={`/api/voice/recording-proxy/${vm.recordingSid}`}
-                  className="h-7 max-w-xs"
-                />
-                <a
-                  href={`tel:${vm.from}`}
-                  title={`Call ${vm.from} back`}
-                  className="flex items-center gap-1.5 rounded-md bg-accent-green/15 px-2.5 py-1 text-[11px] font-semibold text-accent-green hover:bg-accent-green/25"
-                >
-                  <PhoneCall className="h-3 w-3" /> Call back
-                </a>
+                {/* Transcript — landed via /api/voice/transcription-status.
+                    Pending state shows while Twilio processes (typically
+                    30s-2min after the call ends). Failed state shows when
+                    audio was too noisy/short to transcribe. */}
+                {vm.transcription && vm.transcriptionStatus === "completed" && (
+                  <div className="ml-10 mt-2 rounded-md border border-bg-border bg-bg-hover/30 p-2.5">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                      Transcript (auto)
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap text-xs text-ink-secondary">{vm.transcription}</p>
+                  </div>
+                )}
+                {vm.transcriptionStatus === "failed" && (
+                  <div className="ml-10 mt-2 text-[10px] italic text-ink-tertiary">
+                    Transcript unavailable (audio too short/noisy)
+                  </div>
+                )}
+                {!vm.transcriptionStatus && (
+                  <div className="ml-10 mt-2 text-[10px] italic text-ink-tertiary">
+                    Transcript pending…
+                  </div>
+                )}
               </li>
             ))}
           </ul>

@@ -74,13 +74,21 @@ export async function POST(req: NextRequest) {
     process.env.VOICEMAIL_GREETING ||
     `${op.company || op.name || "AVYN"} can't take your call right now. Leave a message after the tone.`;
 
+  // Voicemail transcription -- Twilio runs free English transcription
+  // on every Record verb when transcribe="true". Webhook fires separately
+  // from the recording webhook (typically 30s-2min after the call ends).
+  // Quality is mediocre but useful for scanning vs listening to each one.
+  const transcribeCallbackUrl = new URL(`${url.protocol}//${url.host}/api/voice/transcription-status`);
+  transcribeCallbackUrl.searchParams.set("source", "voicemail");
+  transcribeCallbackUrl.searchParams.set("from", callerId);
+
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial timeout="25" answerOnBridge="true" callerId="${callerId}"${recordAttrs}>
     <Client>${safeIdentity}</Client>
   </Dial>
   <Say voice="Polly.Joanna">${escapeXml(greeting)}</Say>
-  <Record maxLength="120" recordingStatusCallback="${escapeXmlAttr(voicemailCallbackUrl.toString())}" recordingStatusCallbackEvent="completed" />
+  <Record maxLength="120" recordingStatusCallback="${escapeXmlAttr(voicemailCallbackUrl.toString())}" recordingStatusCallbackEvent="completed" transcribe="true" transcribeCallback="${escapeXmlAttr(transcribeCallbackUrl.toString())}" />
   <Say voice="Polly.Joanna">Thanks. Goodbye.</Say>
 </Response>`;
 

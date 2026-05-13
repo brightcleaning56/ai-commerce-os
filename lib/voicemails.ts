@@ -25,6 +25,12 @@ export type Voicemail = {
   durationSec: number;
   recordedAt: string;          // ISO when webhook fired
   read: boolean;               // operator dismissed it
+  // Twilio's built-in voicemail transcription. Lands via
+  // /api/voice/transcription-status webhook after the recording
+  // completes -- typically 30s-2min after the call ends. Quality is
+  // English-only + sometimes truncated; good enough for scanning.
+  transcription?: string;
+  transcriptionStatus?: "pending" | "completed" | "failed";
 };
 
 export async function listVoicemails(): Promise<Voicemail[]> {
@@ -52,4 +58,26 @@ export async function markVoicemailRead(id: string, read: boolean): Promise<Voic
 export async function unreadVoicemailCount(): Promise<number> {
   const all = await listVoicemails();
   return all.filter((v) => !v.read).length;
+}
+
+/**
+ * Patch a transcript onto an existing voicemail. Looked up by RecordingSid
+ * because Twilio's transcription webhook gives us that, not the original
+ * CallSid. Idempotent -- safe to call multiple times for the same recording.
+ */
+export async function patchVoicemailTranscript(args: {
+  recordingSid: string;
+  transcription: string;
+  status: "completed" | "failed";
+}): Promise<Voicemail | null> {
+  const all = await listVoicemails();
+  const idx = all.findIndex((v) => v.recordingSid === args.recordingSid);
+  if (idx === -1) return null;
+  all[idx] = {
+    ...all[idx],
+    transcription: args.transcription,
+    transcriptionStatus: args.status,
+  };
+  await getBackend().write(VOICEMAILS_FILE, all);
+  return all[idx];
 }
