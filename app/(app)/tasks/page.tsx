@@ -4,14 +4,39 @@ import {
   CheckCircle2,
   Clock,
   FileText,
+  Flame,
   Mail,
   MessageSquare,
+  PhoneCall,
+  PhoneOff,
   Phone,
+  PhoneIncoming,
+  Plus,
   Trash2,
+  Voicemail,
+  XCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
+import Drawer from "@/components/ui/Drawer";
+
+// ─── Types ───────────────────────────────────────────────────────────────
+
+type CallOutcome =
+  | "connected"
+  | "voicemail"
+  | "no-answer"
+  | "wrong-number"
+  | "callback-scheduled";
+
+type CallAttempt = {
+  at: string;            // ISO
+  durationSec?: number;  // operator-reported call length
+  outcome: CallOutcome;
+  notes?: string;
+  callbackAt?: string;   // ISO if outcome === "callback-scheduled"
+};
 
 type LocalTask = {
   id: string;
@@ -23,17 +48,35 @@ type LocalTask = {
   type: "phone" | "sequence";
   createdAt: string;
   done?: boolean;
+  // Operator notes -- free-text annotations (separate from per-attempt notes
+  // so the operator can capture context BEFORE the first call attempt).
+  notes?: string;
+  // Call session history -- one entry per "Place call" → outcome cycle.
+  attempts?: CallAttempt[];
 };
 
 type BuyerContact = {
   id: string;
+  company: string;
+  decisionMaker: string;
+  decisionMakerTitle: string;
+  industry: string;
+  intentScore: number;
+  status: string;
+  rationale?: string;
+  forProduct?: string;
   phone?: string;
   email?: string;
+  linkedin?: string;
+  website?: string;
+  location?: string;
 };
 
 const STORAGE_KEY = "aicos:tasks:v1";
 
-function relativeTime(iso: string) {
+// ─── Helpers ─────────────────────────────────────────────────────────────
+
+function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   if (ms < 60_000) return `${Math.max(1, Math.floor(ms / 1000))}s ago`;
   if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
@@ -41,13 +84,49 @@ function relativeTime(iso: string) {
   return `${Math.floor(ms / 86_400_000)}d ago`;
 }
 
+const OUTCOME_META: Record<
+  CallOutcome,
+  { label: string; tone: string; bg: string; Icon: React.ComponentType<{ className?: string }> }
+> = {
+  connected: {
+    label: "Connected",
+    tone: "text-accent-green",
+    bg: "bg-accent-green/15",
+    Icon: PhoneCall,
+  },
+  voicemail: {
+    label: "Voicemail",
+    tone: "text-accent-amber",
+    bg: "bg-accent-amber/15",
+    Icon: Voicemail,
+  },
+  "no-answer": {
+    label: "No answer",
+    tone: "text-ink-secondary",
+    bg: "bg-bg-hover",
+    Icon: PhoneOff,
+  },
+  "wrong-number": {
+    label: "Wrong number",
+    tone: "text-accent-red",
+    bg: "bg-accent-red/15",
+    Icon: XCircle,
+  },
+  "callback-scheduled": {
+    label: "Callback scheduled",
+    tone: "text-brand-200",
+    bg: "bg-brand-500/15",
+    Icon: PhoneIncoming,
+  },
+};
+
+// ─── Page ────────────────────────────────────────────────────────────────
+
 export default function TasksPage() {
   const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [filter, setFilter] = useState<"all" | "phone" | "sequence" | "open" | "done">("open");
-  // Live buyer lookup so we can resolve phone/email for tasks created
-  // BEFORE the task type included those fields. New tasks snapshot the
-  // contact info themselves; this is just the back-fill path.
   const [buyerById, setBuyerById] = useState<Record<string, BuyerContact>>({});
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -55,31 +134,17 @@ export default function TasksPage() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) setTasks(JSON.parse(raw));
     } catch {}
-    // Best-effort buyer lookup -- silent if /api/discovered-buyers fails.
     fetch("/api/discovered-buyers")
       .then((r) => (r.ok ? r.json() : { buyers: [] }))
       .then((d) => {
         const map: Record<string, BuyerContact> = {};
         for (const b of d.buyers ?? []) {
-          map[b.id] = { id: b.id, phone: b.phone, email: b.email };
+          map[b.id] = b as BuyerContact;
         }
         setBuyerById(map);
       })
       .catch(() => {});
   }, []);
-
-  /**
-   * Resolve a task's contact info from either the snapshot on the task itself
-   * or the live buyer record. Snapshot wins (preserves the contact even if
-   * the buyer record is later edited or removed).
-   */
-  function contactFor(t: LocalTask): { phone?: string; email?: string } {
-    const liveBuyer = buyerById[t.buyerId];
-    return {
-      phone: t.buyerPhone || liveBuyer?.phone,
-      email: t.buyerEmail || liveBuyer?.email,
-    };
-  }
 
   function persist(next: LocalTask[]) {
     setTasks(next);
@@ -88,20 +153,33 @@ export default function TasksPage() {
     } catch {}
   }
 
+  function patchTask(id: string, patch: Partial<LocalTask>) {
+    persist(tasks.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  }
+
   function toggleDone(id: string) {
     const t = tasks.find((x) => x.id === id);
-    persist(tasks.map((x) => (x.id === id ? { ...x, done: !x.done } : x)));
+    patchTask(id, { done: !t?.done });
     if (t) toast(t.done ? "Marked open" : "Task completed");
   }
 
   function removeTask(id: string) {
     persist(tasks.filter((x) => x.id !== id));
+    if (openTaskId === id) setOpenTaskId(null);
     toast("Task removed");
   }
 
   function clearDone() {
     persist(tasks.filter((x) => !x.done));
     toast("Cleared completed tasks");
+  }
+
+  function contactFor(t: LocalTask): { phone?: string; email?: string } {
+    const liveBuyer = buyerById[t.buyerId];
+    return {
+      phone: t.buyerPhone || liveBuyer?.phone,
+      email: t.buyerEmail || liveBuyer?.email,
+    };
   }
 
   const filtered = tasks.filter((t) => {
@@ -116,6 +194,8 @@ export default function TasksPage() {
   const phone = tasks.filter((t) => t.type === "phone" && !t.done).length;
   const seq = tasks.filter((t) => t.type === "sequence" && !t.done).length;
 
+  const openTask = openTaskId ? tasks.find((t) => t.id === openTaskId) ?? null : null;
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -126,7 +206,7 @@ export default function TasksPage() {
           <div>
             <h1 className="text-2xl font-bold">Tasks</h1>
             <p className="text-xs text-ink-secondary">
-              {open} open · {done} completed · synced from buyer detail actions
+              {open} open · {done} completed · click any task for the call session
             </p>
           </div>
         </div>
@@ -147,22 +227,22 @@ export default function TasksPage() {
         <Stat label="Completed" v={done} Icon={CheckCircle2} onClick={() => setFilter("done")} active={filter === "done"} />
       </div>
 
-      {/* Honesty banner about AI voice. Operators expect "AI tasks" to mean
-          AI MAKES THE CALL — that's not shipped (no Twilio Voice / Vapi /
-          Bland integration yet). Today the queue is operator-driven: AI
-          identifies who to call, you click-to-call from the task row. */}
+      {/* How it works — sets expectations about today's flow vs roadmap */}
       <div className="rounded-xl border border-brand-500/30 bg-brand-500/5 px-4 py-3">
         <div className="flex items-start gap-3">
           <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-brand-500/15">
             <Bot className="h-4 w-4 text-brand-200" />
           </div>
           <div className="flex-1 text-[12px] text-ink-secondary">
-            <div className="font-semibold text-brand-200">How tasks + AI work today</div>
+            <div className="font-semibold text-brand-200">Call session flow</div>
+            <ol className="mt-1 list-decimal space-y-0.5 pl-4">
+              <li>Click a task to open the call session — buyer profile, AI rationale, talking points, notes, attempt history.</li>
+              <li>Hit <span className="font-semibold text-accent-green">Place call</span> → opens your dialer (or FaceTime/Skype on desktop) and starts an in-app timer.</li>
+              <li>Pick the outcome (Connected / Voicemail / No answer / Wrong number / Callback scheduled), add notes, save.</li>
+              <li>Every attempt is logged to the task — you (and tomorrow-morning you) can see the full call history.</li>
+            </ol>
             <p className="mt-1">
-              AI identifies which buyers need a phone touch and queues the task. <span className="font-semibold text-ink-primary">You click to call</span> (the green Phone button below opens your phone&apos;s dialer via <code className="rounded bg-bg-hover px-1">tel:</code>) or click to email via <code className="rounded bg-bg-hover px-1">mailto:</code>.
-            </p>
-            <p className="mt-1">
-              <span className="font-semibold text-accent-amber">AI making outbound voice calls</span> is on the roadmap — that wires to Twilio Voice / Vapi / Bland with a configurable script. Until then, voice stays human; AI handles the email + SMS legs.
+              <span className="font-semibold text-accent-amber">AI placing the calls</span> (Twilio Voice / Vapi / Bland with a script) ships next; the call session UI here is the surface it&apos;ll plug into.
             </p>
           </div>
         </div>
@@ -212,15 +292,29 @@ export default function TasksPage() {
           {filtered.map((t) => {
             const Icon = t.type === "phone" ? Phone : MessageSquare;
             const { phone: phoneNumber, email: emailAddr } = contactFor(t);
+            const lastAttempt = t.attempts && t.attempts.length > 0 ? t.attempts[t.attempts.length - 1] : null;
+            const lastOutcome = lastAttempt ? OUTCOME_META[lastAttempt.outcome] : null;
             return (
               <li
                 key={t.id}
-                className={`flex flex-wrap items-center gap-3 rounded-xl border bg-bg-card p-4 ${
+                className={`flex flex-wrap items-center gap-3 rounded-xl border bg-bg-card p-4 transition cursor-pointer hover:border-brand-500/40 hover:bg-bg-hover/30 ${
                   t.done ? "border-bg-border opacity-60" : "border-bg-border"
                 }`}
+                onClick={() => setOpenTaskId(t.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setOpenTaskId(t.id);
+                  }
+                }}
               >
                 <button
-                  onClick={() => toggleDone(t.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleDone(t.id);
+                  }}
                   className={`grid h-6 w-6 shrink-0 place-items-center rounded-md border ${
                     t.done
                       ? "border-accent-green/50 bg-accent-green/15 text-accent-green"
@@ -249,67 +343,35 @@ export default function TasksPage() {
                         <span className="font-mono">{phoneNumber}</span>
                       </>
                     )}
+                    {(t.attempts?.length ?? 0) > 0 && (
+                      <>
+                        <span className="opacity-60">·</span>
+                        <span>{t.attempts!.length} attempt{t.attempts!.length === 1 ? "" : "s"}</span>
+                      </>
+                    )}
                   </div>
                 </div>
 
-                {/* Click-to-call — opens the device dialer (mobile) or
-                    default tel: handler (FaceTime / Skype on desktop). For
-                    phone tasks this is the primary CTA; for sequence tasks
-                    it's secondary (operator might still want to call). */}
-                {phoneNumber ? (
-                  <a
-                    href={`tel:${phoneNumber}`}
-                    title={`Call ${phoneNumber}`}
-                    onClick={() => {
-                      // Fire-and-forget: when the operator clicks call, mark
-                      // the phone task as in-progress would be ideal but for
-                      // now we just toast so they have feedback.
-                      toast(`Calling ${phoneNumber}…`, "info");
-                    }}
-                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold ${
-                      t.type === "phone"
-                        ? "bg-accent-green/15 text-accent-green hover:bg-accent-green/25"
-                        : "border border-bg-border bg-bg-hover/40 text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
-                    }`}
-                  >
-                    <Phone className="h-3 w-3" /> Call
-                  </a>
-                ) : (
+                {/* Last-outcome pill — gives the operator at-a-glance status
+                    without opening the drawer. Only renders when there's
+                    been at least one attempt. */}
+                {lastOutcome && (
                   <span
-                    title="No phone number on file. Promote a lead with a phone, or add it on the buyer record."
-                    className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-hover/40 px-2.5 py-1 text-[11px] text-ink-tertiary opacity-50"
+                    title={`${lastOutcome.label} · ${relativeTime(lastAttempt!.at)}`}
+                    className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${lastOutcome.bg} ${lastOutcome.tone}`}
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <Phone className="h-3 w-3" /> No phone
+                    <lastOutcome.Icon className="h-3 w-3" />
+                    {lastOutcome.label}
                   </span>
                 )}
 
-                {emailAddr ? (
-                  <a
-                    href={`mailto:${emailAddr}`}
-                    title={`Email ${emailAddr}`}
-                    className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-hover/40 px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
-                  >
-                    <Mail className="h-3 w-3" /> Email
-                  </a>
-                ) : (
-                  <span
-                    title="No email on file"
-                    className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-hover/40 px-2.5 py-1 text-[11px] text-ink-tertiary opacity-50"
-                  >
-                    <Mail className="h-3 w-3" /> No email
-                  </span>
-                )}
-
-                {/* View buyer with focus param so the right buyer's drawer
-                    auto-opens on /buyers (matches /leads "Open buyer" pattern) */}
-                <Link
-                  href={`/buyers?focus=${encodeURIComponent(t.buyerId)}`}
-                  className="rounded-md border border-bg-border bg-bg-hover/40 px-2.5 py-1 text-[11px] text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
-                >
-                  View buyer
-                </Link>
+                <span className="text-[10px] text-ink-tertiary">Open →</span>
                 <button
-                  onClick={() => removeTask(t.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeTask(t.id);
+                  }}
                   className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-ink-tertiary hover:bg-accent-red/10 hover:text-accent-red"
                   aria-label="Remove"
                 >
@@ -320,8 +382,411 @@ export default function TasksPage() {
           })}
         </ul>
       )}
+
+      <Drawer
+        open={!!openTask}
+        onClose={() => setOpenTaskId(null)}
+        title={openTask ? `${openTask.type === "phone" ? "Call" : "Sequence"} · ${openTask.buyerName}` : ""}
+        width="max-w-2xl"
+      >
+        {openTask && (
+          <TaskDetail
+            task={openTask}
+            buyer={buyerById[openTask.buyerId]}
+            contact={contactFor(openTask)}
+            onPatch={(patch) => patchTask(openTask.id, patch)}
+            onRemove={() => removeTask(openTask.id)}
+          />
+        )}
+      </Drawer>
     </div>
   );
+}
+
+// ─── Task detail drawer ──────────────────────────────────────────────────
+
+function TaskDetail({
+  task,
+  buyer,
+  contact,
+  onPatch,
+  onRemove,
+}: {
+  task: LocalTask;
+  buyer: BuyerContact | undefined;
+  contact: { phone?: string; email?: string };
+  onPatch: (patch: Partial<LocalTask>) => void;
+  onRemove: () => void;
+}) {
+  const { toast } = useToast();
+  const [notesDraft, setNotesDraft] = useState(task.notes ?? "");
+  const [notesDirty, setNotesDirty] = useState(false);
+  // Active call-session state -- exists only between Place call and outcome save
+  const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
+  const [callTickMs, setCallTickMs] = useState(0);
+  const [outcomeForm, setOutcomeForm] = useState<{
+    outcome: CallOutcome;
+    notes: string;
+    callbackAt: string;
+  } | null>(null);
+
+  // Reset when switching tasks
+  useEffect(() => {
+    setNotesDraft(task.notes ?? "");
+    setNotesDirty(false);
+    setCallStartedAt(null);
+    setCallTickMs(0);
+    setOutcomeForm(null);
+  }, [task.id, task.notes]);
+
+  // Tick the call timer every 1s while a call is "active"
+  useEffect(() => {
+    if (callStartedAt == null) return;
+    const id = setInterval(() => setCallTickMs(Date.now() - callStartedAt), 1000);
+    return () => clearInterval(id);
+  }, [callStartedAt]);
+
+  function placeCall() {
+    if (!contact.phone) {
+      toast("No phone number on file for this buyer", "error");
+      return;
+    }
+    setCallStartedAt(Date.now());
+    setCallTickMs(0);
+    setOutcomeForm({ outcome: "connected", notes: "", callbackAt: "" });
+    // Open the device dialer in a new context so the page (with the
+    // running timer + outcome form) stays available
+    window.open(`tel:${contact.phone}`, "_self");
+  }
+
+  function cancelCall() {
+    setCallStartedAt(null);
+    setCallTickMs(0);
+    setOutcomeForm(null);
+  }
+
+  function saveAttempt() {
+    if (!outcomeForm || callStartedAt == null) return;
+    const durationSec = Math.max(1, Math.round((Date.now() - callStartedAt) / 1000));
+    const attempt: CallAttempt = {
+      at: new Date().toISOString(),
+      durationSec,
+      outcome: outcomeForm.outcome,
+      notes: outcomeForm.notes.trim() || undefined,
+      callbackAt:
+        outcomeForm.outcome === "callback-scheduled" && outcomeForm.callbackAt
+          ? new Date(outcomeForm.callbackAt).toISOString()
+          : undefined,
+    };
+    onPatch({
+      attempts: [...(task.attempts ?? []), attempt],
+    });
+    toast(
+      `Logged ${OUTCOME_META[attempt.outcome].label.toLowerCase()} · ${durationSec}s`,
+      attempt.outcome === "connected" ? "success" : "info",
+    );
+    cancelCall();
+  }
+
+  function saveNotes() {
+    if (!notesDirty) return;
+    onPatch({ notes: notesDraft });
+    setNotesDirty(false);
+    toast("Notes saved");
+  }
+
+  function toggleDone() {
+    onPatch({ done: !task.done });
+    toast(task.done ? "Marked open" : "Task completed");
+  }
+
+  // Pull derived data for the script section
+  const intent = buyer?.intentScore;
+  const rationale = buyer?.rationale;
+  const targetProduct = buyer?.forProduct;
+
+  return (
+    <div className="space-y-5 p-5">
+      {/* Buyer summary card */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Buyer</div>
+        <div className="mt-1 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-lg font-bold leading-tight">{task.buyerName}</div>
+            <div className="text-xs text-ink-secondary">
+              {buyer?.decisionMakerTitle && <>{buyer.decisionMakerTitle} · </>}
+              {task.buyerCompany}
+              {buyer?.industry && <> · {buyer.industry}</>}
+            </div>
+          </div>
+          {intent != null && (
+            <span className="flex items-center gap-1 rounded-md bg-brand-500/15 px-2 py-0.5 text-[11px] font-semibold text-brand-200">
+              <Flame className="h-3 w-3" /> Intent {intent}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <ContactRow Icon={Phone} value={contact.phone} type="tel" placeholder="No phone on file" />
+        <ContactRow Icon={Mail} value={contact.email} type="mailto" placeholder="No email on file" />
+      </div>
+
+      {/* Why we're calling — agent rationale + target product */}
+      {(rationale || targetProduct) && (
+        <div className="rounded-lg border border-brand-500/30 bg-brand-500/5 p-3 text-xs">
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-brand-200">
+            <Bot className="h-3 w-3" /> Why this call
+          </div>
+          {targetProduct && (
+            <div className="mt-1 text-ink-secondary">
+              Pitching <span className="font-semibold text-ink-primary">{targetProduct}</span>
+            </div>
+          )}
+          {rationale && (
+            <div className="mt-1 whitespace-pre-wrap text-ink-secondary">{rationale}</div>
+          )}
+        </div>
+      )}
+
+      {/* Call session — placeholder when idle, live timer when active, then
+          outcome form. No backend voice yet; tel: opens the dialer + we
+          track everything else in-app. */}
+      <div className="rounded-lg border border-bg-border bg-bg-card p-4">
+        <div className="flex items-center justify-between">
+          <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Call session</div>
+          {callStartedAt != null && (
+            <span className="font-mono text-xs font-semibold text-accent-green">
+              {fmtDuration(callTickMs)}
+            </span>
+          )}
+        </div>
+
+        {callStartedAt == null ? (
+          <div className="mt-2">
+            <button
+              onClick={placeCall}
+              disabled={!contact.phone}
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-accent-green/15 px-3 py-2 text-sm font-semibold text-accent-green transition hover:bg-accent-green/25 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <PhoneCall className="h-4 w-4" />
+              {contact.phone ? `Place call · ${contact.phone}` : "No phone number on file"}
+            </button>
+            <div className="mt-1.5 text-[10px] text-ink-tertiary">
+              Opens your dialer. Outcome + notes get logged after the call.
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 space-y-3">
+            <div className="rounded-md border border-accent-green/30 bg-accent-green/5 px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 font-semibold text-accent-green">
+                <PhoneCall className="h-3.5 w-3.5 animate-pulse" /> Call in progress
+              </div>
+              <div className="mt-0.5 text-ink-secondary">
+                Pick the outcome below when you hang up.
+              </div>
+            </div>
+
+            {/* Outcome picker */}
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+              {(Object.keys(OUTCOME_META) as CallOutcome[]).map((o) => {
+                const meta = OUTCOME_META[o];
+                const active = outcomeForm?.outcome === o;
+                return (
+                  <button
+                    key={o}
+                    onClick={() => setOutcomeForm((f) => ({ ...f!, outcome: o }))}
+                    className={`flex items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-semibold transition ${
+                      active
+                        ? `border-current ${meta.bg} ${meta.tone}`
+                        : "border-bg-border bg-bg-card text-ink-secondary hover:bg-bg-hover"
+                    }`}
+                  >
+                    <meta.Icon className="h-3 w-3" />
+                    {meta.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {outcomeForm?.outcome === "callback-scheduled" && (
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-wider text-ink-tertiary">Callback at</span>
+                <input
+                  type="datetime-local"
+                  value={outcomeForm.callbackAt}
+                  onChange={(e) => setOutcomeForm((f) => ({ ...f!, callbackAt: e.target.value }))}
+                  className="mt-1 h-9 w-full rounded-md border border-bg-border bg-bg-card px-2 text-xs focus:border-brand-500 focus:outline-none"
+                />
+              </label>
+            )}
+
+            <textarea
+              value={outcomeForm?.notes ?? ""}
+              onChange={(e) => setOutcomeForm((f) => ({ ...f!, notes: e.target.value }))}
+              placeholder="What did they say? Decision-makers? Objections? Next step?"
+              rows={3}
+              maxLength={2000}
+              className="w-full resize-y rounded-md border border-bg-border bg-bg-card p-2 text-xs placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+            />
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={saveAttempt}
+                disabled={!outcomeForm}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-gradient-brand py-2 text-xs font-semibold shadow-glow disabled:opacity-60"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" /> Save attempt
+              </button>
+              <button
+                onClick={cancelCall}
+                className="rounded-md border border-bg-border bg-bg-card px-3 py-2 text-xs hover:bg-bg-hover"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Notes — pre-call context the operator wants to remember */}
+      <div>
+        <div className="mb-1.5 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-tertiary">
+          <span className="flex items-center gap-1">
+            <FileText className="h-3 w-3" /> Notes
+          </span>
+          {notesDirty && <span className="text-accent-amber normal-case tracking-normal">unsaved</span>}
+        </div>
+        <textarea
+          value={notesDraft}
+          onChange={(e) => {
+            setNotesDraft(e.target.value);
+            setNotesDirty(e.target.value !== (task.notes ?? ""));
+          }}
+          onBlur={saveNotes}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+              e.preventDefault();
+              saveNotes();
+            }
+          }}
+          placeholder="Pre-call context, talking points, who introduced this lead, etc."
+          rows={3}
+          maxLength={5000}
+          className="w-full resize-y rounded-md border border-bg-border bg-bg-card p-2 text-xs placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+        />
+        <div className="mt-1 text-[10px] text-ink-tertiary">Saves on blur · ⌘S to save now</div>
+      </div>
+
+      {/* Attempt history — every call logged, newest first */}
+      {(task.attempts?.length ?? 0) > 0 && (
+        <div>
+          <div className="mb-1.5 text-[10px] uppercase tracking-wider text-ink-tertiary">
+            Call history · {task.attempts!.length}
+          </div>
+          <ul className="space-y-2">
+            {task.attempts!.slice().reverse().map((a, i) => {
+              const meta = OUTCOME_META[a.outcome];
+              return (
+                <li key={i} className="rounded-md border border-bg-border bg-bg-hover/30 p-3 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${meta.bg} ${meta.tone}`}>
+                      <meta.Icon className="h-3 w-3" /> {meta.label}
+                    </span>
+                    <span className="text-ink-tertiary">{relativeTime(a.at)}</span>
+                    {a.durationSec != null && (
+                      <span className="font-mono text-ink-tertiary">{fmtDuration(a.durationSec * 1000)}</span>
+                    )}
+                    {a.callbackAt && (
+                      <span className="text-brand-200">
+                        callback {new Date(a.callbackAt).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    )}
+                  </div>
+                  {a.notes && (
+                    <div className="mt-1 whitespace-pre-wrap text-ink-secondary">{a.notes}</div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {/* Actions row — toggle done + remove + open buyer */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-bg-border pt-4">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleDone}
+            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold ${
+              task.done
+                ? "border border-bg-border bg-bg-hover/40 text-ink-secondary hover:bg-bg-hover"
+                : "bg-accent-green/15 text-accent-green hover:bg-accent-green/25"
+            }`}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {task.done ? "Mark open" : "Mark done"}
+          </button>
+          <Link
+            href={`/buyers?focus=${encodeURIComponent(task.buyerId)}`}
+            className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-xs hover:bg-bg-hover"
+          >
+            View buyer →
+          </Link>
+        </div>
+        <button
+          onClick={onRemove}
+          className="flex items-center gap-1.5 rounded-md border border-accent-red/30 bg-accent-red/5 px-3 py-1.5 text-xs text-accent-red hover:bg-accent-red/10"
+        >
+          <Trash2 className="h-3 w-3" /> Remove task
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Small components ────────────────────────────────────────────────────
+
+function ContactRow({
+  Icon,
+  value,
+  type,
+  placeholder,
+}: {
+  Icon: React.ComponentType<{ className?: string }>;
+  value: string | undefined;
+  type: "tel" | "mailto";
+  placeholder: string;
+}) {
+  if (!value) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-bg-border bg-bg-hover/30 px-2 py-1.5 text-ink-tertiary opacity-60">
+        <Icon className="h-3.5 w-3.5" />
+        <span>{placeholder}</span>
+      </div>
+    );
+  }
+  return (
+    <a
+      href={`${type}:${value}`}
+      className="flex items-center gap-2 rounded-md border border-bg-border bg-bg-hover/30 px-2 py-1.5 text-brand-300 hover:bg-bg-hover hover:text-brand-200"
+    >
+      <Icon className="h-3.5 w-3.5" />
+      <span className="truncate font-mono">{value}</span>
+    </a>
+  );
+}
+
+function fmtDuration(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 function Stat({ label, v, Icon, onClick, active }: { label: string; v: number; Icon: React.ComponentType<{ className?: string }>; onClick?: () => void; active?: boolean }) {
