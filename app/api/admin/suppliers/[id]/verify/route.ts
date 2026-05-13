@@ -1,29 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth";
 import { supplierRegistry } from "@/lib/supplierRegistry";
-import { runL1Verification } from "@/lib/supplierVerification";
+import { runL1Verification, runL2Verification } from "@/lib/supplierVerification";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/admin/suppliers/[id]/verify — run L1 identity verification
- * against this supplier's profile.
+ * POST /api/admin/suppliers/[id]/verify?level=L1|L2 — run a
+ * verification level against this supplier's data.
  *
- * Current behavior: L1 only. Future levels (L2 document verification,
- * L3 operational, etc.) ship as additional endpoints / scopes once the
- * document upload pipeline lands.
+ *   L1 — identity (domain / phone / email / address). Hits external
+ *        DNS + RDAP, ~15s worst case.
+ *   L2 — business verification (license + tax/EIN + insurance +
+ *        industry certs). Reads uploaded documents from
+ *        /api/admin/suppliers/[id]/documents and grades by approval
+ *        state.
+ *
+ * Default level: L1 (preserves the previous behavior).
  *
  * Returns the verification run (with per-check signal + evidence) AND
- * the updated supplier (whose `tier` may have advanced to "basic" if
- * L1 passed). Capability: leads:write — re-running verification is
- * scoped the same as creating a supplier.
+ * the updated supplier (whose `tier` may have advanced based on the
+ * latest passed run across all levels). Capability: leads:write.
  *
- * Idempotent in the sense that re-running just appends another L1 run
- * to the audit trail. The latest run wins for tier derivation.
- *
- * Cost: hits DNS-over-HTTPS + RDAP + the supplier's homepage. Each
- * with a short timeout; full run is bounded to ~15s worst case.
+ * Idempotent — re-running just appends another run to the audit
+ * trail. The latest run per level wins for tier derivation.
  */
 export async function POST(
   req: NextRequest,
@@ -36,7 +37,19 @@ export async function POST(
   const supplier = await supplierRegistry.get(id);
   if (!supplier) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const run = await runL1Verification(supplier);
+  const url = new URL(req.url);
+  const level = (url.searchParams.get("level") || "L1").toUpperCase();
+  let run;
+  if (level === "L2") {
+    run = await runL2Verification(supplier);
+  } else if (level === "L1") {
+    run = await runL1Verification(supplier);
+  } else {
+    return NextResponse.json(
+      { error: `level must be L1 or L2 (got ${level})` },
+      { status: 400 },
+    );
+  }
   const updated = await supplierRegistry.appendVerificationRun(id, run);
 
   return NextResponse.json({

@@ -25,6 +25,7 @@
  * Don't call from edge.
  */
 import type { SupplierRecord, VerificationCheck, VerificationRun } from "./supplierRegistry";
+import { DOC_KIND_LABEL, supplierDocs, type SupplierDocKind } from "./supplierDocs";
 
 // ─── Public API ────────────────────────────────────────────────────────
 
@@ -44,6 +45,96 @@ export async function runL1Verification(s: SupplierRecord): Promise<Verification
   const { score, passed } = scoreL1(checks);
   return {
     level: "L1",
+    ranAt: new Date().toISOString(),
+    checks,
+    score,
+    passed,
+  };
+}
+
+/**
+ * Run L2 (Business Verification) — document-based checks.
+ *
+ * L2 says "this is a real operating business" not just "this domain
+ * exists". We require evidence the supplier has uploaded:
+ *   - A business license OR registration certificate (required)
+ *   - A tax cert OR EIN letter (required)
+ *   - Insurance (warn if missing — not always industry-relevant)
+ *   - Industry certifications appropriate to their kind (warn if missing)
+ *
+ * Each required category checks for AT LEAST ONE approved doc of that
+ * kind. A pending doc warns (operator hasn't reviewed yet). A rejected
+ * doc is treated as missing — operator already said no.
+ *
+ * Pass threshold for L2: score >= 70 over runnable signals.
+ */
+export async function runL2Verification(s: SupplierRecord): Promise<VerificationRun> {
+  const docs = await supplierDocs.listForSupplier(s.id);
+  const approvedByKind = new Map<SupplierDocKind, number>();
+  const pendingByKind = new Map<SupplierDocKind, number>();
+  for (const d of docs) {
+    const map = d.status === "approved" ? approvedByKind : d.status === "pending" ? pendingByKind : null;
+    if (!map) continue;
+    map.set(d.kind, (map.get(d.kind) ?? 0) + 1);
+  }
+
+  const has = (kind: SupplierDocKind) => (approvedByKind.get(kind) ?? 0) > 0;
+  const pending = (kind: SupplierDocKind) => (pendingByKind.get(kind) ?? 0) > 0;
+
+  const checks: VerificationCheck[] = [];
+
+  // Required: business license / registration
+  checks.push(
+    has("business-license")
+      ? good(mkBase("doc-business-license", "Business license uploaded + approved"), `${approvedByKind.get("business-license")} approved file(s)`)
+      : pending("business-license")
+        ? warn(mkBase("doc-business-license", "Business license uploaded + approved"), "Uploaded but not yet reviewed")
+        : bad(mkBase("doc-business-license", "Business license uploaded + approved"), "No business license on file"),
+  );
+
+  // Required: tax / EIN
+  const hasTax = has("tax-cert") || has("ein-letter");
+  const taxPending = pending("tax-cert") || pending("ein-letter");
+  checks.push(
+    hasTax
+      ? good(mkBase("doc-tax", "Tax cert or EIN letter approved"), "Tax/EIN evidence on file")
+      : taxPending
+        ? warn(mkBase("doc-tax", "Tax cert or EIN letter approved"), "Uploaded but not yet reviewed")
+        : bad(mkBase("doc-tax", "Tax cert or EIN letter approved"), "No tax/EIN documents on file"),
+  );
+
+  // Recommended: insurance
+  checks.push(
+    has("insurance")
+      ? good(mkBase("doc-insurance", "Insurance certificate on file"), "Approved")
+      : pending("insurance")
+        ? warn(mkBase("doc-insurance", "Insurance certificate on file"), "Uploaded but not yet reviewed")
+        : warn(mkBase("doc-insurance", "Insurance certificate on file"), "No insurance cert — recommended for B2B"),
+  );
+
+  // Recommended: industry certification (any of the industry-specific docs)
+  const industryCerts: SupplierDocKind[] = ["iso-cert", "fda-cert", "ce-cert", "export-license"];
+  const hasIndustryCert = industryCerts.some(has);
+  const industryPending = industryCerts.some(pending);
+  checks.push(
+    hasIndustryCert
+      ? good(mkBase("doc-industry-cert", "At least one industry certification"), `Has ${industryCerts.filter(has).map((k) => DOC_KIND_LABEL[k]).join(", ")}`)
+      : industryPending
+        ? warn(mkBase("doc-industry-cert", "At least one industry certification"), "Cert uploaded but not yet reviewed")
+        : warn(mkBase("doc-industry-cert", "At least one industry certification"), "None on file — appropriate for kind " + s.kind),
+  );
+
+  // Bonus: physical evidence (factory photo / utility bill)
+  const hasPhysical = has("factory-photo") || has("utility-bill");
+  checks.push(
+    hasPhysical
+      ? good(mkBase("doc-physical-evidence", "Physical operation evidence"), "Factory photo or utility bill on file")
+      : warn(mkBase("doc-physical-evidence", "Physical operation evidence"), "No factory photo or utility bill"),
+  );
+
+  const { score, passed } = scoreL1(checks); // same 70-threshold scoring
+  return {
+    level: "L2",
     ranAt: new Date().toISOString(),
     checks,
     score,

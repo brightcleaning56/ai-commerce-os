@@ -3,13 +3,17 @@ import {
   AlertCircle,
   Building2,
   CheckCircle2,
+  Download,
   Factory,
+  FileText,
   Loader2,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
+  Trash2,
+  Upload,
   X,
   XCircle,
 } from "lucide-react";
@@ -81,6 +85,51 @@ type SupplierRecord = {
   capacityUnitsPerMo?: number;
 };
 
+type SupplierDocKind =
+  | "business-license" | "tax-cert" | "ein-letter" | "insurance"
+  | "export-license" | "iso-cert" | "fda-cert" | "ce-cert"
+  | "factory-photo" | "utility-bill" | "bank-letter" | "other";
+
+type SupplierDocStatus = "pending" | "approved" | "rejected";
+
+type SupplierDocMeta = {
+  id: string;
+  supplierId: string;
+  kind: SupplierDocKind;
+  filename: string;
+  mime: string;
+  sizeBytes: number;
+  uploadedAt: string;
+  uploadedBy: string;
+  status: SupplierDocStatus;
+  reviewNotes?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+};
+
+const DOC_KIND_LABEL: Record<SupplierDocKind, string> = {
+  "business-license": "Business license",
+  "tax-cert":         "Tax certificate",
+  "ein-letter":       "EIN letter",
+  "insurance":        "Insurance",
+  "export-license":   "Export license",
+  "iso-cert":         "ISO cert",
+  "fda-cert":         "FDA cert",
+  "ce-cert":          "CE mark",
+  "factory-photo":    "Factory photo",
+  "utility-bill":     "Utility bill",
+  "bank-letter":      "Bank letter",
+  "other":            "Other",
+};
+
+const DOC_STATUS_TONE: Record<SupplierDocStatus, string> = {
+  pending:  "bg-accent-amber/15 text-accent-amber",
+  approved: "bg-accent-green/15 text-accent-green",
+  rejected: "bg-accent-red/15 text-accent-red",
+};
+
+const MAX_DOC_BYTES = 4 * 1024 * 1024;
+
 const TIER_TONE: Record<SupplierTier, string> = {
   unverified: "bg-bg-hover text-ink-tertiary",
   basic:      "bg-accent-blue/15 text-accent-blue",
@@ -135,10 +184,10 @@ export default function AdminSuppliersPage() {
     void load();
   }, [load]);
 
-  async function runVerification(s: SupplierRecord) {
+  async function runVerification(s: SupplierRecord, level: "L1" | "L2" = "L1") {
     setVerifyingId(s.id);
     try {
-      const r = await fetch(`/api/admin/suppliers/${s.id}/verify`, { method: "POST" });
+      const r = await fetch(`/api/admin/suppliers/${s.id}/verify?level=${level}`, { method: "POST" });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? `Verify failed (${r.status})`);
       const updated = d.supplier as SupplierRecord;
@@ -147,8 +196,8 @@ export default function AdminSuppliersPage() {
       const run = d.run as VerificationRun;
       toast(
         run.passed
-          ? `L1 passed — score ${run.score}/100 → ${updated.tier}`
-          : `L1 failed — score ${run.score}/100, see the audit trail`,
+          ? `${level} passed — score ${run.score}/100 → ${updated.tier}`
+          : `${level} failed — score ${run.score}/100, see the audit trail`,
         run.passed ? "success" : "error",
       );
     } catch (e) {
@@ -355,7 +404,7 @@ export default function AdminSuppliersPage() {
         <SupplierDrawer
           supplier={selected}
           onClose={() => setSelected(null)}
-          onVerify={() => runVerification(selected)}
+          onVerify={(level) => runVerification(selected, level)}
           verifying={verifyingId === selected.id}
         />
       )}
@@ -400,7 +449,7 @@ function SupplierDrawer({
 }: {
   supplier: SupplierRecord;
   onClose: () => void;
-  onVerify: () => void;
+  onVerify: (level: "L1" | "L2") => void;
   verifying: boolean;
 }) {
   return (
@@ -479,21 +528,36 @@ function SupplierDrawer({
             />
           </Section>
 
+          {/* Documents (L2 evidence) */}
+          <SupplierDocsPanel supplierId={supplier.id} />
+
           {/* Verification audit */}
           <div>
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
                 Verification audit ({supplier.verificationRuns.length} run{supplier.verificationRuns.length === 1 ? "" : "s"})
               </div>
-              <button
-                type="button"
-                onClick={onVerify}
-                disabled={verifying}
-                className="inline-flex items-center gap-1 rounded-md bg-gradient-brand px-2.5 py-1 text-[11px] font-semibold shadow-glow disabled:opacity-50"
-              >
-                {verifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                Run L1
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onVerify("L1")}
+                  disabled={verifying}
+                  className="inline-flex items-center gap-1 rounded-md border border-brand-500/40 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/20 disabled:opacity-50"
+                >
+                  {verifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                  Run L1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onVerify("L2")}
+                  disabled={verifying}
+                  className="inline-flex items-center gap-1 rounded-md bg-gradient-brand px-2.5 py-1 text-[11px] font-semibold shadow-glow disabled:opacity-50"
+                  title="Score uploaded documents (license, tax/EIN, insurance, industry certs)"
+                >
+                  {verifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
+                  Run L2
+                </button>
+              </div>
             </div>
             {supplier.verificationRuns.length === 0 ? (
               <div className="rounded-md border border-bg-border bg-bg-card px-3 py-3 text-[11px] text-ink-tertiary">
@@ -708,6 +772,212 @@ function CreateSupplierModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function SupplierDocsPanel({ supplierId }: { supplierId: string }) {
+  const { toast } = useToast();
+  const [docs, setDocs] = useState<SupplierDocMeta[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [uploadKind, setUploadKind] = useState<SupplierDocKind>("business-license");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/admin/suppliers/${supplierId}/documents`, { cache: "no-store" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Load failed (${r.status})`);
+      setDocs(d.documents ?? []);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't load documents", "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [supplierId, toast]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // reset so the same filename can be re-uploaded
+    if (!file) return;
+    if (file.size > MAX_DOC_BYTES) {
+      toast(`File too large: ${(file.size / 1024 / 1024).toFixed(1)} MB (max 4 MB)`, "error");
+      return;
+    }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("kind", uploadKind);
+      const r = await fetch(`/api/admin/suppliers/${supplierId}/documents`, {
+        method: "POST",
+        body: fd,
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Upload failed (${r.status})`);
+      toast(`Uploaded ${d.document.filename}`, "success");
+      await load();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Upload failed", "error");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function review(docId: string, status: SupplierDocStatus) {
+    setReviewingId(docId);
+    try {
+      const r = await fetch(
+        `/api/admin/suppliers/${supplierId}/documents/${docId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        },
+      );
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Review failed (${r.status})`);
+      setDocs((prev) => prev.map((x) => (x.id === docId ? (d.document as SupplierDocMeta) : x)));
+      toast(`Marked ${status}`, "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Review failed", "error");
+    } finally {
+      setReviewingId(null);
+    }
+  }
+
+  async function remove(docId: string, filename: string) {
+    if (!confirm(`Delete ${filename}? This can't be undone.`)) return;
+    setReviewingId(docId);
+    try {
+      const r = await fetch(
+        `/api/admin/suppliers/${supplierId}/documents/${docId}`,
+        { method: "DELETE" },
+      );
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Delete failed (${r.status})`);
+      setDocs((prev) => prev.filter((x) => x.id !== docId));
+      toast(`Deleted ${filename}`, "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Delete failed", "error");
+    } finally {
+      setReviewingId(null);
+    }
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+          Documents ({docs.length})
+        </div>
+        <div className="flex items-center gap-1">
+          <select
+            value={uploadKind}
+            onChange={(e) => setUploadKind(e.target.value as SupplierDocKind)}
+            className="h-7 rounded-md border border-bg-border bg-bg-app px-2 text-[11px]"
+          >
+            {(Object.keys(DOC_KIND_LABEL) as SupplierDocKind[]).map((k) => (
+              <option key={k} value={k}>{DOC_KIND_LABEL[k]}</option>
+            ))}
+          </select>
+          <label className="inline-flex items-center gap-1 rounded-md border border-brand-500/40 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/20 cursor-pointer">
+            {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+            Upload
+            <input
+              type="file"
+              className="hidden"
+              onChange={handleFileChange}
+              disabled={uploading}
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.doc,.docx"
+            />
+          </label>
+        </div>
+      </div>
+
+      {loading && docs.length === 0 ? (
+        <div className="flex items-center gap-2 rounded-md border border-bg-border bg-bg-card px-3 py-2 text-[11px] text-ink-tertiary">
+          <Loader2 className="h-3 w-3 animate-spin" /> Loading documents…
+        </div>
+      ) : docs.length === 0 ? (
+        <div className="rounded-md border border-bg-border bg-bg-card px-3 py-2 text-[11px] text-ink-tertiary">
+          No documents yet. Upload a business license + tax cert/EIN to advance to L2.
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {docs.map((d) => (
+            <li key={d.id} className="rounded-md border border-bg-border bg-bg-card p-3">
+              <div className="flex items-start gap-2">
+                <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-tertiary" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[12px] font-medium text-ink-primary truncate">
+                      {DOC_KIND_LABEL[d.kind]}
+                    </span>
+                    <span className={`rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${DOC_STATUS_TONE[d.status]}`}>
+                      {d.status}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 truncate text-[10px] font-mono text-ink-tertiary" title={d.filename}>
+                    {d.filename} · {(d.sizeBytes / 1024).toFixed(0)} KB · {relTime(d.uploadedAt)}
+                  </div>
+                  {d.reviewedAt && (
+                    <div className="text-[10px] text-ink-tertiary">
+                      Reviewed by {d.reviewedBy} {relTime(d.reviewedAt)}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <a
+                    href={`/api/admin/suppliers/${supplierId}/documents/${d.id}?download=1`}
+                    title="Download"
+                    className="grid h-6 w-6 place-items-center rounded-md border border-bg-border bg-bg-app text-ink-tertiary hover:text-ink-primary"
+                  >
+                    <Download className="h-3 w-3" />
+                  </a>
+                  {d.status !== "approved" && (
+                    <button
+                      type="button"
+                      onClick={() => review(d.id, "approved")}
+                      disabled={reviewingId === d.id}
+                      title="Approve"
+                      className="grid h-6 w-6 place-items-center rounded-md border border-accent-green/40 bg-accent-green/15 text-accent-green hover:bg-accent-green/25 disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="h-3 w-3" />
+                    </button>
+                  )}
+                  {d.status !== "rejected" && (
+                    <button
+                      type="button"
+                      onClick={() => review(d.id, "rejected")}
+                      disabled={reviewingId === d.id}
+                      title="Reject"
+                      className="grid h-6 w-6 place-items-center rounded-md border border-accent-red/40 bg-accent-red/15 text-accent-red hover:bg-accent-red/25 disabled:opacity-50"
+                    >
+                      <XCircle className="h-3 w-3" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => remove(d.id, d.filename)}
+                    disabled={reviewingId === d.id}
+                    title="Delete"
+                    className="grid h-6 w-6 place-items-center rounded-md border border-bg-border bg-bg-app text-ink-tertiary hover:text-accent-red disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
