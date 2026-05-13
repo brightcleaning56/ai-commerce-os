@@ -80,6 +80,7 @@ export const NAV_SECTIONS: NavSection[] = [
       // Buyer / supplier / business directory feed the leads funnel.
       { label: "Buyer Discovery", href: "/buyers", icon: Users, requires: "leads:read" },
       { label: "Supplier Finder", href: "/suppliers", icon: Factory, requires: "leads:read" },
+      { label: "Supplier Registry", href: "/admin/suppliers", icon: ShieldCheck, badge: "NEW", requires: "leads:read" },
       { label: "Business Directory", href: "/admin/businesses", icon: Building2, badge: "NEW", requires: "leads:read" },
       // Supply graph is system-level data infrastructure.
       { label: "Supply Graph", href: "/admin/edges", icon: GitBranch, badge: "NEW", requires: "system:read" },
