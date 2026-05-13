@@ -421,6 +421,11 @@ export default function SystemHealthPage() {
             </div>
           </div>
 
+          {/* Postmark live status — queries Postmark's API directly so the
+              operator can see "is email actually working right now?" vs
+              having to dig through Postmark's dashboard. */}
+          <PostmarkStatusCard />
+
           {/* Voice diagnostics — mic test + place test call to verify the
               full audio path before any real lead. Lives next to the
               transport-test card since it serves the same purpose:
@@ -718,6 +723,275 @@ function relTime(iso: string): string {
   if (ms < 5_000) return "just now";
   if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
   return `${Math.floor(ms / 60_000)}m ago`;
+}
+
+// ─── Postmark live status card ───────────────────────────────────────
+//
+// Queries /api/admin/postmark-status which proxies the Postmark REST
+// API server-side using POSTMARK_TOKEN. Surfaces approval state,
+// today's send count + bounce rate, last 10 outbound messages, and
+// recent bounces so the operator can answer "is email actually
+// working" without leaving the app.
+
+type PostmarkServerInfo = {
+  id: number;
+  name: string;
+  color: string;
+  approvalState: string;
+  smtpApiActivated: boolean;
+  deliveryType: string;
+  bounceHookUrl: string | null;
+  inboundHookUrl: string | null;
+};
+type PostmarkStatsInfo = {
+  sent: number;
+  bounced: number;
+  spamComplaints: number;
+  tracked: number;
+  bounceRate: number;
+};
+type PostmarkMessageInfo = {
+  messageId: string;
+  to: string;
+  subject: string;
+  status: string;
+  receivedAt: string;
+};
+type PostmarkBounceInfo = {
+  id: number;
+  email: string;
+  type: string;
+  typeCode: number;
+  description: string;
+  bouncedAt: string;
+};
+type PostmarkStatusResponse = {
+  configured: boolean;
+  error?: string;
+  fixHint?: string;
+  server: PostmarkServerInfo | null;
+  serverError: string | null;
+  stats: PostmarkStatsInfo | null;
+  recentMessages: PostmarkMessageInfo[];
+  recentBounces: PostmarkBounceInfo[];
+  issues: string[];
+  checkedAt: string;
+};
+
+function PostmarkStatusCard() {
+  const [data, setData] = useState<PostmarkStatusResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/admin/postmark-status", { cache: "no-store" });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${t.slice(0, 200)}`);
+      }
+      const j = (await res.json()) as PostmarkStatusResponse;
+      setData(j);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-bg-border px-5 py-3.5">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Mail className="h-4 w-4 text-brand-300" /> Postmark live status
+        </div>
+        <div className="flex items-center gap-2 text-[11px] text-ink-tertiary">
+          {data?.checkedAt && <span>checked {relTime(data.checkedAt)}</span>}
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-base px-2 py-1 text-[11px] hover:bg-bg-border disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
+            Recheck
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-3 p-5">
+        {error && (
+          <div className="rounded-md border border-rose-300/30 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-200">
+            Could not reach status endpoint: {error}
+          </div>
+        )}
+
+        {data && !data.configured && (
+          <div className="rounded-md border border-amber-300/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200">
+            <div className="font-semibold">Postmark not configured</div>
+            <div className="mt-0.5">{data.error}</div>
+            {data.fixHint && <div className="mt-1 text-amber-300/80">{data.fixHint}</div>}
+          </div>
+        )}
+
+        {data?.serverError && (
+          <div className="rounded-md border border-rose-300/30 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-200">
+            Postmark API error: {data.serverError}
+          </div>
+        )}
+
+        {data && data.issues.length > 0 && (
+          <div className="rounded-md border border-amber-300/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-100">
+            <div className="mb-1 flex items-center gap-1 font-semibold">
+              <AlertTriangle className="h-3.5 w-3.5" /> Auto-detected issues
+            </div>
+            <ul className="space-y-1 pl-4">
+              {data.issues.map((iss, i) => (
+                <li key={i} className="list-disc">{iss}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {data?.server && (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <PostmarkStat
+              label="Approval"
+              value={data.server.approvalState}
+              tone={data.server.approvalState === "Approved" ? "green" : "amber"}
+            />
+            <PostmarkStat
+              label="Delivery"
+              value={data.server.deliveryType}
+              tone={data.server.deliveryType === "Live" ? "green" : "amber"}
+            />
+            <PostmarkStat
+              label="Sent today"
+              value={data.stats ? String(data.stats.sent) : "—"}
+              tone="neutral"
+            />
+            <PostmarkStat
+              label="Bounce rate"
+              value={data.stats ? `${data.stats.bounceRate}%` : "—"}
+              tone={
+                data.stats && data.stats.bounceRate > 5
+                  ? "red"
+                  : data.stats && data.stats.bounceRate > 1
+                    ? "amber"
+                    : "green"
+              }
+            />
+          </div>
+        )}
+
+        {data?.server && (
+          <div className="text-[11px] text-ink-tertiary">
+            Server <span className="font-mono text-ink-secondary">{data.server.name}</span>
+            {data.server.bounceHookUrl ? " · bounce webhook wired" : " · no bounce webhook"}
+            {data.server.inboundHookUrl ? " · inbound webhook wired" : ""}
+          </div>
+        )}
+
+        {data && data.recentMessages.length > 0 && (
+          <div>
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+              Last {data.recentMessages.length} outbound messages
+            </div>
+            <div className="overflow-hidden rounded-md border border-bg-border">
+              <table className="w-full text-[11px]">
+                <tbody>
+                  {data.recentMessages.map((m) => {
+                    const good = m.status === "Sent" || m.status === "Opened" || m.status === "Delivered";
+                    return (
+                      <tr key={m.messageId} className="border-b border-bg-border last:border-0">
+                        <td className="w-20 px-2 py-1.5 align-top">
+                          <span
+                            className={
+                              good
+                                ? "rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-200"
+                                : "rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] text-rose-200"
+                            }
+                          >
+                            {m.status}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5 align-top text-ink-secondary">
+                          <div className="truncate font-mono text-[10px]">{m.to}</div>
+                          <div className="truncate text-ink-tertiary">{m.subject}</div>
+                        </td>
+                        <td className="w-24 px-2 py-1.5 text-right align-top text-[10px] text-ink-tertiary">
+                          {m.receivedAt ? relTime(m.receivedAt) : ""}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {data && data.recentBounces.length > 0 && (
+          <div>
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+              Recent bounces ({data.recentBounces.length})
+            </div>
+            <ul className="space-y-1 rounded-md border border-rose-300/20 bg-rose-500/5 p-2 text-[11px]">
+              {data.recentBounces.map((b) => (
+                <li key={b.id} className="text-rose-200">
+                  <span className="font-mono">{b.email}</span> · {b.type}
+                  <div className="text-[10px] text-rose-300/70">{b.description}</div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {data && data.configured && !data.server && !data.serverError && (
+          <div className="text-[11px] text-ink-tertiary">No server data returned.</div>
+        )}
+
+        {!data && !error && loading && (
+          <div className="flex items-center gap-2 text-[12px] text-ink-tertiary">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Querying Postmark…
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PostmarkStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "green" | "amber" | "red" | "neutral";
+}) {
+  const toneClass =
+    tone === "green"
+      ? "text-emerald-200"
+      : tone === "amber"
+        ? "text-amber-200"
+        : tone === "red"
+          ? "text-rose-200"
+          : "text-ink-primary";
+  return (
+    <div className="rounded-md border border-bg-border bg-bg-base px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+        {label}
+      </div>
+      <div className={`mt-0.5 text-sm font-semibold ${toneClass}`}>{value}</div>
+    </div>
+  );
 }
 
 // ─── Voice diagnostics card ──────────────────────────────────────────
