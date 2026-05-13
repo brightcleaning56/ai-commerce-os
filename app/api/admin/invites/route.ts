@@ -82,14 +82,14 @@ export async function POST(req: NextRequest) {
 
   await store.addInvite(invite);
 
-  // Best-effort notify — don't block the operator's response on email
-  // delivery. The acceptance URL is the public /invite/[token] landing
-  // page; the token IS the auth (high-entropy, sent only to the invited
-  // email). Per-user sign-in isn't wired yet, so the page tells the
-  // invitee they're confirming-but-not-logging-in today.
+  // Send the invite email AND capture the result so the UI can show the
+  // operator whether delivery actually happened. Previously this was
+  // fire-and-forget which made silent "Postmark not approved yet" or
+  // "EMAIL_LIVE=false" failures invisible -- operator saw "Sent 9h ago"
+  // but the invitee never got anything.
   const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://avyncommerce.com";
   const acceptUrl = `${origin}/invite/${invite.token}`;
-  await sendEmail({
+  const emailResult = await sendEmail({
     to: rawEmail,
     subject: `${op.name} invited you to ${op.company} on AVYN Commerce`,
     textBody: [
@@ -117,9 +117,28 @@ export async function POST(req: NextRequest) {
     metadata: { invite_id: invite.id, role: invite.role },
   }).catch((err) => {
     console.error("[invites] notification email failed", err);
+    return {
+      ok: false,
+      provider: "fallback" as const,
+      sentTo: rawEmail,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    };
   });
 
-  return NextResponse.json({ ok: true, invite });
+  return NextResponse.json({
+    ok: true,
+    invite,
+    email: {
+      ok: emailResult.ok,
+      provider: emailResult.provider,
+      sentTo: emailResult.sentTo,
+      simulated: ("simulated" in emailResult ? emailResult.simulated : false) ?? false,
+      suppressed: ("suppressed" in emailResult ? emailResult.suppressed : false) ?? false,
+      redirectedFrom: ("redirectedFrom" in emailResult ? emailResult.redirectedFrom : undefined),
+      errorMessage: emailResult.errorMessage,
+    },
+    acceptUrl, // returned so the operator can copy-paste manually if email failed
+  });
 }
 
 /**

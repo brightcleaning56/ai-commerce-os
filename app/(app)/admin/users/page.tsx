@@ -12,6 +12,7 @@ import {
   Users,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 
@@ -41,6 +42,10 @@ type Invite = {
   invitedBy: string;
   acceptedAt?: string;
   cancelledAt?: string;
+  // Token is included in the /api/admin/users response so the operator's
+  // "Copy link" button can construct the accept URL without a second
+  // round-trip. Stays scoped to the admin surface (admin auth required).
+  token?: string;
 };
 
 type UsersPayload = {
@@ -150,7 +155,33 @@ export default function UsersPage() {
   const [inviteRole, setInviteRole] = useState<InviteRole>("Operator");
   const [submitting, setSubmitting] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  // Live snapshot of the email check from /api/admin/system-health so we
+  // can warn the operator BEFORE they click Invite that delivery won't
+  // actually happen. Saves the "I sent the invite but they didn't get it"
+  // confusion that prompted this whole slice.
+  const [emailHealth, setEmailHealth] = useState<{
+    ok: boolean;
+    provider?: string;
+    liveMode?: boolean;
+    fixHint?: string;
+  } | null>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    fetch("/api/admin/system-health", { cache: "no-store", credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d?.checks?.email) return;
+        const e = d.checks.email;
+        setEmailHealth({
+          ok: e.ok,
+          provider: e.detail?.provider as string | undefined,
+          liveMode: e.detail?.liveMode as boolean | undefined,
+          fixHint: e.detail?.fixHint as string | undefined,
+        });
+      })
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -216,7 +247,36 @@ export default function UsersPage() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? `Invite failed (${r.status})`);
-      toast(`Invited ${inviteEmail} as ${inviteRole}`, "success");
+      // Show the REAL email-send status, not a generic "Invited" success.
+      // Operator was previously blind to "Postmark rejected" / "simulated
+      // because no provider" / "redirected to test recipient" cases.
+      const e = d.email ?? {};
+      if (e.ok && !e.simulated) {
+        toast(
+          `Invited ${inviteEmail} as ${inviteRole} · email delivered via ${e.provider}`,
+          "success",
+        );
+      } else if (e.simulated) {
+        toast(
+          `Invited ${inviteEmail} — email SIMULATED (no provider configured). Copy the accept link from the invite row.`,
+          "info",
+        );
+      } else if (e.suppressed) {
+        toast(
+          `Invited ${inviteEmail} — address is on the suppression list. Un-suppress at /admin/suppressions, then Resend.`,
+          "error",
+        );
+      } else if (e.redirectedFrom) {
+        toast(
+          `Invited ${inviteEmail} — email redirected to ${e.sentTo} (EMAIL_LIVE=false). Set EMAIL_LIVE=true to deliver.`,
+          "info",
+        );
+      } else {
+        toast(
+          `Invited ${inviteEmail} but EMAIL FAILED${e.errorMessage ? ` — ${e.errorMessage}` : ""}. Copy the accept link from the invite row.`,
+          "error",
+        );
+      }
       setInviteEmail("");
       setOpenInvite(false);
       await load();
@@ -224,6 +284,70 @@ export default function UsersPage() {
       toast(e instanceof Error ? e.message : "Invite failed", "error");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  /**
+   * Re-send an invite. Used when the original send failed silently
+   * (Postmark not approved / EMAIL_LIVE=false / wrong domain). Reuses
+   * the existing token + expiry; just hits the email path again.
+   */
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  async function resendInvite(inv: Invite) {
+    setResendingId(inv.id);
+    try {
+      const r = await fetch(`/api/admin/invites/${inv.id}/resend`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Resend failed (${r.status})`);
+      const e = d.email ?? {};
+      if (e.ok && !e.simulated) {
+        toast(`Resent invite to ${inv.email} via ${e.provider}`, "success");
+      } else if (e.simulated) {
+        toast(`Resend simulated (no provider). Copy the accept link from the invite row.`, "info");
+      } else if (e.suppressed) {
+        toast(`${inv.email} is on the suppression list — un-suppress first`, "error");
+      } else {
+        toast(
+          `Resend failed${e.errorMessage ? ` — ${e.errorMessage}` : ""}. Copy the accept link from the invite row.`,
+          "error",
+        );
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Resend failed", "error");
+    } finally {
+      setResendingId(null);
+    }
+  }
+
+  /**
+   * Copy the accept URL to clipboard. Failsafe for when email can't be
+   * delivered -- operator can paste the link to the invitee via Slack /
+   * Signal / whatever channel works.
+   */
+  async function copyAcceptLink(inv: Invite) {
+    // Server returns the token in the listing payload for this admin surface.
+    // Fall back to fetching the single-invite endpoint if it's somehow missing
+    // (older clients, mid-deploy, etc).
+    let token = inv.token;
+    if (!token) {
+      try {
+        const r = await fetch(`/api/admin/invites/${inv.id}`, { cache: "no-store" });
+        const d = await r.json();
+        token = d?.invite?.token;
+      } catch {}
+    }
+    if (!token) {
+      toast("Couldn't fetch invite token — try Resend instead", "error");
+      return;
+    }
+    const origin = window.location.origin;
+    const url = `${origin}/invite/${token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast(`Copied accept link for ${inv.email}`, "success");
+    } catch {
+      // Some browsers block clipboard access on non-https or without focus
+      toast(`Copy failed — link is ${url}`, "info");
     }
   }
 
@@ -306,6 +430,44 @@ export default function UsersPage() {
               {" "}Per-user sign-in + role enforcement ship in the next slice.
               Today the workspace has one privileged identity: the owner email above.
               Roles you assign are stored so the next slice can enforce them.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Email-health banner -- when delivery is broken/simulated, warn
+          the operator BEFORE they click Invite. Saves the "I sent the
+          invite but they didn't get it" debugging cycle. Surfaces the
+          specific cause + a one-click jump to the fix. */}
+      {emailHealth && (!emailHealth.ok || emailHealth.liveMode === false) && (
+        <div className={`rounded-xl border px-4 py-3 ${
+          !emailHealth.ok
+            ? "border-accent-red/40 bg-accent-red/5"
+            : "border-accent-amber/30 bg-accent-amber/5"
+        }`}>
+          <div className="flex items-start gap-3 text-[12px]">
+            <div className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${
+              !emailHealth.ok ? "bg-accent-red/15" : "bg-accent-amber/15"
+            }`}>
+              <AlertCircle className={`h-3.5 w-3.5 ${
+                !emailHealth.ok ? "text-accent-red" : "text-accent-amber"
+              }`} />
+            </div>
+            <div className="flex-1 text-ink-secondary">
+              <span className={`font-semibold ${
+                !emailHealth.ok ? "text-accent-red" : "text-accent-amber"
+              }`}>
+                {!emailHealth.ok
+                  ? "Email delivery is NOT configured"
+                  : `Email is in test mode (provider: ${emailHealth.provider ?? "unknown"}, EMAIL_LIVE=false)`}
+              </span>
+              {" "}— invites will land in your invitee&apos;s inbox <strong>only after</strong> this is fixed.
+              {emailHealth.fixHint && <> {emailHealth.fixHint}</>}
+              {" "}Meanwhile, click <strong>Copy link</strong> on each pending invite below to send the accept URL manually (Slack / Signal / text).
+              {" "}
+              <Link href="/admin/system-health" className="font-semibold text-brand-300 underline hover:text-brand-200">
+                Open System Health →
+              </Link>
             </div>
           </div>
         </div>
@@ -522,13 +684,30 @@ export default function UsersPage() {
                           </td>
                           <td className="px-3 py-3 text-right">
                             {inv.status === "pending" ? (
-                              <button
-                                onClick={() => cancelInvite(inv)}
-                                disabled={cancellingId === inv.id}
-                                className="text-[11px] text-ink-tertiary hover:text-accent-red disabled:opacity-60"
-                              >
-                                {cancellingId === inv.id ? "Cancelling…" : "Cancel"}
-                              </button>
+                              <div className="flex items-center justify-end gap-2 text-[11px]">
+                                <button
+                                  onClick={() => resendInvite(inv)}
+                                  disabled={resendingId === inv.id}
+                                  className="rounded-md border border-brand-500/40 bg-brand-500/10 px-2 py-1 font-semibold text-brand-200 hover:bg-brand-500/20 disabled:opacity-60"
+                                  title="Resend the invite email (same accept link)"
+                                >
+                                  {resendingId === inv.id ? "Resending…" : "Resend"}
+                                </button>
+                                <button
+                                  onClick={() => copyAcceptLink(inv)}
+                                  className="rounded-md border border-bg-border bg-bg-hover/40 px-2 py-1 text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+                                  title="Copy the accept link to clipboard (paste it to the invitee via Slack / etc when email isn't working)"
+                                >
+                                  Copy link
+                                </button>
+                                <button
+                                  onClick={() => cancelInvite(inv)}
+                                  disabled={cancellingId === inv.id}
+                                  className="text-ink-tertiary hover:text-accent-red disabled:opacity-60"
+                                >
+                                  {cancellingId === inv.id ? "Cancelling…" : "Cancel"}
+                                </button>
+                              </div>
                             ) : (
                               <span className="text-[11px] text-ink-tertiary">—</span>
                             )}
