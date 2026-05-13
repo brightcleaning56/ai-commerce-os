@@ -115,22 +115,55 @@ export function mintAccessToken(input: AccessTokenInput): AccessTokenResult {
  * `callerId` MUST be a number you OWN in Twilio (or have verified for
  * outbound). Reads TWILIO_FROM (already used by SMS) by default; the
  * route handler can override per-call if you have multiple numbers.
+ *
+ * Recording behavior: enabled when TWILIO_RECORD_CALLS=true (default
+ * off so deploys don't accidentally record without operator opt-in).
+ * Uses dual-channel recording so the operator's voice and the buyer's
+ * voice land on separate channels for cleaner review + auto-transcription.
+ * Twilio POSTs the recording URL back to /api/voice/recording-status
+ * once the call completes; that handler maps CallSid → recording URL
+ * for client-side display.
  */
-export function buildOutboundTwiml(toNumber: string, callerIdOverride?: string): string {
-  const callerId = callerIdOverride || process.env.TWILIO_FROM || "";
+export function buildOutboundTwiml(args: {
+  toNumber: string;
+  callerIdOverride?: string;
+  /**
+   * Absolute URL of the recording-status webhook on this deployment.
+   * Built from the inbound request URL by the route handler so we
+   * don't have to guess the host.
+   */
+  recordingStatusUrl?: string;
+}): string {
+  const callerId = args.callerIdOverride || process.env.TWILIO_FROM || "";
   // Sanitize the To number — strip anything that's not a digit, plus, or
   // SIP characters. Defends against TwiML injection via crafted To values.
-  const safeTo = toNumber.replace(/[^+\d#*]/g, "");
+  const safeTo = args.toNumber.replace(/[^+\d#*]/g, "");
   const safeCaller = callerId.replace(/[^+\d]/g, "");
+
+  const recordEnabled =
+    process.env.TWILIO_RECORD_CALLS === "true" && !!args.recordingStatusUrl;
+  const recordAttrs = recordEnabled
+    ? ` record="record-from-answer-dual" recordingStatusCallback="${escapeXmlAttr(
+        args.recordingStatusUrl!,
+      )}" recordingStatusCallbackEvent="completed"`
+    : "";
 
   // answerOnBridge=true — the browser session doesn't ring "connected"
   // until the called party actually answers. Better operator UX.
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Dial callerId="${safeCaller}" answerOnBridge="true" timeout="30">
+  <Dial callerId="${safeCaller}" answerOnBridge="true" timeout="30"${recordAttrs}>
     <Number>${safeTo}</Number>
   </Dial>
 </Response>`;
+}
+
+function escapeXmlAttr(v: string): string {
+  return v
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 /**

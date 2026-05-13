@@ -60,7 +60,17 @@ export async function POST(req: NextRequest) {
   // Most callers omit this and we use TWILIO_FROM by default.
   const callerOverride = formParams.CallerId?.trim() || undefined;
 
-  const twiml = buildOutboundTwiml(to, callerOverride);
+  // Build the recording-status webhook URL from this request's origin
+  // so it works on any deploy (Netlify preview, prod, local ngrok)
+  // without needing NEXT_PUBLIC_APP_ORIGIN set.
+  const url = new URL(req.url);
+  const recordingStatusUrl = `${url.protocol}//${url.host}/api/voice/recording-status`;
+
+  const twiml = buildOutboundTwiml({
+    toNumber: to,
+    callerIdOverride: callerOverride,
+    recordingStatusUrl,
+  });
   return new NextResponse(twiml, {
     status: 200,
     headers: { "Content-Type": "text/xml; charset=utf-8" },

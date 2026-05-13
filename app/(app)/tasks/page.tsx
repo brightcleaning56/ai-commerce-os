@@ -38,6 +38,18 @@ type CallAttempt = {
   outcome: CallOutcome;
   notes?: string;
   callbackAt?: string;   // ISO if outcome === "callback-scheduled"
+  // Twilio CallSid -- captured from the SDK at call time. Lets the
+  // /api/voice/recordings endpoint later resolve the recording URL
+  // once Twilio's recording-status webhook fires.
+  callSid?: string;
+};
+
+type RecordingMeta = {
+  callSid: string;
+  recordingSid: string;
+  recordingUrl: string;
+  durationSec: number;
+  recordedAt: string;
 };
 
 type CallScript = {
@@ -548,6 +560,63 @@ function TaskDetail({
   // AI talking-points state -- generated on demand, persisted on the task
   const [scriptLoading, setScriptLoading] = useState(false);
 
+  // Recording metadata, keyed by CallSid. Populated by polling
+  // /api/voice/recordings whenever this task has attempts with sids
+  // but no recording yet. Twilio's recording-status webhook can take
+  // ~30s after hangup to fire, so we poll for ~5 min then give up.
+  const [recordingsBySid, setRecordingsBySid] = useState<Record<string, RecordingMeta>>({});
+
+  useEffect(() => {
+    const sids = (task.attempts ?? [])
+      .map((a) => a.callSid)
+      .filter((s): s is string => !!s)
+      .filter((s) => !recordingsBySid[s]);
+    if (sids.length === 0) return;
+
+    let cancelled = false;
+    const startedAt = Date.now();
+    const POLL_INTERVAL_MS = 5_000;
+    const POLL_TIMEOUT_MS = 5 * 60_000;
+
+    async function poll() {
+      try {
+        const r = await fetch(
+          `/api/voice/recordings?callSids=${encodeURIComponent(sids.join(","))}`,
+          { credentials: "include", cache: "no-store" },
+        );
+        if (!r.ok) return;
+        const d = (await r.json()) as { recordings: Record<string, RecordingMeta> };
+        if (cancelled) return;
+        if (Object.keys(d.recordings).length > 0) {
+          setRecordingsBySid((prev) => ({ ...prev, ...d.recordings }));
+        }
+      } catch {
+        // silent — caller will retry on the interval
+      }
+    }
+    poll();
+    const id = setInterval(() => {
+      if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+        clearInterval(id);
+        return;
+      }
+      // Stop polling early if every attempt has its recording
+      const stillMissing = (task.attempts ?? [])
+        .map((a) => a.callSid)
+        .filter((s): s is string => !!s)
+        .some((s) => !recordingsBySid[s]);
+      if (!stillMissing) {
+        clearInterval(id);
+        return;
+      }
+      poll();
+    }, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [task.attempts, recordingsBySid]);
+
   // ─── Twilio Voice browser dialer (optional) ───────────────────────
   // When VOICE_PROVIDER=twilio is configured + the @twilio/voice-sdk
   // can initialize, we replace the tel: handoff with an in-browser
@@ -560,6 +629,9 @@ function TaskDetail({
   // call-session UI (outcome pills, notes, attempts log) is identical.
   const deviceRef = useRef<unknown>(null);
   const currentCallRef = useRef<unknown>(null);
+  // CallSid captured from the SDK Call object; persisted on the attempt
+  // so the recording webhook → /tasks join works post-hangup.
+  const currentCallSidRef = useRef<string | null>(null);
   const [twilioReady, setTwilioReady] = useState(false);
   const [twilioInFlight, setTwilioInFlight] = useState<"idle" | "connecting" | "ringing" | "open">("idle");
 
@@ -725,23 +797,32 @@ function TaskDetail({
     if (twilioReady && device) {
       try {
         setTwilioInFlight("connecting");
+        currentCallSidRef.current = null;
         const call = (await device.connect({
           params: { To: contact.phone },
         })) as {
           on: (ev: string, cb: (...args: unknown[]) => void) => void;
           disconnect: () => void;
           status: () => string;
+          parameters?: { CallSid?: string };
         };
         currentCallRef.current = call;
 
         // Lifecycle events drive the UI badge + auto-suggest outcome on hangup
         call.on("ringing", () => setTwilioInFlight("ringing"));
-        call.on("accept", () => setTwilioInFlight("open"));
+        call.on("accept", () => {
+          setTwilioInFlight("open");
+          // CallSid is reliably populated by the time the call is accepted.
+          // Capture it here for join with the recording webhook later.
+          if (call.parameters?.CallSid) {
+            currentCallSidRef.current = call.parameters.CallSid;
+          }
+        });
         call.on("disconnect", () => {
           setTwilioInFlight("idle");
           currentCallRef.current = null;
-          // Don't auto-save -- operator still picks the outcome explicitly
-          // (was it actually connected? voicemail? wrong number?)
+          // Don't clear currentCallSidRef -- saveAttempt reads it after
+          // hangup to persist the CallSid on the attempt
         });
         call.on("error", (...args) => {
           const err = args[0] as { message?: string } | undefined;
@@ -790,12 +871,16 @@ function TaskDetail({
         outcomeForm.outcome === "callback-scheduled" && outcomeForm.callbackAt
           ? new Date(outcomeForm.callbackAt).toISOString()
           : undefined,
+      // Persist the CallSid so /api/voice/recordings can match this
+      // attempt to its recording once Twilio's webhook fires.
+      callSid: currentCallSidRef.current ?? undefined,
     };
+    currentCallSidRef.current = null;
     onPatch({
       attempts: [...(task.attempts ?? []), attempt],
     });
     toast(
-      `Logged ${OUTCOME_META[attempt.outcome].label.toLowerCase()} · ${durationSec}s`,
+      `Logged ${OUTCOME_META[attempt.outcome].label.toLowerCase()} · ${durationSec}s${attempt.callSid ? " · recording will appear shortly" : ""}`,
       attempt.outcome === "connected" ? "success" : "info",
     );
     cancelCall();
@@ -1094,6 +1179,7 @@ function TaskDetail({
           <ul className="space-y-2">
             {task.attempts!.slice().reverse().map((a, i) => {
               const meta = OUTCOME_META[a.outcome];
+              const recording = a.callSid ? recordingsBySid[a.callSid] : undefined;
               return (
                 <li key={i} className="rounded-md border border-bg-border bg-bg-hover/30 p-3 text-xs">
                   <div className="flex flex-wrap items-center gap-2">
@@ -1114,9 +1200,36 @@ function TaskDetail({
                         })}
                       </span>
                     )}
+                    {a.callSid && !recording && (
+                      <span className="text-ink-tertiary opacity-70" title={`CallSid ${a.callSid}`}>
+                        recording pending…
+                      </span>
+                    )}
                   </div>
                   {a.notes && (
                     <div className="mt-1 whitespace-pre-wrap text-ink-secondary">{a.notes}</div>
+                  )}
+                  {/* Recording player -- once Twilio's recording-status
+                      webhook fires and the polling effect picks it up,
+                      render an inline <audio> tag pointing at our proxy
+                      so the browser can play it without Twilio Basic Auth. */}
+                  {recording && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <audio
+                        controls
+                        preload="none"
+                        src={`/api/voice/recording-proxy/${recording.recordingSid}`}
+                        className="h-7 max-w-full flex-1"
+                      />
+                      <a
+                        href={`/api/voice/recording-proxy/${recording.recordingSid}`}
+                        download={`call-${recording.recordingSid}.mp3`}
+                        title="Download recording"
+                        className="text-[10px] text-brand-300 hover:text-brand-200"
+                      >
+                        download
+                      </a>
+                    </div>
                   )}
                 </li>
               );
