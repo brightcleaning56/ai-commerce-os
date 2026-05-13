@@ -1,6 +1,7 @@
 "use client";
 import {
   CheckCircle2,
+  CircleDot,
   Clock,
   Download,
   PhoneCall,
@@ -69,6 +70,16 @@ type RecordingMeta = {
   recordedAt: string;
 };
 
+type VoicemailRecord = {
+  id: string;
+  recordingSid: string;
+  recordingUrl: string;
+  from: string;
+  durationSec: number;
+  recordedAt: string;
+  read: boolean;
+};
+
 type FlatRow = {
   attempt: CallAttempt;
   task: LocalTask;
@@ -119,17 +130,26 @@ function withinWindow(iso: string, window: DateWindow): boolean {
 export default function CallsPage() {
   const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [recordings, setRecordings] = useState<Record<string, RecordingMeta>>({});
+  const [voicemails, setVoicemails] = useState<VoicemailRecord[]>([]);
   const [query, setQuery] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState<CallOutcome | "all">("all");
   const [dateWindow, setDateWindow] = useState<DateWindow>("7d");
   const [sortBy, setSortBy] = useState<"date" | "duration">("date");
   const { toast } = useToast();
 
+  function loadVoicemails() {
+    fetch("/api/voice/voicemails", { credentials: "include", cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { voicemails: [] }))
+      .then((d) => setVoicemails(d.voicemails ?? []))
+      .catch(() => {});
+  }
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem("aicos:tasks:v1");
       if (raw) setTasks(JSON.parse(raw));
     } catch {}
+    loadVoicemails();
   }, []);
 
   // Once tasks load, fetch recordings for any attempts that have a CallSid
@@ -149,6 +169,24 @@ export default function CallsPage() {
       .then((d) => setRecordings(d.recordings ?? {}))
       .catch(() => {});
   }, [tasks]);
+
+  async function toggleVoicemailRead(id: string, read: boolean) {
+    try {
+      const r = await fetch(`/api/voice/voicemails/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ read }),
+      });
+      if (!r.ok) throw new Error(`Mark ${read ? "read" : "unread"} failed (${r.status})`);
+      // Optimistic update + re-fetch to stay in sync
+      setVoicemails((prev) => prev.map((v) => (v.id === id ? { ...v, read } : v)));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Update failed", "error");
+    }
+  }
+
+  const unreadVoicemailCount = voicemails.filter((v) => !v.read).length;
 
   // Flatten + filter + sort
   const rows = useMemo<FlatRow[]>(() => {
@@ -307,6 +345,78 @@ export default function CallsPage() {
           ))}
         </div>
       </div>
+
+      {/* Inbound voicemails -- captured by /api/voice/inbound's <Record>
+          when the operator's browser doesn't pick up. Separate from the
+          main attempt log because they have no associated task. Newest
+          first. Unread voicemails get a brand-glow border so the operator
+          can scan + clear them quickly. */}
+      {voicemails.length > 0 && (
+        <div className="rounded-xl border border-bg-border bg-bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-bg-border px-5 py-3.5">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Voicemail className="h-4 w-4 text-accent-amber" /> Inbound voicemails
+              {unreadVoicemailCount > 0 && (
+                <span className="rounded bg-accent-amber/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-amber">
+                  {unreadVoicemailCount} unread
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] text-ink-tertiary">
+              Captured when no one answers your Twilio number
+            </div>
+          </div>
+          <ul className="divide-y divide-bg-border">
+            {voicemails.map((vm) => (
+              <li
+                key={vm.id}
+                className={`flex flex-wrap items-center gap-3 px-5 py-3 ${vm.read ? "" : "bg-accent-amber/5"}`}
+              >
+                <button
+                  onClick={() => toggleVoicemailRead(vm.id, !vm.read)}
+                  title={vm.read ? "Mark unread" : "Mark read"}
+                  className={`grid h-7 w-7 shrink-0 place-items-center rounded-md border ${
+                    vm.read
+                      ? "border-bg-border text-ink-tertiary hover:bg-bg-hover"
+                      : "border-accent-amber/40 bg-accent-amber/15 text-accent-amber hover:bg-accent-amber/25"
+                  }`}
+                >
+                  {vm.read ? <CheckCircle2 className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}
+                </button>
+                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-amber/15 text-accent-amber">
+                  <Voicemail className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className={`text-sm font-medium ${vm.read ? "text-ink-secondary" : ""}`}>
+                    Voicemail from <span className="font-mono">{vm.from}</span>
+                  </div>
+                  <div className="text-[11px] text-ink-tertiary">
+                    {new Date(vm.recordedAt).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })} · {fmtDuration(vm.durationSec)}
+                  </div>
+                </div>
+                <audio
+                  controls
+                  preload="none"
+                  src={`/api/voice/recording-proxy/${vm.recordingSid}`}
+                  className="h-7 max-w-xs"
+                />
+                <a
+                  href={`tel:${vm.from}`}
+                  title={`Call ${vm.from} back`}
+                  className="flex items-center gap-1.5 rounded-md bg-accent-green/15 px-2.5 py-1 text-[11px] font-semibold text-accent-green hover:bg-accent-green/25"
+                >
+                  <PhoneCall className="h-3 w-3" /> Call back
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Outcome filter pills */}
       <div className="flex flex-wrap items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs w-fit">

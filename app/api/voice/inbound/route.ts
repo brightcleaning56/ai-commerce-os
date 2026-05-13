@@ -60,10 +60,16 @@ export async function POST(req: NextRequest) {
 
   const callerId = (formParams.From ?? "unknown").replace(/[^+\d]/g, "");
 
+  // Voicemail recording callback gets ?source=voicemail&from=<E.164> so
+  // /api/voice/recording-status can route it to the voicemails store.
+  // Without these params the recording would land as a generic CallSid
+  // -> URL entry that no UI surfaces (since there's no task to match).
+  const voicemailCallbackUrl = new URL(recordingStatusUrl);
+  voicemailCallbackUrl.searchParams.set("source", "voicemail");
+  voicemailCallbackUrl.searchParams.set("from", callerId);
+
   // Try the operator's browser for 25s. If no answer, drop to voicemail
-  // (prerecorded greeting + 2-min recording window). The voicemail
-  // recording flows through the same recording webhook so it shows up
-  // on /admin or wherever we add an inbound surface.
+  // (prerecorded greeting + 2-min recording window).
   const greeting =
     process.env.VOICEMAIL_GREETING ||
     `${op.company || op.name || "AVYN"} can't take your call right now. Leave a message after the tone.`;
@@ -74,7 +80,7 @@ export async function POST(req: NextRequest) {
     <Client>${safeIdentity}</Client>
   </Dial>
   <Say voice="Polly.Joanna">${escapeXml(greeting)}</Say>
-  <Record maxLength="120" recordingStatusCallback="${recordingStatusUrl}" recordingStatusCallbackEvent="completed" />
+  <Record maxLength="120" recordingStatusCallback="${escapeXmlAttr(voicemailCallbackUrl.toString())}" recordingStatusCallbackEvent="completed" />
   <Say voice="Polly.Joanna">Thanks. Goodbye.</Say>
 </Response>`;
 
@@ -89,6 +95,17 @@ function escapeXml(v: string): string {
     .replace(/&/g, "&amp;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// Stricter version for attribute values (no need to escape ' since we
+// use double-quoted attributes). Used for URLs with query strings
+// where & needs to become &amp; or the XML parser breaks.
+function escapeXmlAttr(v: string): string {
+  return v
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }

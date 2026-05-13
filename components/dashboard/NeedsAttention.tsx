@@ -13,6 +13,7 @@ import {
   ShieldAlert,
   Smartphone,
   Truck,
+  Voicemail,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -28,7 +29,8 @@ type AttentionType =
   | "lead_ai_stuck"
   | "lead_hot_unhandled"
   | "inbound_reply"
-  | "lead_sms_reply";
+  | "lead_sms_reply"
+  | "voicemail_pending";
 
 type Item = {
   type: AttentionType;
@@ -57,6 +59,7 @@ const ICON: Record<AttentionType, React.ComponentType<{ className?: string }>> =
   lead_hot_unhandled: Flame,
   inbound_reply: MessageSquare,
   lead_sms_reply: Smartphone,
+  voicemail_pending: Voicemail,
 };
 
 const URGENCY_TONE: Record<Item["urgency"], { ring: string; bg: string; iconBg: string; iconText: string; cta: string }> = {

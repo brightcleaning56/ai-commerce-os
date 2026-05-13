@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sendEmail } from "@/lib/email";
+import { getOperator } from "@/lib/operator";
+import { saveVoicemail } from "@/lib/voicemails";
 import { saveVoiceRecording } from "@/lib/voiceRecordings";
 import { verifyTwilioSignature } from "@/lib/twilioVoice";
 
@@ -68,17 +71,70 @@ export async function POST(req: NextRequest) {
 
   // Twilio sends RecordingUrl WITHOUT the .mp3 extension by default.
   // Append it explicitly so the <audio> element in /tasks can play it.
-  // (Twilio also accepts .wav; .mp3 is smaller + universally supported.)
-  const mp3Url = recordingUrl.endsWith(".mp3")
-    ? recordingUrl
-    : `${recordingUrl}.mp3`;
+  const mp3Url = recordingUrl.endsWith(".mp3") ? recordingUrl : `${recordingUrl}.mp3`;
+  const durationSec = parseInt(formParams.RecordingDuration ?? "0", 10) || 0;
+  const recordedAt = new Date().toISOString();
 
+  // Voicemail branch -- /api/voice/inbound's <Record> verb appends
+  // ?source=voicemail&from=<E.164> to its callback so we route inbound
+  // voicemails into a separate store + notify the operator. Outbound
+  // call recordings (no source param) flow through the original path.
+  const url = new URL(req.url);
+  const source = url.searchParams.get("source");
+  if (source === "voicemail") {
+    const from = url.searchParams.get("from") ?? "unknown";
+    await saveVoicemail({
+      id: callSid,
+      recordingSid,
+      recordingUrl: mp3Url,
+      from,
+      durationSec,
+      recordedAt,
+      read: false,
+    });
+
+    // Operator notification -- voicemails are time-sensitive (somebody
+    // tried to reach you and got the answering machine). Email is the
+    // existing channel and won't block on Postmark hiccups.
+    const op = getOperator();
+    if (op.email) {
+      sendEmail({
+        to: op.email,
+        subject: `📞 New voicemail from ${from} (${durationSec}s)`,
+        textBody: [
+          `${from} left a ${durationSec}s voicemail at ${recordedAt}.`,
+          ``,
+          `Listen + manage at:`,
+          `${process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://avyncommerce.com"}/calls`,
+        ].join("\n"),
+        skipFooter: true,
+        metadata: { kind: "voicemail-notification", call_sid: callSid },
+      }).catch((err) => {
+        console.warn(`[voicemail] operator notify failed:`, err);
+      });
+    }
+
+    // Also save to the recording store so the recording-proxy still
+    // works (it validates against listVoiceRecordings before serving).
+    await saveVoiceRecording({
+      callSid,
+      recordingSid,
+      recordingUrl: mp3Url,
+      durationSec,
+      recordedAt,
+      channels: parseInt(formParams.RecordingChannels ?? "1", 10) || 1,
+    });
+
+    return NextResponse.json({ ok: true, persisted: true, kind: "voicemail" });
+  }
+
+  // Default: outbound (or inbound that bridged to operator) call recording
   await saveVoiceRecording({
     callSid,
     recordingSid,
     recordingUrl: mp3Url,
-    durationSec: parseInt(formParams.RecordingDuration ?? "0", 10) || 0,
-    recordedAt: new Date().toISOString(),
+    durationSec,
+    recordedAt,
     channels: parseInt(formParams.RecordingChannels ?? "1", 10) || 1,
   });
 

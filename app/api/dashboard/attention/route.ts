@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { store } from "@/lib/store";
 import { scoreLead } from "@/lib/leadScore";
+import { unreadVoicemailCount } from "@/lib/voicemails";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,7 +53,8 @@ export async function GET() {
       | "lead_ai_stuck"
       | "lead_hot_unhandled"
       | "inbound_reply"
-      | "lead_sms_reply";
+      | "lead_sms_reply"
+      | "voicemail_pending";
     count: number;
     urgency: "high" | "medium" | "low";
     label: string;
@@ -115,6 +117,23 @@ export async function GET() {
       detail: "Click \"Retry AI for N stuck\" on /leads to drain. Usually means Postmark wasn't approved when they came in.",
       href: "/leads",
       cta: "Open /leads",
+    });
+  }
+
+  // ── Inbound voicemails (operator missed the call) ─────────────────────
+  // Captured by /api/voice/inbound's <Record> when no client picked up.
+  // Each unread voicemail is a missed sales conversation -- escalate to
+  // high once 3+ pile up so the operator clears the queue.
+  const voicemailUnread = await unreadVoicemailCount();
+  if (voicemailUnread > 0) {
+    items.push({
+      type: "voicemail_pending",
+      count: voicemailUnread,
+      urgency: voicemailUnread >= 3 ? "high" : "medium",
+      label: `${voicemailUnread} new voicemail${voicemailUnread === 1 ? "" : "s"}`,
+      detail: "Buyers called your Twilio number while you were unreachable. Listen + call back.",
+      href: "/calls",
+      cta: "Open call log",
     });
   }
 
