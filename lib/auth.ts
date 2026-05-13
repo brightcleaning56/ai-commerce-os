@@ -40,6 +40,10 @@ export type CapabilityResult =
   | { ok: true; mode: "production" | "dev"; as: "owner" | "user"; user?: UserTokenPayload }
   | { ok: false; status: 401 | 403; reason: string };
 
+export type SupplierAuthResult =
+  | { ok: true; mode: "production" | "dev"; supplierId: string; email: string; payload: UserTokenPayload }
+  | { ok: false; status: 401 | 403; reason: string };
+
 /**
  * Validate the request as coming from an authenticated admin/operator.
  * Centralized so swapping to Clerk / NextAuth is a single-file change.
@@ -71,7 +75,20 @@ export async function requireAdmin(
     if (constantTimeEquals(headerToken, expected)) return { ok: true, mode: "production" };
     if (looksLikeUserToken(headerToken)) {
       const v = await verifyUserToken(headerToken);
-      if (v.ok) return { ok: true, mode: "production", user: v.payload };
+      if (v.ok) {
+        // Supplier tokens are scoped to the /portal surface ONLY. Staff
+        // routes (admin / app / etc.) must reject them — otherwise a
+        // supplier could mint themselves arbitrary read access. The
+        // portal-facing requireSupplier helper accepts them instead.
+        if (v.payload.kind === "supplier") {
+          return {
+            ok: false,
+            status: 403,
+            reason: "Supplier token can only access /portal routes",
+          };
+        }
+        return { ok: true, mode: "production", user: v.payload };
+      }
       return { ok: false, status: 401, reason: `Invalid user token: ${v.reason}` };
     }
     return { ok: false, status: 401, reason: "Invalid admin token" };
@@ -93,11 +110,61 @@ export async function requireAdmin(
     }
     if (looksLikeUserToken(cookieToken)) {
       const v = await verifyUserToken(cookieToken);
-      if (v.ok) return { ok: true, mode: "production", user: v.payload };
+      if (v.ok) {
+        if (v.payload.kind === "supplier") {
+          return {
+            ok: false,
+            status: 403,
+            reason: "Supplier session can only access /portal routes",
+          };
+        }
+        return { ok: true, mode: "production", user: v.payload };
+      }
     }
   }
 
   return { ok: false, status: 401, reason: "Missing Authorization header or session cookie" };
+}
+
+/**
+ * Supplier-portal auth gate. Accepts ONLY supplier-kind invite tokens
+ * (rejects ADMIN_TOKEN, rejects staff invite tokens). Use this on every
+ * /api/portal/* route handler.
+ *
+ * In dev mode (no ADMIN_TOKEN), there's no portal session to validate
+ * — returns 401 so dev environments don't accidentally expose data
+ * the production path would scope.
+ */
+export async function requireSupplier(
+  req: { headers: Headers } | Request,
+): Promise<SupplierAuthResult> {
+  const expected = process.env.ADMIN_TOKEN;
+  if (!expected) {
+    return { ok: false, status: 401, reason: "Portal disabled in dev (ADMIN_TOKEN unset)" };
+  }
+
+  const candidates: string[] = [];
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth.startsWith("Bearer ")) candidates.push(auth.slice("Bearer ".length));
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const match = /(?:^|;\s*)aicos_admin=([^;]+)/.exec(cookieHeader);
+  if (match) candidates.push(decodeURIComponent(match[1]));
+
+  for (const token of candidates) {
+    if (!looksLikeUserToken(token)) continue;
+    const v = await verifyUserToken(token);
+    if (!v.ok) continue;
+    if (v.payload.kind !== "supplier" || !v.payload.supplierId) continue;
+    return {
+      ok: true,
+      mode: "production",
+      supplierId: v.payload.supplierId,
+      email: v.payload.email,
+      payload: v.payload,
+    };
+  }
+
+  return { ok: false, status: 401, reason: "No valid supplier session" };
 }
 
 /**

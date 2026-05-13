@@ -120,20 +120,36 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check Authorization header (programmatic API access)
+  // Two protected surfaces: staff (/(app), /admin, /api/admin, etc.)
+  // and supplier-portal (/portal, /api/portal). A single cookie type
+  // covers both; we route based on the token's `kind` claim.
+  const isPortalPath = pathname.startsWith("/portal") || pathname.startsWith("/api/portal");
+
+  // 1. Check Authorization header (programmatic API access)
   const auth = req.headers.get("authorization") ?? "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
   if (bearer) {
+    // Global ADMIN_TOKEN — full access, but supplier-portal pages
+    // aren't designed for it. Let it through anyway; the page-level
+    // check is permissive.
     if (constantTimeEquals(bearer, expected)) {
       return withNoCDNCache(NextResponse.next());
     }
     if (looksLikeUserToken(bearer)) {
       const v = await verifyUserToken(bearer);
-      if (v.ok) return withNoCDNCache(NextResponse.next());
+      if (v.ok) {
+        const ok = isPortalPath
+          ? v.payload.kind === "supplier"
+          : v.payload.kind !== "supplier";
+        if (ok) return withNoCDNCache(NextResponse.next());
+        // Wrong kind for this surface — reject as 403 for API, redirect
+        // for browser navigation so the user lands on the right side.
+        return rejectMismatch(req, isPortalPath, pathname);
+      }
     }
   }
 
-  // Check cookie (browser session)
+  // 2. Check cookie (browser session)
   const cookie = req.cookies.get("aicos_admin")?.value ?? "";
   if (cookie) {
     if (constantTimeEquals(cookie, expected)) {
@@ -141,17 +157,44 @@ export async function middleware(req: NextRequest) {
     }
     if (looksLikeUserToken(cookie)) {
       const v = await verifyUserToken(cookie);
-      if (v.ok) return withNoCDNCache(NextResponse.next());
+      if (v.ok) {
+        const ok = isPortalPath
+          ? v.payload.kind === "supplier"
+          : v.payload.kind !== "supplier";
+        if (ok) return withNoCDNCache(NextResponse.next());
+        return rejectMismatch(req, isPortalPath, pathname);
+      }
     }
   }
 
-  // API requests get 401, browser requests redirect to signin
+  // No valid session — API gets 401, browser gets redirected to sign-in.
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const signinUrl = new URL("/signin", req.url);
   signinUrl.searchParams.set("next", pathname);
   return NextResponse.redirect(signinUrl);
+}
+
+/**
+ * The token is valid but for the wrong surface (staff token hitting
+ * /portal, or supplier token hitting /(app)). For API requests we
+ * 403 with a hint; for browser navigation we redirect them to their
+ * own landing page so they don't get stuck.
+ */
+function rejectMismatch(req: NextRequest, attemptingPortal: boolean, pathname: string): NextResponse {
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json(
+      {
+        error: attemptingPortal
+          ? "Staff sessions cannot access /portal — sign in with a supplier token to use the portal."
+          : "Supplier sessions can only access /portal — request access to staff surfaces from the workspace owner.",
+      },
+      { status: 403 },
+    );
+  }
+  const target = attemptingPortal ? "/" : "/portal";
+  return NextResponse.redirect(new URL(target, req.url));
 }
 
 export const config = {

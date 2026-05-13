@@ -3,9 +3,13 @@ import {
   AlertCircle,
   Building2,
   CheckCircle2,
+  Copy,
   Download,
+  Eye,
+  EyeOff,
   Factory,
   FileText,
+  KeyRound,
   Loader2,
   Plus,
   RefreshCw,
@@ -161,6 +165,32 @@ export default function AdminSuppliersPage() {
   const [selected, setSelected] = useState<SupplierRecord | null>(null);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [openCreate, setOpenCreate] = useState(false);
+  const [portalToken, setPortalToken] = useState<{
+    token: string;
+    portalUrl: string;
+    email: string;
+    supplierName: string;
+  } | null>(null);
+  const [issuingPortalId, setIssuingPortalId] = useState<string | null>(null);
+
+  async function issuePortalToken(s: SupplierRecord) {
+    setIssuingPortalId(s.id);
+    try {
+      const r = await fetch(`/api/admin/suppliers/${s.id}/portal-token`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Mint failed (${r.status})`);
+      setPortalToken({
+        token: d.token,
+        portalUrl: d.portalUrl,
+        email: d.email,
+        supplierName: s.legalName,
+      });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't issue portal token", "error");
+    } finally {
+      setIssuingPortalId(null);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -406,6 +436,19 @@ export default function AdminSuppliersPage() {
           onClose={() => setSelected(null)}
           onVerify={(level) => runVerification(selected, level)}
           verifying={verifyingId === selected.id}
+          onIssuePortalToken={() => issuePortalToken(selected)}
+          issuingPortalToken={issuingPortalId === selected.id}
+        />
+      )}
+
+      {portalToken && (
+        <PortalTokenModal
+          token={portalToken.token}
+          email={portalToken.email}
+          portalUrl={portalToken.portalUrl}
+          supplierName={portalToken.supplierName}
+          onClose={() => setPortalToken(null)}
+          onCopied={() => toast(`Token copied — send it to ${portalToken.email}`, "success")}
         />
       )}
 
@@ -446,33 +489,49 @@ function SupplierDrawer({
   onClose,
   onVerify,
   verifying,
+  onIssuePortalToken,
+  issuingPortalToken,
 }: {
   supplier: SupplierRecord;
   onClose: () => void;
   onVerify: (level: "L1" | "L2") => void;
   verifying: boolean;
+  onIssuePortalToken: () => void;
+  issuingPortalToken: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-bg-app/70 backdrop-blur-sm">
       <div className="w-full max-w-xl overflow-y-auto bg-bg-panel">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-bg-border bg-bg-panel px-5 py-3">
-          <div className="flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-brand-300" />
-            <div className="text-sm font-semibold truncate">{supplier.legalName}</div>
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-bg-border bg-bg-panel px-5 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Building2 className="h-4 w-4 shrink-0 text-brand-300" />
+            <div className="truncate text-sm font-semibold">{supplier.legalName}</div>
             <span
-              className={`rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${TIER_TONE[supplier.tier]}`}
+              className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold capitalize ${TIER_TONE[supplier.tier]}`}
             >
               {supplier.tier}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={onIssuePortalToken}
+              disabled={issuingPortalToken}
+              title="Mint a sign-in token so this supplier can self-serve verification at /portal"
+              className="inline-flex items-center gap-1 rounded-md border border-brand-500/40 bg-brand-500/10 px-2 py-1 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/20 disabled:opacity-50"
+            >
+              {issuingPortalToken ? <Loader2 className="h-3 w-3 animate-spin" /> : <KeyRound className="h-3 w-3" />}
+              {issuingPortalToken ? "Issuing…" : "Issue portal access"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="space-y-5 p-5">
@@ -770,6 +829,116 @@ function CreateSupplierModal({
             {submitting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
             Create supplier
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PortalTokenModal({
+  token,
+  email,
+  portalUrl,
+  supplierName,
+  onClose,
+  onCopied,
+}: {
+  token: string;
+  email: string;
+  portalUrl: string;
+  supplierName: string;
+  onClose: () => void;
+  onCopied: () => void;
+}) {
+  const [show, setShow] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+      onCopied();
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setShow(true);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg-app/80 px-5 backdrop-blur-sm">
+      <div className="relative w-full max-w-lg rounded-2xl border border-bg-border bg-bg-card p-6 shadow-2xl">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+        >
+          <X className="h-4 w-4" />
+        </button>
+
+        <div className="flex items-center gap-2">
+          <div className="grid h-9 w-9 place-items-center rounded-lg bg-brand-500/15">
+            <KeyRound className="h-4 w-4 text-brand-200" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold">Portal access for {supplierName}</div>
+            <div className="text-[11px] text-ink-tertiary">
+              Send this token + sign-in URL to <span className="font-mono">{email}</span>. Won&apos;t be shown again.
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-bg-border bg-bg-app p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+              Sign-in token (180-day expiry)
+            </div>
+            <button
+              type="button"
+              onClick={() => setShow((s) => !s)}
+              className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-hover/40 px-2 py-0.5 text-[11px] text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+            >
+              {show ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              {show ? "Hide" : "Reveal"}
+            </button>
+          </div>
+          <div
+            className="mt-2 max-h-32 overflow-auto break-all rounded-md border border-bg-border bg-bg-card px-3 py-2 font-mono text-[11px] text-ink-primary"
+            style={{ filter: show ? undefined : "blur(5px)" }}
+          >
+            {token}
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={copy}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-bg-border bg-bg-hover/40 px-3 py-2 text-[12px] font-medium text-ink-primary hover:bg-bg-hover"
+          >
+            <Copy className="h-3.5 w-3.5" />
+            {copied ? "Copied" : "Copy token"}
+          </button>
+          <a
+            href={portalUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex flex-1 items-center justify-center rounded-lg border border-bg-border px-3 py-2 text-[12px] font-medium text-ink-secondary hover:text-ink-primary"
+          >
+            Open /portal
+          </a>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-accent-amber/30 bg-accent-amber/5 p-3 text-[11px] text-ink-secondary">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-amber" />
+            <div>
+              Anyone with this token can sign in as <span className="font-mono">{email}</span> and
+              upload documents on behalf of <strong>{supplierName}</strong>. Send it over a private
+              channel. Need to revoke? Rotate ADMIN_TOKEN to invalidate every outstanding token
+              (staff + suppliers) at once.
+            </div>
+          </div>
         </div>
       </div>
     </div>

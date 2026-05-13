@@ -40,11 +40,23 @@
 
 export type UserTokenPayload = {
   v: 1;
-  sub: string;       // invite id
+  sub: string;         // invite id (kind="user") or supplier id (kind="supplier")
   email: string;
-  role: string;      // "Owner" | "Admin" | "Operator" | "Viewer" | "Billing"
-  exp: number;       // unix seconds
-  jti: string;       // random nonce
+  role: string;        // staff role for kind="user"; "Supplier" for kind="supplier"
+  exp: number;         // unix seconds
+  jti: string;         // random nonce
+  /**
+   * Identity type. Omitted (or "user") for internal staff invite tokens.
+   * "supplier" for external supplier-portal access tokens. Staff routes
+   * (admin / internal /(app) pages) MUST reject "supplier" tokens — they
+   * grant scoped access to a single supplier's data via /portal only.
+   */
+  kind?: "user" | "supplier";
+  /**
+   * When kind="supplier", the registry id of the supplier this token
+   * grants access to. Portal endpoints scope all reads + writes by this.
+   */
+  supplierId?: string;
 };
 
 export type VerifyResult =
@@ -97,24 +109,68 @@ export async function mintUserToken(input: {
   role: string;
   ttlSeconds?: number; // default 90 days
 }): Promise<string> {
+  return mintToken({
+    sub: input.inviteId,
+    email: input.email,
+    role: input.role,
+    ttlSeconds: input.ttlSeconds,
+    kind: "user",
+  });
+}
+
+/**
+ * Mint a supplier-portal token. Owner-only at the API layer. The
+ * supplier never sees ADMIN_TOKEN; their token is HMAC-signed against
+ * it so rotating ADMIN_TOKEN mass-revokes every outstanding supplier
+ * session at the same time as every staff session. Acceptable trade
+ * because both are subject to the same blast-radius policy.
+ *
+ * Default TTL is 180 days (longer than staff tokens — suppliers
+ * shouldn't be re-onboarded as often as employees turn over).
+ */
+export async function mintSupplierToken(input: {
+  supplierId: string;
+  email: string;
+  ttlSeconds?: number; // default 180 days
+}): Promise<string> {
+  return mintToken({
+    sub: input.supplierId,
+    email: input.email,
+    role: "Supplier",
+    ttlSeconds: input.ttlSeconds ?? 60 * 60 * 24 * 180,
+    kind: "supplier",
+    supplierId: input.supplierId,
+  });
+}
+
+async function mintToken(input: {
+  sub: string;
+  email: string;
+  role: string;
+  ttlSeconds?: number;
+  kind?: "user" | "supplier";
+  supplierId?: string;
+}): Promise<string> {
   const secret = process.env.ADMIN_TOKEN;
   if (!secret) {
     throw new Error(
-      "Cannot mint user token: ADMIN_TOKEN env var not set. The token is HMAC-signed with ADMIN_TOKEN as the key.",
+      "Cannot mint token: ADMIN_TOKEN env var not set. Tokens are HMAC-signed with ADMIN_TOKEN as the key.",
     );
   }
   const now = Math.floor(Date.now() / 1000);
-  const ttl = input.ttlSeconds ?? 60 * 60 * 24 * 90; // 90 days
+  const ttl = input.ttlSeconds ?? 60 * 60 * 24 * 90; // 90 days default
   const jtiBytes = new Uint8Array(8);
   crypto.getRandomValues(jtiBytes);
   const jti = Array.from(jtiBytes, (b) => b.toString(16).padStart(2, "0")).join("");
   const payload: UserTokenPayload = {
     v: 1,
-    sub: input.inviteId,
+    sub: input.sub,
     email: input.email.toLowerCase(),
     role: input.role,
     exp: now + ttl,
     jti,
+    kind: input.kind ?? "user",
+    supplierId: input.supplierId,
   };
   const payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
   const payloadB64 = b64urlEncode(payloadBytes);
