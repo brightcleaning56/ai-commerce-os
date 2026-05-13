@@ -640,7 +640,21 @@ export type Lead = {
  * the team, and so the next slice (per-user identity + role enforcement)
  * has data to work with.
  */
-export type InviteRole = "Admin" | "Operator" | "Viewer" | "Billing";
+// Invite roles mirror the assignable Role list in lib/capabilities.ts.
+// Owner is excluded because it's a singleton (the workspace owner is
+// authenticated via ADMIN_TOKEN, not via an invite).
+//
+// "Billing" is gone — Finance covers that resource now.
+export type InviteRole =
+  | "Admin"
+  | "Sales"
+  | "Operator"
+  | "Finance"
+  | "Marketing"
+  | "Support"
+  | "Analyst"
+  | "Developer"
+  | "Viewer";
 export type InviteStatus = "pending" | "accepted" | "cancelled" | "expired";
 
 export type Invite = {

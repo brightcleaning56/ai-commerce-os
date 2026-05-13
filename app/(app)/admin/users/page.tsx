@@ -2,16 +2,20 @@
 import {
   AlertCircle,
   Check,
+  ChevronDown,
   Copy,
   Eye,
   EyeOff,
   KeyRound,
   Loader2,
+  Lock,
   Mail,
+  Save,
   Search,
   Shield,
   ShieldCheck,
   ShieldOff,
+  Sparkles,
   UserPlus,
   Users,
   X,
@@ -20,8 +24,25 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 
-type Role = "Owner" | "Admin" | "Operator" | "Viewer" | "Billing";
+// Mirrors lib/capabilities.ts ROLES (kept inline so the page stays a
+// pure client component without importing server-side modules).
+const ROLES_LIST = [
+  "Owner",
+  "Admin",
+  "Sales",
+  "Operator",
+  "Finance",
+  "Marketing",
+  "Support",
+  "Analyst",
+  "Developer",
+  "Viewer",
+] as const;
+type Role = (typeof ROLES_LIST)[number];
 type InviteRole = Exclude<Role, "Owner">;
+const INVITE_ROLES: InviteRole[] = ROLES_LIST.filter(
+  (r): r is InviteRole => r !== "Owner",
+);
 type InviteStatus = "pending" | "accepted" | "cancelled" | "expired";
 
 type Owner = {
@@ -66,11 +87,16 @@ type UsersPayload = {
 };
 
 const ROLE_TONE: Record<Role, string> = {
-  Owner: "bg-gradient-brand text-white",
-  Admin: "bg-brand-500/15 text-brand-200",
-  Operator: "bg-accent-blue/15 text-accent-blue",
-  Viewer: "bg-bg-hover text-ink-secondary",
-  Billing: "bg-accent-green/15 text-accent-green",
+  Owner:      "bg-gradient-brand text-white",
+  Admin:      "bg-brand-500/15 text-brand-200",
+  Sales:      "bg-accent-amber/15 text-accent-amber",
+  Operator:   "bg-accent-blue/15 text-accent-blue",
+  Finance:    "bg-accent-green/15 text-accent-green",
+  Marketing:  "bg-pink-500/15 text-pink-300",
+  Support:    "bg-cyan-500/15 text-cyan-300",
+  Analyst:    "bg-indigo-500/15 text-indigo-300",
+  Developer:  "bg-slate-500/15 text-slate-300",
+  Viewer:     "bg-bg-hover text-ink-secondary",
 };
 
 const STATUS_TONE: Record<InviteStatus | "Active", string> = {
@@ -81,55 +107,24 @@ const STATUS_TONE: Record<InviteStatus | "Active", string> = {
   expired: "bg-bg-hover text-ink-tertiary",
 };
 
-// Today's actual permission story. Honest: only the owner has any
-// privileges because per-user auth isn't wired yet. Other roles are
-// "planned" — the operator can plan the team and create invites, but
-// the next slice is what actually enforces these.
-type Level = "All" | "Read" | "Own" | "None" | "Planned";
-const ROLE_PERMISSIONS: Record<Role, { area: string; level: Level }[]> = {
-  Owner: [
-    { area: "Workspace", level: "All" },
-    { area: "Billing", level: "All" },
-    { area: "Agents", level: "All" },
-    { area: "CRM Pipeline", level: "All" },
-    { area: "Marketplace", level: "All" },
-  ],
-  Admin: [
-    { area: "Workspace", level: "Planned" },
-    { area: "Billing", level: "Planned" },
-    { area: "Agents", level: "Planned" },
-    { area: "CRM Pipeline", level: "Planned" },
-    { area: "Marketplace", level: "Planned" },
-  ],
-  Operator: [
-    { area: "Workspace", level: "Planned" },
-    { area: "Billing", level: "Planned" },
-    { area: "Agents", level: "Planned" },
-    { area: "CRM Pipeline", level: "Planned" },
-    { area: "Marketplace", level: "Planned" },
-  ],
-  Viewer: [
-    { area: "Workspace", level: "Planned" },
-    { area: "Billing", level: "Planned" },
-    { area: "Agents", level: "Planned" },
-    { area: "CRM Pipeline", level: "Planned" },
-    { area: "Marketplace", level: "Planned" },
-  ],
-  Billing: [
-    { area: "Workspace", level: "Planned" },
-    { area: "Billing", level: "Planned" },
-    { area: "Agents", level: "Planned" },
-    { area: "CRM Pipeline", level: "Planned" },
-    { area: "Marketplace", level: "Planned" },
-  ],
-};
-
-const LEVEL_TONE: Record<Level, string> = {
-  All: "text-accent-green",
-  Read: "text-accent-blue",
-  Own: "text-accent-amber",
-  None: "text-ink-tertiary",
-  Planned: "text-ink-tertiary italic",
+// Capability + resource shape mirrored from lib/capabilities.ts. We
+// duplicate the type definition here (instead of importing) so the
+// "use client" module doesn't drag in lib/store.ts via lib/rolePolicy.ts.
+// The actual catalog (which resources exist, which capabilities are
+// valid, which presets are suggested) is fetched at runtime from
+// /api/admin/role-permissions.
+type Action = "read" | "write";
+type Capability = `${string}:${Action}`;
+type RolePermissionsBundle = {
+  roles: readonly Role[];
+  assignableRoles: readonly InviteRole[];
+  resources: readonly string[];
+  resourceLabels: Record<string, string>;
+  capabilities: Capability[];
+  defaultNonOwnerCapabilities: Capability[];
+  suggestedPresets: Record<InviteRole, Capability[]>;
+  overrides: Partial<Record<InviteRole, Capability[]>>;
+  effective: Record<Role, Capability[]>;
 };
 
 function relativeTime(iso: string): string {
@@ -562,7 +557,7 @@ export default function UsersPage() {
               onChange={(e) => setInviteRole(e.target.value as InviteRole)}
               className="h-10 rounded-lg border border-bg-border bg-bg-card px-3 text-sm"
             >
-              {(["Admin", "Operator", "Viewer", "Billing"] as InviteRole[]).map((r) => (
+              {INVITE_ROLES.map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>
@@ -591,7 +586,7 @@ export default function UsersPage() {
               />
             </div>
             <div className="flex flex-wrap items-center gap-1 rounded-lg border border-bg-border bg-bg-card p-1 text-xs">
-              {(["All", "Owner", "Admin", "Operator", "Viewer", "Billing"] as const).map((r) => (
+              {(["All", ...ROLES_LIST] as const).map((r) => (
                 <button
                   key={r}
                   onClick={() => setFilterRole(r as Role | "All")}
@@ -772,38 +767,8 @@ export default function UsersPage() {
         </div>
 
         <aside className="space-y-4">
-          <div className="rounded-xl border border-bg-border bg-bg-card">
-            <div className="border-b border-bg-border px-5 py-3.5 text-sm font-semibold">
-              Role permissions
-            </div>
-            <div className="space-y-3 p-4">
-              {(Object.keys(ROLE_PERMISSIONS) as Role[]).map((r) => {
-                const memberCount = r === "Owner"
-                  ? 1
-                  : data?.invites.filter((i) => i.role === r && i.status === "pending").length ?? 0;
-                return (
-                  <div key={r} className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
-                    <div className="flex items-center justify-between">
-                      <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${ROLE_TONE[r]}`}>
-                        {r}
-                      </span>
-                      <span className="text-[10px] text-ink-tertiary">
-                        {memberCount} {r === "Owner" ? "member" : `pending invite${memberCount === 1 ? "" : "s"}`}
-                      </span>
-                    </div>
-                    <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
-                      {ROLE_PERMISSIONS[r].map((p) => (
-                        <div key={p.area} className="flex items-center justify-between">
-                          <span className="text-ink-secondary">{p.area}</span>
-                          <span className={LEVEL_TONE[p.level]}>{p.level}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <RolePermissionsMatrix invites={data?.invites ?? []} />
+
 
           <div className="rounded-xl border border-bg-border bg-bg-card p-4">
             <div className="text-sm font-semibold">Security</div>
@@ -968,5 +933,281 @@ function Row({ k, v, tone }: { k: string; v: string; tone?: string }) {
       <span className="text-ink-secondary">{k}</span>
       <span className={tone ?? ""}>{v}</span>
     </div>
+  );
+}
+
+/**
+ * RolePermissionsMatrix — interactive capability toggles per non-Owner
+ * role. Fetches the catalog + current overrides from
+ * /api/admin/role-permissions, renders each role as an expandable card
+ * with a 2-column grid of read/write checkboxes per resource. Owner
+ * gets a single read-only "all capabilities" card.
+ *
+ * Save semantics: PUT replaces the entire overrides map. Roles the
+ * owner hasn't touched fall back to read-only defaults at the API
+ * layer; we don't need to send those explicitly.
+ *
+ * Suggested preset: per-role "Apply suggested" button overwrites that
+ * role's draft state with the preset from lib/capabilities.ts.
+ *
+ * Permission to save is owner-only — the PUT endpoint rejects per-user
+ * tokens. If the matrix is loaded by a non-owner, Save shows an error
+ * and we keep the matrix in read-only mode (no checkbox interactions).
+ */
+function RolePermissionsMatrix({ invites }: { invites: Invite[] }) {
+  const { toast } = useToast();
+  const [data, setData] = useState<RolePermissionsBundle | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [draft, setDraft] = useState<Partial<Record<InviteRole, Set<Capability>>>>({});
+  const [expanded, setExpanded] = useState<Role | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/admin/role-permissions", { cache: "no-store" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Load failed (${r.status})`);
+      setData(d as RolePermissionsBundle);
+      // Seed draft from the effective map so the toggles render as the
+      // current state (override OR fallback default).
+      const next: Partial<Record<InviteRole, Set<Capability>>> = {};
+      const eff = d.effective as Record<Role, Capability[]>;
+      for (const role of d.assignableRoles as InviteRole[]) {
+        next[role] = new Set(eff[role] ?? []);
+      }
+      setDraft(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load permissions");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  function toggleCap(role: InviteRole, cap: Capability) {
+    setDraft((prev) => {
+      const set = new Set(prev[role] ?? []);
+      if (set.has(cap)) set.delete(cap);
+      else set.add(cap);
+      return { ...prev, [role]: set };
+    });
+  }
+
+  function applyPreset(role: InviteRole) {
+    if (!data) return;
+    const preset = data.suggestedPresets[role] ?? [];
+    setDraft((prev) => ({ ...prev, [role]: new Set(preset) }));
+    toast(`Applied suggested preset for ${role}`, "info");
+  }
+
+  function resetRole(role: InviteRole) {
+    if (!data) return;
+    setDraft((prev) => ({
+      ...prev,
+      [role]: new Set(data.defaultNonOwnerCapabilities),
+    }));
+    toast(`Reset ${role} to read-only default`, "info");
+  }
+
+  async function save() {
+    if (!data) return;
+    setSaving(true);
+    try {
+      const overrides: Partial<Record<InviteRole, Capability[]>> = {};
+      for (const role of data.assignableRoles) {
+        const set = draft[role];
+        if (set) overrides[role] = Array.from(set).sort();
+      }
+      const r = await fetch("/api/admin/role-permissions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ overrides }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Save failed (${r.status})`);
+      toast("Role permissions saved", "success");
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Save failed", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-bg-border px-5 py-3.5">
+        <div>
+          <div className="text-sm font-semibold">Role permissions</div>
+          <div className="text-[11px] text-ink-tertiary">
+            Owner has every capability. Others start read-only — you assign writes.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving || loading || !data}
+          className="inline-flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 py-1.5 text-[12px] font-semibold shadow-glow disabled:opacity-50"
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+          Save
+        </button>
+      </div>
+
+      {error && (
+        <div className="m-4 rounded-md border border-rose-300/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+          {error}
+        </div>
+      )}
+
+      {loading && !data && (
+        <div className="flex items-center gap-2 p-4 text-[12px] text-ink-tertiary">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading capabilities…
+        </div>
+      )}
+
+      {data && (
+        <div className="space-y-1.5 p-3">
+          {/* Owner card — single, locked, all-on */}
+          <div className="rounded-lg border border-bg-border bg-bg-hover/30 px-3 py-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${ROLE_TONE.Owner}`}>
+                  Owner
+                </span>
+                <span className="text-[10px] text-ink-tertiary">1 member · all capabilities</span>
+              </div>
+              <Lock className="h-3 w-3 text-ink-tertiary" />
+            </div>
+          </div>
+
+          {data.assignableRoles.map((role) => {
+            const pending = invites.filter(
+              (i) => i.role === role && i.status === "pending",
+            ).length;
+            const accepted = invites.filter(
+              (i) => i.role === role && i.status === "accepted",
+            ).length;
+            const isOpen = expanded === role;
+            const set = draft[role] ?? new Set<Capability>();
+            const writeCount = data.capabilities.filter(
+              (c) => c.endsWith(":write") && set.has(c),
+            ).length;
+            return (
+              <div key={role} className="rounded-lg border border-bg-border bg-bg-hover/30">
+                <button
+                  type="button"
+                  onClick={() => setExpanded(isOpen ? null : role)}
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${ROLE_TONE[role]}`}>
+                      {role}
+                    </span>
+                    <span className="text-[10px] text-ink-tertiary">
+                      {accepted + pending > 0
+                        ? `${accepted} active · ${pending} pending`
+                        : "no members"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-ink-tertiary">
+                      {writeCount} write · {set.size - writeCount} read
+                    </span>
+                    <ChevronDown
+                      className={`h-3 w-3 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                    />
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="border-t border-bg-border p-3">
+                    <div className="mb-2 flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => applyPreset(role)}
+                        className="inline-flex items-center gap-1 rounded-md border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 text-[10px] font-semibold text-brand-200 hover:bg-brand-500/20"
+                        title="Apply the suggested capability preset for this role"
+                      >
+                        <Sparkles className="h-2.5 w-2.5" />
+                        Suggested
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => resetRole(role)}
+                        className="rounded-md border border-bg-border bg-bg-card px-2 py-0.5 text-[10px] text-ink-secondary hover:text-ink-primary"
+                        title="Reset to read-only across everything"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      {data.resources.map((resource) => {
+                        const readCap = `${resource}:read` as Capability;
+                        const writeCap = `${resource}:write` as Capability;
+                        return (
+                          <div
+                            key={resource}
+                            className="grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[11px]"
+                          >
+                            <span className="truncate text-ink-secondary" title={data.resourceLabels[resource]}>
+                              {data.resourceLabels[resource]}
+                            </span>
+                            <CapToggle
+                              checked={set.has(readCap)}
+                              onChange={() => toggleCap(role, readCap)}
+                              label="read"
+                            />
+                            <CapToggle
+                              checked={set.has(writeCap)}
+                              onChange={() => toggleCap(role, writeCap)}
+                              label="write"
+                              danger
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CapToggle({
+  checked,
+  onChange,
+  label,
+  danger,
+}: {
+  checked: boolean;
+  onChange: () => void;
+  label: string;
+  danger?: boolean;
+}) {
+  const onCls = danger
+    ? "border-accent-amber/50 bg-accent-amber/20 text-accent-amber"
+    : "border-accent-green/40 bg-accent-green/15 text-accent-green";
+  return (
+    <button
+      type="button"
+      onClick={onChange}
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+        checked ? onCls : "border-bg-border bg-transparent text-ink-tertiary hover:text-ink-secondary"
+      }`}
+    >
+      {checked ? <Check className="h-2.5 w-2.5" /> : <X className="h-2.5 w-2.5" />}
+      {label}
+    </button>
   );
 }

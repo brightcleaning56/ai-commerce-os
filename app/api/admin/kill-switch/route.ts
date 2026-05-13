@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getKillSwitch, setKillSwitch } from "@/lib/killSwitch";
 
 export const runtime = "nodejs";
@@ -14,14 +14,14 @@ export const dynamic = "force-dynamic";
  * code path that reads it (crons, lead auto-reply, retry-stuck, etc).
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "system:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const state = await getKillSwitch();
   return NextResponse.json(state);
 }
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "system:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const body = await req.json().catch(() => ({}));

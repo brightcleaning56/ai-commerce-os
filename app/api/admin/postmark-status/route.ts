@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +24,7 @@ export const dynamic = "force-dynamic";
  * NEVER returns the Postmark token itself, only derived state.
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "system:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const token = process.env.POSTMARK_TOKEN;

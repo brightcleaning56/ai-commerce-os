@@ -1,6 +1,6 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getOperator } from "@/lib/operator";
 import { generateApiKeySecret, hashApiKeySecret } from "@/lib/apiAuth";
 import {
@@ -28,7 +28,7 @@ const VALID_ENVS: ApiKeyEnvironment[] = ["Production", "Test"];
  * the server. The operator sees prefix + name + scopes + usage.
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "apikeys:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const all = await store.getApiKeys();
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
  * recover it later. Same model as Stripe / GitHub.
  */
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "apikeys:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: Record<string, unknown> = {};

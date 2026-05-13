@@ -1,0 +1,75 @@
+auth: 10 roles + capability matrix + role-based gating (no more "every user is admin")
+
+Closes the role-enforcement gap. Previously every per-user invite
+token granted full workspace access regardless of the role on the
+invite -- the role was a label, not an enforced contract. This slice
+makes role-aware capabilities the real gate.
+
+10 roles (matches Eric's spec):
+  Owner / Admin / Sales / Operator / Finance / Marketing / Support /
+  Analyst / Developer / Viewer
+Owner = workspace owner, signed in via ADMIN_TOKEN, always has every
+capability and can never be edited.
+
+12 resources x {read, write} = 24 atomic capabilities:
+  users / audit / system / billing / leads / deals / outreach /
+  transactions / voice / earnings / apikeys / reports
+  (each as <resource>:read and <resource>:write)
+
+Default for every non-Owner role: ALL reads granted, NO writes
+(matches the "read-only across everything" choice). Owner toggles
+writes on per role via the new /admin/users matrix.
+
+New files:
+  - lib/capabilities.ts: role list, resources, capabilities,
+    DEFAULT_NON_OWNER_CAPABILITIES, suggested presets per role.
+  - lib/rolePolicy.ts: store-backed read/write of overrides; resolves
+    a role's effective capabilities (override if present, default
+    otherwise). Node-only -- never import from edge middleware.
+  - app/api/admin/role-permissions/route.ts: GET (catalog + current
+    state) and PUT (owner-only mutation; rejects per-user-token
+    callers to prevent privilege escalation).
+
+Enforcement:
+  - lib/auth.ts: new requireCapability(req, cap) async helper. Owner
+    always passes. User-token callers pass only if their role's
+    effective set includes cap. Returns 403 with a reason that
+    surfaces to the UI.
+  - Sensitive admin routes migrated from requireAdmin to
+    requireCapability with the right resource:
+      api-keys                -> apikeys:read | apikeys:write
+      kill-switch             -> system:read | system:write
+      billing                 -> billing:read
+      audit                   -> audit:read
+      users                   -> users:read
+      invites (CRUD)          -> users:read / users:write
+      invites/[id]/resend     -> users:write
+      system-health           -> system:read
+      postmark-status         -> system:read
+  - Issue-token endpoint stays owner-only (stricter than users:write
+    because minting tokens for other people is privilege escalation).
+  - Other routes still use requireAdmin (slice 2 will migrate the rest).
+
+UI (/admin/users):
+  - Invite role dropdown now offers all 9 non-Owner roles.
+  - The "Role permissions" sidebar is now a live, interactive matrix:
+    each non-Owner role expands to show 12 resource rows with
+    read/write toggle chips. "Suggested" applies my preset for that
+    role; "Reset" reverts to read-only. Owner card is locked.
+  - Save button PUTs to /api/admin/role-permissions.
+
+Invite type:
+  - InviteRole expanded from {Admin,Operator,Viewer,Billing} to the
+    new 9 (Billing folded into Finance).
+  - VALID_ROLES list + invite-page ROLE_BLURB updated.
+
+Limitations called out in capabilities.ts:
+  - Not every route is gated yet. The remaining ones (transactions,
+    leads, voice, outreach, etc) still use requireAdmin which
+    accepts any authenticated user. Slice 2 maps each to the right
+    resource:action.
+  - Token denylist still TODO. Capability changes take effect on
+    NEW user tokens immediately; existing tokens see the new
+    capabilities at the next role lookup (we re-read overrides
+    every requireCapability call), so this works correctly even
+    for already-issued tokens.

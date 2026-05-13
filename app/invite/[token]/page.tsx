@@ -15,7 +15,16 @@ import {
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
-type InviteRole = "Admin" | "Operator" | "Viewer" | "Billing";
+type InviteRole =
+  | "Admin"
+  | "Sales"
+  | "Operator"
+  | "Finance"
+  | "Marketing"
+  | "Support"
+  | "Analyst"
+  | "Developer"
+  | "Viewer";
 type InviteStatus = "pending" | "accepted" | "cancelled" | "expired";
 
 type InvitePayload = {
@@ -28,11 +37,19 @@ type InvitePayload = {
   workspace: string;
 };
 
+// Plain-language summary per role. The actual capabilities are set by
+// the workspace owner on /admin/users, so these are best-guess
+// descriptions of the suggested presets, not enforced contracts.
 const ROLE_BLURB: Record<InviteRole, string> = {
-  Admin: "Full operator powers minus billing — manage agents, the CRM pipeline, and the marketplace.",
-  Operator: "Run your assigned agents and your slice of the CRM pipeline.",
-  Viewer: "Read-only access — see what the workspace is doing without making changes.",
-  Billing: "Manage subscriptions, invoices, and payment methods. No operational access.",
+  Admin: "Workspace administration — user management, system health, audit log, kill switch. No billing or direct integrations work.",
+  Sales: "Run the pipeline — leads, deals, outreach, CRM, quotes, sales calls.",
+  Operator: "Day-to-day operations — transactions, calls and voicemails, tasks, supplier coordination.",
+  Finance: "Money — billing, earnings, escrow, transaction reads.",
+  Marketing: "Top-of-funnel — outreach campaigns, automations, demand signals.",
+  Support: "Customer-facing — calls, voicemails, lead comms.",
+  Analyst: "Read-only everywhere — reports, insights, audit, transaction history.",
+  Developer: "Tech surface — API keys, integrations, data sources, system health.",
+  Viewer: "Read-only access across the workspace, no write actions.",
 };
 
 export default function InviteAcceptPage() {

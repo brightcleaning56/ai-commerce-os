@@ -29,9 +29,15 @@
  * Crypto subtle.verify which is async. All call sites pass `await`.
  */
 import { looksLikeUserToken, verifyUserToken, type UserTokenPayload } from "./userToken";
+import { ROLES, type Capability, type Role } from "./capabilities";
+import { resolveCapabilities } from "./rolePolicy";
 
 export type AuthResult =
   | { ok: true; mode: "production" | "dev"; user?: UserTokenPayload }
+  | { ok: false; status: 401 | 403; reason: string };
+
+export type CapabilityResult =
+  | { ok: true; mode: "production" | "dev"; as: "owner" | "user"; user?: UserTokenPayload }
   | { ok: false; status: 401 | 403; reason: string };
 
 /**
@@ -104,6 +110,56 @@ function constantTimeEquals(a: string, b: string): boolean {
     mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
   return mismatch === 0;
+}
+
+/**
+ * Capability gate. Owner (ADMIN_TOKEN holder) always passes. User-token
+ * holders pass only if their role's effective capability set includes
+ * `cap`. Anything else → 403 with a reason the caller can surface.
+ *
+ * Don't call from edge middleware — this hits lib/rolePolicy.ts which
+ * imports the store (node-only). Use in route handlers (runtime "nodejs").
+ *
+ * Failure modes returned:
+ *   - 401: not authenticated at all
+ *   - 403 "Capability X not granted to role Y": authenticated but role
+ *     doesn't have the cap. Useful in the response body so the operator
+ *     understands why a teammate hit a wall.
+ */
+export async function requireCapability(
+  req: { headers: Headers } | Request,
+  cap: Capability,
+): Promise<CapabilityResult> {
+  const auth = await requireAdmin(req);
+  if (!auth.ok) return auth;
+
+  // Owner / dev paths: bypass entirely.
+  if (auth.mode === "dev") return { ok: true, mode: "dev", as: "owner" };
+  if (!auth.user) return { ok: true, mode: "production", as: "owner" };
+
+  // Per-user token: look up role's effective capabilities.
+  const rawRole = auth.user.role;
+  if (!isKnownRole(rawRole)) {
+    return {
+      ok: false,
+      status: 403,
+      reason: `Unknown role "${rawRole}" — re-issue your sign-in token.`,
+    };
+  }
+  const role: Role = rawRole;
+  const caps = await resolveCapabilities(role);
+  if (!caps.has(cap)) {
+    return {
+      ok: false,
+      status: 403,
+      reason: `Capability "${cap}" is not granted to role "${role}". Ask the workspace owner to enable it on /admin/users.`,
+    };
+  }
+  return { ok: true, mode: "production", as: "user", user: auth.user };
+}
+
+function isKnownRole(s: string): s is Role {
+  return (ROLES as readonly string[]).includes(s);
 }
 
 /**

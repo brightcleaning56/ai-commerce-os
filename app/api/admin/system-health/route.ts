@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { describeSchedule, PIPELINE_CRON_SCHEDULE, nextCronFire } from "@/lib/cron";
 import { getKillSwitch } from "@/lib/killSwitch";
 import { getVoiceProvider } from "@/lib/voice";
@@ -25,7 +25,7 @@ export const dynamic = "force-dynamic";
  * 4-char prefix of the Anthropic key, etc).
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "system:read");
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }

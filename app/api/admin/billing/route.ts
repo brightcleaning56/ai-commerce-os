@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { store } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -27,7 +27,7 @@ export const dynamic = "force-dynamic";
  *     before this slice â€” now it's the real spend-ledger month total)
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "billing:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const [drafts, buyers, suppliers, products, apiKeys, ledger] = await Promise.all([

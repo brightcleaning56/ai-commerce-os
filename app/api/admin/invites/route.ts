@@ -1,6 +1,6 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getOperator } from "@/lib/operator";
 import { sendEmail } from "@/lib/email";
 import { store, type Invite, type InviteRole } from "@/lib/store";
@@ -8,7 +8,17 @@ import { store, type Invite, type InviteRole } from "@/lib/store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const VALID_ROLES: InviteRole[] = ["Admin", "Operator", "Viewer", "Billing"];
+const VALID_ROLES: InviteRole[] = [
+  "Admin",
+  "Sales",
+  "Operator",
+  "Finance",
+  "Marketing",
+  "Support",
+  "Analyst",
+  "Developer",
+  "Viewer",
+];
 const INVITE_EXPIRY_DAYS = 14;
 
 /**
@@ -25,7 +35,7 @@ const INVITE_EXPIRY_DAYS = 14;
  * acceptance + role enforcement ships in a follow-up.
  */
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "users:write");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: Record<string, unknown> = {};
@@ -147,7 +157,7 @@ export async function POST(req: NextRequest) {
  * access from scripts / future per-invite drill-down pages.
  */
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireCapability(req, "users:read");
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const invites = await store.getInvites();
   return NextResponse.json({ invites });
