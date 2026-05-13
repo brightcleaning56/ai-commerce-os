@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { NAV_SECTIONS, ADMIN_NAV } from "@/lib/nav";
 import { X } from "lucide-react";
 import { AvynMark } from "@/components/AvynLogo";
+import { useCapabilities } from "@/components/CapabilityContext";
 
 function NavLink({
   href,
@@ -73,6 +74,11 @@ export default function Sidebar({
   const pathname = usePathname();
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+  // Capability-aware filtering. Owner sees everything; non-Owner roles
+  // only see nav items whose `requires` is in their effective capability
+  // set (resolved server-side from /admin/users matrix).
+  const { can, me } = useCapabilities();
 
   const [pendingApprovals, setPendingApprovals] = useState<number | null>(null);
   const [owner, setOwner] = useState<{ name: string; email: string; company: string; title: string; initials: string } | null>(null);
@@ -157,48 +163,64 @@ export default function Sidebar({
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 pb-4">
-          {NAV_SECTIONS.map((section) => (
-            <div key={section.title} className="mb-1">
-              <div className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
-                {section.title}
+          {NAV_SECTIONS.map((section) => {
+            // Drop items the user can't access. Empty sections collapse
+            // entirely so we don't render a stranded section header.
+            const visible = section.items.filter((item) => can(item.requires));
+            if (visible.length === 0) return null;
+            return (
+              <div key={section.title} className="mb-1">
+                <div className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                  {section.title}
+                </div>
+                <div className="space-y-0.5">
+                  {visible.map((item) => (
+                    <NavLink
+                      key={item.href}
+                      href={item.href}
+                      label={item.label}
+                      Icon={item.icon}
+                      badge={badgeFor(item.href, item.badge)}
+                      active={isActive(item.href)}
+                      onClick={onClose}
+                    />
+                  ))}
+                </div>
               </div>
-              <div className="space-y-0.5">
-                {section.items.map((item) => (
-                  <NavLink
-                    key={item.href}
-                    href={item.href}
-                    label={item.label}
-                    Icon={item.icon}
-                    badge={badgeFor(item.href, item.badge)}
-                    active={isActive(item.href)}
-                    onClick={onClose}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
 
-          <div className="mb-1">
-            <div className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
-              Admin
-            </div>
-            <div className="space-y-0.5">
-              {ADMIN_NAV.map((item) => (
-                <NavLink
-                  key={item.href}
-                  href={item.href}
-                  label={item.label}
-                  Icon={item.icon}
-                  active={isActive(item.href)}
-                  onClick={onClose}
-                />
-              ))}
-            </div>
-          </div>
+          {(() => {
+            const visibleAdmin = ADMIN_NAV.filter((item) => can(item.requires));
+            if (visibleAdmin.length === 0) return null;
+            return (
+              <div className="mb-1">
+                <div className="px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                  Admin
+                </div>
+                <div className="space-y-0.5">
+                  {visibleAdmin.map((item) => (
+                    <NavLink
+                      key={item.href}
+                      href={item.href}
+                      label={item.label}
+                      Icon={item.icon}
+                      active={isActive(item.href)}
+                      onClick={onClose}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </nav>
 
         <div className="border-t border-bg-border p-3 space-y-2">
-          {owner && (
+          {/* Identity card. For the workspace Owner we have richer info
+              from /api/operator (name, title, company, initials). For
+              per-user-token sessions we only know email + role from the
+              token payload — display those and skip the Owner-only bits. */}
+          {me?.isOwner && owner ? (
             <div className="flex items-center gap-2.5 rounded-xl border border-bg-border bg-bg-card p-2.5">
               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gradient-brand text-[11px] font-bold text-white shadow-glow">
                 {owner.initials}
@@ -216,7 +238,27 @@ export default function Sidebar({
                 Owner
               </span>
             </div>
-          )}
+          ) : me ? (
+            <div className="flex items-center gap-2.5 rounded-xl border border-bg-border bg-bg-card p-2.5">
+              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-bg-hover text-[11px] font-bold text-ink-primary">
+                {(me.email[0] ?? "?").toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-semibold text-ink-primary">
+                  {me.email}
+                </div>
+                <div className="truncate text-[10px] text-ink-tertiary">
+                  Signed in as {me.role}
+                </div>
+              </div>
+              <span
+                className="rounded bg-brand-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-brand-200"
+                title={`${me.role} session`}
+              >
+                {me.role}
+              </span>
+            </div>
+          ) : null}
           <div className="rounded-xl border border-bg-border bg-bg-card p-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium">System Status</span>

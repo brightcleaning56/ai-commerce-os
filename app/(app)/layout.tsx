@@ -6,6 +6,7 @@ import CommandPaletteProvider from "@/components/CommandPalette";
 import ToastProvider from "@/components/Toast";
 import VoiceProvider from "@/components/voice/VoiceContext";
 import IncomingCallWidget from "@/components/voice/IncomingCallWidget";
+import { CapabilityProvider } from "@/components/CapabilityContext";
 
 export default function AppLayout({
   children,
@@ -15,6 +16,7 @@ export default function AppLayout({
   const [mobileOpen, setMobileOpen] = useState(false);
   return (
     <ToastProvider>
+      <CapabilityProvider>
       <CommandPaletteProvider>
         {/* VoiceProvider mounts ONCE per browser tab and registers the
             Twilio Device. Inbound calls then ring on every page (vs the
@@ -33,6 +35,7 @@ export default function AppLayout({
           <IncomingCallWidget />
         </VoiceProvider>
       </CommandPaletteProvider>
+      </CapabilityProvider>
     </ToastProvider>
   );
 }
