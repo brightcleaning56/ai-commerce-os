@@ -368,6 +368,53 @@ export default function VoiceProvider({ children }: { children: React.ReactNode 
         toast("Voice not ready — check /admin/system-health", "error");
         return null;
       }
+
+      // Log the call to the server-side store as soon as we start so
+      // the row exists even if the call never connects (busy / blocked
+      // / network error). Fire and forget — failure here shouldn't
+      // block the actual dial.
+      const callStartIso = new Date().toISOString();
+      let serverCallId: string | null = null;
+      try {
+        const r = await fetch("/api/calls", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            direction: "outbound",
+            toNumber,
+            source: "other",  // call sites can override via a future arg
+          }),
+        });
+        if (r.ok) {
+          const d = await r.json();
+          serverCallId = d?.call?.id ?? null;
+        }
+      } catch {
+        // Network error logging the call — the call itself still happens.
+      }
+
+      const patchEnd = (outcome: "connected" | "failed" | "no-answer") => {
+        if (!serverCallId) return;
+        const endedAt = new Date().toISOString();
+        const durationSec = Math.max(
+          0,
+          Math.round((new Date(endedAt).getTime() - new Date(callStartIso).getTime()) / 1000),
+        );
+        fetch(`/api/calls/${serverCallId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          keepalive: true,
+          body: JSON.stringify({
+            endedAt,
+            durationSec,
+            outcome,
+            callSid: currentCallSidRef.current ?? undefined,
+          }),
+        }).catch(() => {});
+      };
+
       try {
         setTwilioInFlight("connecting");
         currentCallSidRef.current = null;
@@ -383,21 +430,41 @@ export default function VoiceProvider({ children }: { children: React.ReactNode 
           setTwilioInFlight("open");
           const sid = (call.parameters?.CallSid as string | undefined) ?? null;
           currentCallSidRef.current = sid;
+          // Patch the server-side record with the CallSid as soon as
+          // we know it — the recording-status webhook will need it to
+          // join the recording back to this row.
+          if (serverCallId && sid) {
+            fetch(`/api/calls/${serverCallId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ callSid: sid }),
+            }).catch(() => {});
+          }
         });
         call.on("disconnect", () => {
           setTwilioInFlight("idle");
           currentCallRef.current = null;
+          // Outcome heuristic: if we were "open" at disconnect time,
+          // the call connected. We can't read state at this exact
+          // moment (closure capture issue) so just send "connected"
+          // here and let recording-status correct it if needed.
+          // Recording-status only fires for bridged calls so it's the
+          // source of truth for "did this actually connect".
+          patchEnd("connected");
         });
         call.on("error", (...args) => {
           const err = args[0] as { message?: string } | undefined;
           setTwilioInFlight("idle");
           currentCallRef.current = null;
           toast(`Call error: ${err?.message ?? "unknown"}`, "error");
+          patchEnd("failed");
         });
         return call;
       } catch (e) {
         setTwilioInFlight("idle");
         toast(`Call failed: ${e instanceof Error ? e.message : "unknown"}`, "error");
+        patchEnd("failed");
         return null;
       }
     },

@@ -4,6 +4,7 @@ import { getOperator } from "@/lib/operator";
 import { saveVoicemail } from "@/lib/voicemails";
 import { saveVoiceRecording } from "@/lib/voiceRecordings";
 import { verifyTwilioSignature } from "@/lib/twilioVoice";
+import { callsStore } from "@/lib/calls";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -137,6 +138,28 @@ export async function POST(req: NextRequest) {
     recordedAt,
     channels: parseInt(formParams.RecordingChannels ?? "1", 10) || 1,
   });
+
+  // Attach recordingSid + connected outcome to the server-side Call
+  // record so /calls can show it alongside the row. Best-effort: a
+  // missing Call record (e.g. inbound call that nobody picked up but
+  // got recorded) just means we don't update anything.
+  try {
+    const existing = await callsStore.getByCallSid(callSid);
+    if (existing) {
+      await callsStore.update(existing.id, {
+        recordingSid,
+        // If the call ended without an explicit outcome, treat a
+        // recording's existence as "connected" (Twilio only records
+        // bridged calls; un-bridged ones don't generate recording
+        // events). Don't overwrite an explicit outcome the agent set.
+        outcome: existing.outcome ?? "connected",
+        durationSec: existing.durationSec ?? durationSec,
+        endedAt: existing.endedAt ?? recordedAt,
+      });
+    }
+  } catch (err) {
+    console.warn("[voice/recording-status] failed to attach to Call record:", err);
+  }
 
   return NextResponse.json({ ok: true, persisted: true });
 }

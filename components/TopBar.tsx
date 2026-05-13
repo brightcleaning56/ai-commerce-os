@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useCommandPalette } from "./CommandPalette";
 import ThemeToggle from "./ThemeToggle";
 import VoiceStatusBadge from "./voice/VoiceStatusBadge";
+import AgentRoster from "./voice/AgentRoster";
 
 type OperatorProfile = { name: string; title: string; initials: string };
 
@@ -231,6 +232,11 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           when mic is denied / not configured, blue while a call is in
           flight. Click for the specific reason + a one-click fix. */}
       <VoiceStatusBadge />
+
+      {/* Agent roster — "N online" pill that opens a popover listing
+          who else has a Device registered. Helps the operator see if
+          anyone else is covering before they step away from inbound. */}
+      <AgentRoster />
 
       <div ref={bellRef} className="relative">
         <button

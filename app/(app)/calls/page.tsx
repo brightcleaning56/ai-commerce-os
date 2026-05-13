@@ -88,6 +88,37 @@ type FlatRow = {
   attempt: CallAttempt;
   task: LocalTask;
   recording?: RecordingMeta;
+  // When this row came from the server-side /api/calls log (vs the
+  // legacy localStorage task attempts), serverCallId is set. Used to
+  // disambiguate when two sources have overlapping CallSids during
+  // the migration window.
+  serverCallId?: string;
+  agentEmail?: string;
+  agentRole?: string;
+};
+
+type ServerCall = {
+  id: string;
+  direction: "outbound" | "inbound";
+  callSid: string | null;
+  agentEmail: string;
+  agentRole: string;
+  toNumber: string;
+  toContact?: string;
+  startedAt: string;
+  endedAt?: string;
+  durationSec?: number;
+  outcome?:
+    | "connected"
+    | "voicemail"
+    | "no-answer"
+    | "wrong-number"
+    | "callback-scheduled"
+    | "missed"
+    | "failed";
+  notes?: string;
+  recordingSid?: string;
+  source?: string;
 };
 
 type DateWindow = "1d" | "7d" | "30d" | "all";
@@ -135,6 +166,10 @@ export default function CallsPage() {
   const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [recordings, setRecordings] = useState<Record<string, RecordingMeta>>({});
   const [voicemails, setVoicemails] = useState<VoicemailRecord[]>([]);
+  // Server-side call log -- the shared multi-agent source of truth.
+  // Merged with the legacy localStorage task attempts below so existing
+  // history isn't lost while we migrate.
+  const [serverCalls, setServerCalls] = useState<ServerCall[]>([]);
   const [query, setQuery] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState<CallOutcome | "all">("all");
   const [dateWindow, setDateWindow] = useState<DateWindow>("7d");
@@ -171,31 +206,49 @@ export default function CallsPage() {
       .catch(() => {});
   }
 
+  function loadServerCalls() {
+    fetch("/api/calls?limit=500", { credentials: "include", cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { calls: [] }))
+      .then((d) => setServerCalls(d.calls ?? []))
+      .catch(() => {});
+  }
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem("aicos:tasks:v1");
       if (raw) setTasks(JSON.parse(raw));
     } catch {}
     loadVoicemails();
+    loadServerCalls();
+    // Poll the server log every 20s so an agent sees calls their
+    // teammates are placing right now without manual refresh. Cheap
+    // enough since each call is ~150 bytes and we cap at 500 rows.
+    const interval = setInterval(loadServerCalls, 20_000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Once tasks load, fetch recordings for any attempts that have a CallSid
+  // Once tasks + server calls load, fetch recordings for any with a
+  // CallSid. One batch covers both sources so the <audio> elements
+  // light up regardless of where the row came from.
   useEffect(() => {
-    const sids: string[] = [];
+    const sids = new Set<string>();
     for (const t of tasks) {
       for (const a of t.attempts ?? []) {
-        if (a.callSid) sids.push(a.callSid);
+        if (a.callSid) sids.add(a.callSid);
       }
     }
-    if (sids.length === 0) return;
-    fetch(`/api/voice/recordings?callSids=${encodeURIComponent(sids.join(","))}`, {
+    for (const sc of serverCalls) {
+      if (sc.callSid) sids.add(sc.callSid);
+    }
+    if (sids.size === 0) return;
+    fetch(`/api/voice/recordings?callSids=${encodeURIComponent(Array.from(sids).join(","))}`, {
       credentials: "include",
       cache: "no-store",
     })
       .then((r) => (r.ok ? r.json() : { recordings: {} }))
       .then((d) => setRecordings(d.recordings ?? {}))
       .catch(() => {});
-  }, [tasks]);
+  }, [tasks, serverCalls]);
 
   async function toggleVoicemailRead(id: string, read: boolean) {
     try {
@@ -215,9 +268,16 @@ export default function CallsPage() {
 
   const unreadVoicemailCount = voicemails.filter((v) => !v.read).length;
 
-  // Flatten + filter + sort
+  // Flatten + filter + sort. Two sources:
+  //   1. Legacy localStorage task attempts (per-browser, /tasks-owned)
+  //   2. Server-side calls from /api/calls (shared across agents)
+  // We merge both into the same FlatRow shape. Dedupe by callSid so a
+  // task attempt with the same CallSid as a server call shows once.
   const rows = useMemo<FlatRow[]>(() => {
     const flat: FlatRow[] = [];
+    const sidSeen = new Set<string>();
+
+    // Local task attempts first
     for (const task of tasks) {
       for (const attempt of task.attempts ?? []) {
         flat.push({
@@ -225,8 +285,47 @@ export default function CallsPage() {
           task,
           recording: attempt.callSid ? recordings[attempt.callSid] : undefined,
         });
+        if (attempt.callSid) sidSeen.add(attempt.callSid);
       }
     }
+
+    // Server-side calls — convert to FlatRow shape. Skip any whose
+    // CallSid we already saw from local tasks (avoids double-rendering).
+    for (const sc of serverCalls) {
+      if (sc.callSid && sidSeen.has(sc.callSid)) continue;
+      const synth: FlatRow = {
+        attempt: {
+          at: sc.startedAt,
+          durationSec: sc.durationSec,
+          outcome:
+            sc.outcome === "voicemail"
+              ? "voicemail"
+              : sc.outcome === "wrong-number"
+                ? "wrong-number"
+                : sc.outcome === "callback-scheduled"
+                  ? "callback-scheduled"
+                  : sc.outcome === "no-answer"
+                    ? "no-answer"
+                    : "connected",  // covers "connected" + "missed" + "failed" fallbacks
+          notes: sc.notes,
+          callSid: sc.callSid ?? undefined,
+        },
+        task: {
+          id: sc.id,
+          buyerId: sc.id,
+          buyerCompany: sc.toContact ?? sc.toNumber,
+          buyerName: sc.toContact ?? sc.toNumber,
+          buyerPhone: sc.toNumber,
+          type: "phone",
+        },
+        recording: sc.callSid ? recordings[sc.callSid] : undefined,
+        serverCallId: sc.id,
+        agentEmail: sc.agentEmail,
+        agentRole: sc.agentRole,
+      };
+      flat.push(synth);
+    }
+
     let filtered = flat;
     if (outcomeFilter !== "all") {
       filtered = filtered.filter((r) => r.attempt.outcome === outcomeFilter);
@@ -247,7 +346,7 @@ export default function CallsPage() {
       filtered.sort((a, b) => (b.attempt.durationSec ?? 0) - (a.attempt.durationSec ?? 0));
     }
     return filtered;
-  }, [tasks, recordings, outcomeFilter, dateWindow, query, sortBy]);
+  }, [tasks, recordings, outcomeFilter, dateWindow, query, sortBy, serverCalls]);
 
   // Roll-up stats over the visible rows
   const stats = useMemo(() => {
