@@ -55,6 +55,12 @@ type Resubmission = {
   newMessage?: string;
   triggeredAiReply: boolean;
 };
+type InboundSms = {
+  at: string;
+  from: string;
+  body: string;
+  messageSid?: string;
+};
 type Lead = {
   id: string;
   createdAt: string;
@@ -75,6 +81,7 @@ type Lead = {
   aiReply?: AiReply;
   aiFollowups?: AiFollowup[];
   resubmissions?: Resubmission[];
+  inboundSms?: InboundSms[];
   lastSubmittedAt?: string;
   promotedToBuyerId?: string;
   promotedAt?: string;
@@ -920,6 +927,34 @@ export default function LeadsPage() {
                         <div className="mt-1 text-[10px] text-ink-tertiary">
                           {f.model}{f.estCostUsd != null && <> · ${f.estCostUsd.toFixed(4)}</>}
                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Inbound SMS replies — populated by /api/webhooks/twilio/sms.
+                  Newest first. Each reply triggers an operator email + lands
+                  here so the operator sees the conversation in context with
+                  the AI auto-reply / followup history above. */}
+              {selected.inboundSms && selected.inboundSms.length > 0 && (
+                <div>
+                  <div className="mb-1.5 flex items-center gap-2 text-[10px] uppercase tracking-wider text-ink-tertiary">
+                    Inbound SMS replies
+                    <span className="rounded-md bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-green">
+                      {selected.inboundSms.length}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {selected.inboundSms.slice().reverse().map((m, i) => (
+                      <div key={m.messageSid ?? i} className="rounded-md border border-accent-green/30 bg-accent-green/5 p-3 text-xs">
+                        <div className="flex items-center gap-2 text-[11px] text-ink-tertiary">
+                          <Phone className="h-3 w-3 text-accent-green" />
+                          <span className="font-mono">{m.from}</span>
+                          <span>·</span>
+                          <span>{relativeTime(m.at)}</span>
+                        </div>
+                        <div className="mt-1 whitespace-pre-wrap text-ink-primary">{m.body}</div>
                       </div>
                     ))}
                   </div>

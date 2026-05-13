@@ -238,10 +238,11 @@ export async function GET(req: NextRequest) {
                 outboundTwimlUrl: `${process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://YOUR-DOMAIN"}/api/voice/twiml`,
                 inboundTwimlUrl: `${process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://YOUR-DOMAIN"}/api/voice/inbound`,
                 recordingStatusUrl: `${process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://YOUR-DOMAIN"}/api/voice/recording-status`,
+                inboundSmsUrl: `${process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://YOUR-DOMAIN"}/api/webhooks/twilio/sms`,
                 tokenEndpoint: "/api/voice/token (admin-only GET)",
                 recordingEnabled: process.env.TWILIO_RECORD_CALLS === "true",
                 setupHint:
-                  "OUTBOUND: Voice > TwiML > Apps > <your-app> > Voice Configuration > Request URL = outboundTwimlUrl (POST). Put App SID in TWILIO_TWIML_APP_SID. INBOUND: Phone Numbers > <your-number> > Voice Configuration > Webhook = inboundTwimlUrl (POST). RECORDING: set TWILIO_RECORD_CALLS=true.",
+                  "OUTBOUND CALLS: Voice > TwiML > Apps > <your-app> > Voice Configuration > Request URL = outboundTwimlUrl (POST). Put App SID in TWILIO_TWIML_APP_SID. INBOUND CALLS: Phone Numbers > <your-number> > Voice Configuration > Webhook = inboundTwimlUrl (POST). INBOUND SMS: same number > Messaging Configuration > Webhook = inboundSmsUrl (POST). RECORDING: set TWILIO_RECORD_CALLS=true.",
               }
             : {}),
         }

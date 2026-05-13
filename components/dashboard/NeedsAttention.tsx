@@ -11,6 +11,7 @@ import {
   MessageSquare,
   Package,
   ShieldAlert,
+  Smartphone,
   Truck,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,7 +27,8 @@ type AttentionType =
   | "supplier_disconnect"
   | "lead_ai_stuck"
   | "lead_hot_unhandled"
-  | "inbound_reply";
+  | "inbound_reply"
+  | "lead_sms_reply";
 
 type Item = {
   type: AttentionType;
@@ -54,6 +56,7 @@ const ICON: Record<AttentionType, React.ComponentType<{ className?: string }>> =
   lead_ai_stuck: Inbox,
   lead_hot_unhandled: Flame,
   inbound_reply: MessageSquare,
+  lead_sms_reply: Smartphone,
 };
 
 const URGENCY_TONE: Record<Item["urgency"], { ring: string; bg: string; iconBg: string; iconText: string; cta: string }> = {

@@ -51,7 +51,8 @@ export async function GET() {
       // operator's first glance covers BOTH halves of the funnel).
       | "lead_ai_stuck"
       | "lead_hot_unhandled"
-      | "inbound_reply";
+      | "inbound_reply"
+      | "lead_sms_reply";
     count: number;
     urgency: "high" | "medium" | "low";
     label: string;
@@ -112,6 +113,28 @@ export async function GET() {
       urgency: stuckLeads >= 10 ? "high" : "medium",
       label: `${stuckLeads} lead${stuckLeads === 1 ? "" : "s"} stuck without AI reply`,
       detail: "Click \"Retry AI for N stuck\" on /leads to drain. Usually means Postmark wasn't approved when they came in.",
+      href: "/leads",
+      cta: "Open /leads",
+    });
+  }
+
+  // ── Inbound SMS replies (operator should respond) ─────────────────────
+  // A lead has an unhandled inbound SMS when inboundSms[] is non-empty AND
+  // the lead is still in "new" or "contacted" status. Once the operator
+  // marks the lead "qualified"/"won"/"lost", we assume the conversation is
+  // owned and don't pester. Surfaces a count so the operator pivots to
+  // those replies in /leads.
+  const smsReplyLeads = leads.filter((l) => {
+    if ((l.inboundSms?.length ?? 0) === 0) return false;
+    return l.status === "new" || l.status === "contacted";
+  }).length;
+  if (smsReplyLeads > 0) {
+    items.push({
+      type: "lead_sms_reply",
+      count: smsReplyLeads,
+      urgency: smsReplyLeads >= 3 ? "high" : "medium",
+      label: `${smsReplyLeads} lead${smsReplyLeads === 1 ? "" : "s"} replied via SMS`,
+      detail: "Buyers texted back your Twilio number. Open the lead and respond.",
       href: "/leads",
       cta: "Open /leads",
     });

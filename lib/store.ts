@@ -605,6 +605,17 @@ export type Lead = {
     triggeredAiReply: boolean;
   }>;
   lastSubmittedAt?: string;             // ISO of most recent submission
+  // ── Inbound SMS replies (Twilio webhook) ─────────────────────────────────
+  // When a lead texts back the Twilio number (responding to the AI auto-
+  // reply or a followup), Twilio posts to /api/webhooks/twilio/sms which
+  // appends the message here. Surfaces in the /leads detail rail so the
+  // operator sees real two-way SMS conversations alongside email replies.
+  inboundSms?: Array<{
+    at: string;          // ISO when Twilio delivered the inbound
+    from: string;        // E.164 sender (matches lead.phone)
+    body: string;        // raw message body
+    messageSid?: string; // Twilio MessageSid for de-dup / debugging
+  }>;
   // ── Lead → Buyer promotion (slice: lead-promotion) ───────────────────────
   // Set when an operator (or auto-promote rule) one-clicks the lead into a
   // DiscoveredBuyer record on /leads. Once set, the same lead can't be
