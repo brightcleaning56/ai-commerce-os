@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { runBusinessProfileScan } from "@/lib/agents/businessProfile";
+import { checkKillSwitch } from "@/lib/killSwitch";
 import { store } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -23,6 +24,14 @@ export async function POST(
 ) {
   const auth = requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
+
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    return NextResponse.json(
+      { error: `Agents paused: ${ks.state.reason ?? "kill switch active"}. Resume at /admin.` },
+      { status: 503 },
+    );
+  }
 
   const { id } = await params;
   const biz = await store.getBusiness(id);

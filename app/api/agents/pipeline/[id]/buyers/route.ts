@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runBuyersStage } from "@/lib/agents/pipelineAsync";
+import { checkKillSwitch } from "@/lib/killSwitch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,14 @@ export const maxDuration = 60;
  * Body: { productId: string }
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    return NextResponse.json(
+      { error: `Agents paused: ${ks.state.reason ?? "kill switch active"}. Resume at /admin.` },
+      { status: 503 },
+    );
+  }
+
   let body: { productId?: string } = {};
   try {
     body = await req.json();

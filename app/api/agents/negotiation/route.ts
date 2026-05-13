@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runNegotiation } from "@/lib/agents/negotiation";
+import { checkKillSwitch } from "@/lib/killSwitch";
 import { store } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -10,6 +11,14 @@ const RATE_WINDOW_MS = 60_000;
 const recent: number[] = [];
 
 export async function POST(req: NextRequest) {
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    return NextResponse.json(
+      { error: `Agents paused: ${ks.state.reason ?? "kill switch active"}. Resume at /admin.` },
+      { status: 503 },
+    );
+  }
+
   const now = Date.now();
   while (recent.length && now - recent[0] > RATE_WINDOW_MS) recent.shift();
   if (recent.length >= RATE_LIMIT) {

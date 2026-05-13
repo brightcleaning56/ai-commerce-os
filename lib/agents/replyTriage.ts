@@ -1,4 +1,5 @@
 import { checkSpendBudget, estimateCost, getAnthropicClient, MODEL_SMART, recordSpend } from "@/lib/anthropic";
+import { checkKillSwitch } from "@/lib/killSwitch";
 import { getOperator, getOperatorSignature } from "@/lib/operator";
 import { store, type AgentRun, type OutreachDraft, type ThreadMessage } from "@/lib/store";
 
@@ -149,8 +150,29 @@ function fallbackSuggestions(draft: OutreachDraft, latestBuyerMessage: ThreadMes
 export async function runReplyTriage(draftId: string): Promise<{
   run: AgentRun;
   generated: NonNullable<OutreachDraft["suggestedReplies"]>;
-  skipped?: "no-buyer-message" | "already-suggested" | "draft-not-found";
+  skipped?: "no-buyer-message" | "already-suggested" | "draft-not-found" | "kill-switch-active";
 }> {
+  // Kill-switch gate -- when active, the buyer's reply still lands
+  // (handled by the route), but we don't burn Anthropic generating
+  // suggestions. Operator sees the inbound message in /outreach and
+  // can manually triage once they un-pause.
+  const ks = await checkKillSwitch();
+  if (ks.killed) {
+    const synthetic: AgentRun = {
+      id: `run_skip_${Date.now().toString(36)}`,
+      agent: "negotiation",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 0,
+      status: "success",
+      inputCategory: null,
+      productCount: 0,
+      modelUsed: "n/a",
+      usedFallback: true,
+    };
+    return { run: synthetic, generated: [], skipped: "kill-switch-active" };
+  }
+
   const draft = await store.getDraft(draftId);
   if (!draft) {
     const synthetic: AgentRun = {
