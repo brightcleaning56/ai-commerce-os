@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
 import Drawer from "@/components/ui/Drawer";
 
@@ -548,6 +548,93 @@ function TaskDetail({
   // AI talking-points state -- generated on demand, persisted on the task
   const [scriptLoading, setScriptLoading] = useState(false);
 
+  // ─── Twilio Voice browser dialer (optional) ───────────────────────
+  // When VOICE_PROVIDER=twilio is configured + the @twilio/voice-sdk
+  // can initialize, we replace the tel: handoff with an in-browser
+  // call. Operator never leaves the page; the timer matches the actual
+  // call duration to the millisecond; the call stream goes through
+  // Twilio (~$0.0085/min) using your verified caller-id.
+  //
+  // When voice isn't configured (no token / SDK fails to load), we
+  // stay on tel: and the device dialer handles it. Either way the
+  // call-session UI (outcome pills, notes, attempts log) is identical.
+  const deviceRef = useRef<unknown>(null);
+  const currentCallRef = useRef<unknown>(null);
+  const [twilioReady, setTwilioReady] = useState(false);
+  const [twilioInFlight, setTwilioInFlight] = useState<"idle" | "connecting" | "ringing" | "open">("idle");
+
+  useEffect(() => {
+    let cancelled = false;
+    let cleanup: (() => void) | null = null;
+
+    async function initDevice() {
+      try {
+        const r = await fetch("/api/voice/token", { credentials: "include" });
+        if (!r.ok) return; // 503 = not configured. Stays on tel: fallback.
+        const d = await r.json();
+        if (!d?.token) return;
+
+        // Lazy-load the SDK -- only operators with voice configured pay
+        // the bundle cost (~150KB).
+        const mod: { Device: new (token: string, opts?: Record<string, unknown>) => unknown } =
+          await import("@twilio/voice-sdk");
+        if (cancelled) return;
+
+        const Device = mod.Device;
+        const device = new Device(d.token, {
+          // 1 = ERROR only. Crank to 3 for verbose if debugging.
+          logLevel: 1,
+          // Codec preferences for B2B voice quality
+          codecPreferences: ["opus" as never, "pcmu" as never],
+        }) as {
+          register: () => Promise<void>;
+          on: (ev: string, cb: (...args: unknown[]) => void) => void;
+          updateToken: (t: string) => void;
+          destroy: () => void;
+          connect: (opts: { params: Record<string, string> }) => Promise<unknown>;
+        };
+        deviceRef.current = device;
+
+        // Auto-refresh the token before it expires so long sessions don't
+        // hit a wall mid-call.
+        device.on("tokenWillExpire", async () => {
+          try {
+            const rr = await fetch("/api/voice/token", { credentials: "include" });
+            const dd = await rr.json();
+            if (dd?.token) device.updateToken(dd.token);
+          } catch (e) {
+            console.warn("[twilio voice] token refresh failed", e);
+          }
+        });
+
+        device.on("error", (...args) => {
+          const err = args[0] as { message?: string } | undefined;
+          console.warn("[twilio voice] device error", err);
+          if (err?.message) toast(`Voice: ${err.message}`, "error");
+        });
+
+        await device.register();
+        if (cancelled) {
+          device.destroy();
+          return;
+        }
+        setTwilioReady(true);
+        cleanup = () => device.destroy();
+      } catch (e) {
+        // SDK install missing on the build, network failed, or the user
+        // declined the mic permission. Stay on tel: fallback silently.
+        console.info("[twilio voice] not active:", e instanceof Error ? e.message : e);
+      }
+    }
+    initDevice();
+    return () => {
+      cancelled = true;
+      if (cleanup) cleanup();
+      deviceRef.current = null;
+      currentCallRef.current = null;
+    };
+  }, [toast]);
+
   /**
    * Generate AI talking points via /api/agents/call-prep. Pulls everything
    * we know about the buyer (name, title, intent, rationale, target product)
@@ -620,7 +707,7 @@ function TaskDetail({
     return () => clearInterval(id);
   }, [callStartedAt]);
 
-  function placeCall() {
+  async function placeCall() {
     if (!contact.phone) {
       toast("No phone number on file for this buyer", "error");
       return;
@@ -628,12 +715,64 @@ function TaskDetail({
     setCallStartedAt(Date.now());
     setCallTickMs(0);
     setOutcomeForm({ outcome: "connected", notes: "", callbackAt: "" });
-    // Open the device dialer in a new context so the page (with the
-    // running timer + outcome form) stays available
-    window.open(`tel:${contact.phone}`, "_self");
+
+    // If Twilio is wired + Device registered, place the call IN BROWSER.
+    // Otherwise fall back to the OS dialer via tel: so the operator's
+    // workflow doesn't break -- they just leave the page momentarily.
+    const device = deviceRef.current as
+      | { connect: (opts: { params: Record<string, string> }) => Promise<unknown> }
+      | null;
+    if (twilioReady && device) {
+      try {
+        setTwilioInFlight("connecting");
+        const call = (await device.connect({
+          params: { To: contact.phone },
+        })) as {
+          on: (ev: string, cb: (...args: unknown[]) => void) => void;
+          disconnect: () => void;
+          status: () => string;
+        };
+        currentCallRef.current = call;
+
+        // Lifecycle events drive the UI badge + auto-suggest outcome on hangup
+        call.on("ringing", () => setTwilioInFlight("ringing"));
+        call.on("accept", () => setTwilioInFlight("open"));
+        call.on("disconnect", () => {
+          setTwilioInFlight("idle");
+          currentCallRef.current = null;
+          // Don't auto-save -- operator still picks the outcome explicitly
+          // (was it actually connected? voicemail? wrong number?)
+        });
+        call.on("error", (...args) => {
+          const err = args[0] as { message?: string } | undefined;
+          setTwilioInFlight("idle");
+          currentCallRef.current = null;
+          toast(`Call error: ${err?.message ?? "unknown"}`, "error");
+        });
+      } catch (err) {
+        setTwilioInFlight("idle");
+        toast(`Call failed to start: ${err instanceof Error ? err.message : "unknown"}`, "error");
+        // Fall back to tel: so the operator can still complete the call
+        window.open(`tel:${contact.phone}`, "_self");
+      }
+    } else {
+      // tel: fallback — opens the device dialer
+      window.open(`tel:${contact.phone}`, "_self");
+    }
   }
 
   function cancelCall() {
+    // Hang up the in-flight Twilio call if any
+    const call = currentCallRef.current as { disconnect: () => void } | null;
+    if (call) {
+      try {
+        call.disconnect();
+      } catch (e) {
+        console.warn("[twilio voice] hangup failed", e);
+      }
+      currentCallRef.current = null;
+    }
+    setTwilioInFlight("idle");
     setCallStartedAt(null);
     setCallTickMs(0);
     setOutcomeForm(null);
@@ -786,7 +925,17 @@ function TaskDetail({
           track everything else in-app. */}
       <div className="rounded-lg border border-bg-border bg-bg-card p-4">
         <div className="flex items-center justify-between">
-          <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Call session</div>
+          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-ink-tertiary">
+            <span>Call session</span>
+            {twilioReady && (
+              <span
+                title="Browser dialer ready (Twilio Voice JS SDK)"
+                className="rounded bg-accent-green/15 px-1.5 py-0.5 normal-case tracking-normal text-accent-green"
+              >
+                Browser dialer ready
+              </span>
+            )}
+          </div>
           {callStartedAt != null && (
             <span className="font-mono text-xs font-semibold text-accent-green">
               {fmtDuration(callTickMs)}
@@ -805,14 +954,20 @@ function TaskDetail({
               {contact.phone ? `Place call · ${contact.phone}` : "No phone number on file"}
             </button>
             <div className="mt-1.5 text-[10px] text-ink-tertiary">
-              Opens your dialer. Outcome + notes get logged after the call.
+              {twilioReady
+                ? "Calls via Twilio Voice in your browser — never leaves the page. Outcome + notes get logged after."
+                : "Opens your device dialer. Outcome + notes get logged after the call. Configure VOICE_PROVIDER=twilio in env to dial in-browser."}
             </div>
           </div>
         ) : (
           <div className="mt-3 space-y-3">
             <div className="rounded-md border border-accent-green/30 bg-accent-green/5 px-3 py-2 text-xs">
               <div className="flex items-center gap-2 font-semibold text-accent-green">
-                <PhoneCall className="h-3.5 w-3.5 animate-pulse" /> Call in progress
+                <PhoneCall className="h-3.5 w-3.5 animate-pulse" />
+                {twilioInFlight === "connecting" && "Connecting…"}
+                {twilioInFlight === "ringing" && "Ringing…"}
+                {twilioInFlight === "open" && "Connected — call in progress"}
+                {twilioInFlight === "idle" && "Call in progress"}
               </div>
               <div className="mt-0.5 text-ink-secondary">
                 Pick the outcome below when you hang up.
@@ -870,6 +1025,26 @@ function TaskDetail({
               >
                 <CheckCircle2 className="h-3.5 w-3.5" /> Save attempt
               </button>
+              {/* Hang Up only renders when an in-browser Twilio call is
+                  actually in flight -- otherwise Cancel is enough (the
+                  device dialer call is OS-level, can't be hung up here). */}
+              {twilioInFlight === "open" || twilioInFlight === "ringing" || twilioInFlight === "connecting" ? (
+                <button
+                  onClick={() => {
+                    const call = currentCallRef.current as { disconnect: () => void } | null;
+                    if (call) {
+                      try {
+                        call.disconnect();
+                      } catch {}
+                      currentCallRef.current = null;
+                    }
+                    setTwilioInFlight("idle");
+                  }}
+                  className="flex items-center gap-1.5 rounded-md bg-accent-red/15 px-3 py-2 text-xs font-semibold text-accent-red hover:bg-accent-red/25"
+                >
+                  <PhoneOff className="h-3 w-3" /> Hang up
+                </button>
+              ) : null}
               <button
                 onClick={cancelCall}
                 className="rounded-md border border-bg-border bg-bg-card px-3 py-2 text-xs hover:bg-bg-hover"

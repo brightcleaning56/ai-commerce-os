@@ -222,7 +222,7 @@ export async function GET(req: NextRequest) {
     severity: "warning" as const,
     affects: [
       "Operator browser calling from /tasks call session (tel: fallback works without)",
-      "AI agent placing outbound calls (Vapi / Bland only — Twilio needs extra wiring)",
+      "AI agent placing outbound calls (Vapi / Bland only — Twilio needs ConversationRelay wiring)",
     ],
     detail: voiceInfo.configured
       ? {
@@ -230,12 +230,23 @@ export async function GET(req: NextRequest) {
           supportsAiOutbound: voiceInfo.supportsAiOutbound,
           supportsBrowserCalls: voiceInfo.supportsBrowserCalls,
           ...voiceInfo.detail,
+          // Twilio-specific: confirm the TwiML webhook is reachable. The
+          // operator needs to set this URL in Twilio Console for the
+          // browser-side Device.connect() to actually place calls.
+          ...(voiceInfo.provider === "twilio"
+            ? {
+                twimlWebhookUrl: `${process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://YOUR-DOMAIN"}/api/voice/twiml`,
+                tokenEndpoint: "/api/voice/token (admin-only GET)",
+                setupHint:
+                  "In Twilio Console: Voice > TwiML > Apps > <your-app> > Voice Configuration > set Request URL to the twimlWebhookUrl above (POST). Then put the App SID in TWILIO_TWIML_APP_SID.",
+              }
+            : {}),
         }
       : voiceInfo.provider === "fallback"
         ? {
             currentMode: "tel: fallback (device dialer)",
             fixHint:
-              "Set VOICE_PROVIDER=vapi (recommended -- single vendor for AI + operator) and VAPI_PRIVATE_KEY + VAPI_PHONE_NUMBER_ID. Or VOICE_PROVIDER=twilio for operator-only browser dialer (~$0.0085/min).",
+              "Set VOICE_PROVIDER=twilio + TWILIO_API_KEY + TWILIO_API_SECRET + TWILIO_TWIML_APP_SID for operator browser dialer (~$0.0085/min, recommended for AVYN). Or VOICE_PROVIDER=vapi for AI-driven outbound calls (~$0.05/min).",
           }
         : {
             provider: voiceInfo.provider,
