@@ -9,11 +9,13 @@ import {
   MapPin,
   MessageSquare,
   Phone,
+  PhoneCall,
   Send,
   Sparkles,
   Target,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Buyer } from "@/lib/buyers";
 import BuyerHistory from "@/components/buyers/BuyerHistory";
@@ -59,6 +61,7 @@ function Stat({ label, value, hint }: { label: string; value: string | number; h
 }
 
 export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; forProduct?: string } }) {
+  const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [draft, setDraft] = useState<DraftPayload | null>(null);
   const [meta, setMeta] = useState<{ usedFallback: boolean; cost?: number; model: string } | null>(null);
@@ -69,12 +72,17 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
   const targetProduct = b.forProduct || b.matchedProducts[0] || "Trending Product";
   const productCategory = b.industry; // best guess from buyer industry
 
-  function addTask(type: "phone" | "sequence") {
+  /**
+   * Create a task in localStorage. Returns the new task id so callers can
+   * route the operator into the call session (Place call now flow).
+   */
+  function addTask(type: "phone" | "sequence"): string {
+    const id = `t_${Date.now().toString(36)}`;
     try {
       const raw = localStorage.getItem("aicos:tasks:v1");
       const tasks: LocalTask[] = raw ? JSON.parse(raw) : [];
       tasks.unshift({
-        id: `t_${Date.now().toString(36)}`,
+        id,
         buyerId: b.id,
         buyerCompany: b.company,
         buyerName: b.decisionMaker,
@@ -90,6 +98,17 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
     } catch {}
     setTaskAdded(type);
     setTimeout(() => setTaskAdded(null), 2500);
+    return id;
+  }
+
+  /**
+   * One-click call flow: create the phone task AND navigate to /tasks
+   * with ?focus=<id> so the call-session drawer auto-opens. Operator
+   * goes from buyer → call session in one motion.
+   */
+  function placeCallNow() {
+    const id = addTask("phone");
+    router.push(`/tasks?focus=${encodeURIComponent(id)}`);
   }
 
   async function generate() {
@@ -342,6 +361,20 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
         >
           <Phone className="h-4 w-4" /> Add Phone Task
         </button>
+        {/* One-click "Place call" -- creates the task AND routes to /tasks
+            with ?focus=<id> so the call-session drawer auto-opens. Operator
+            goes from buyer record to active call session in one click.
+            Only shown when the buyer has a phone on record (gate matches
+            the call action; no point creating a task that can't dial). */}
+        {b.phone && (
+          <button
+            onClick={placeCallNow}
+            title={`Create phone task and open call session for ${b.phone}`}
+            className="flex items-center justify-center gap-2 rounded-lg bg-accent-green/15 py-2.5 text-sm font-semibold text-accent-green hover:bg-accent-green/25"
+          >
+            <PhoneCall className="h-4 w-4" /> Place Call
+          </button>
+        )}
         <Link
           href={`/crm?company=${encodeURIComponent(b.company)}`}
           className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card py-2.5 text-sm hover:bg-bg-hover"

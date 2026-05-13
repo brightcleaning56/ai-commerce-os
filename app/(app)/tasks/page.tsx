@@ -5,6 +5,7 @@ import {
   Clock,
   FileText,
   Flame,
+  Loader2,
   Mail,
   MessageSquare,
   PhoneCall,
@@ -17,7 +18,8 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 import Drawer from "@/components/ui/Drawer";
 
@@ -135,11 +137,36 @@ const OUTCOME_META: Record<
 // ─── Page ────────────────────────────────────────────────────────────────
 
 export default function TasksPage() {
+  return (
+    <Suspense fallback={<div className="grid place-items-center py-16 text-ink-tertiary"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+      <TasksInner />
+    </Suspense>
+  );
+}
+
+function TasksInner() {
+  const searchParams = useSearchParams();
+  // ?focus=<taskId> — set when the operator clicks "Place call" on /buyers
+  // BuyerDetail. Causes the matching task's call-session drawer to auto-open
+  // on mount so the operator goes from buyer → call session in one motion.
+  const focusTaskId = searchParams.get("focus");
+
   const [tasks, setTasks] = useState<LocalTask[]>([]);
   const [filter, setFilter] = useState<"all" | "phone" | "sequence" | "open" | "done" | "callbacks">("open");
   const [buyerById, setBuyerById] = useState<Record<string, BuyerContact>>({});
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const { toast } = useToast();
+
+  // Auto-open the focused task once tasks are loaded. We can't open before
+  // load because the task might not exist in localStorage yet (race with
+  // the buyer-detail "Place call" handler that creates it then routes here).
+  useEffect(() => {
+    if (!focusTaskId) return;
+    if (tasks.length === 0) return;
+    if (tasks.find((t) => t.id === focusTaskId)) {
+      setOpenTaskId(focusTaskId);
+    }
+  }, [focusTaskId, tasks]);
 
   // Derive the "next callback due" timestamp for a task from its attempts.
   // Returns null when no callback has been scheduled.
