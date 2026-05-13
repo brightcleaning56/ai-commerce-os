@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { store } from "@/lib/store";
 import { requireAdmin } from "@/lib/auth";
 
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * Returns last 30 days, today's totals, and the configured budget cap.
  */
 export async function GET(req: Request) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const ledger = await store.getSpendLedger();

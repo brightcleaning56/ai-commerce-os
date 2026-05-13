@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { looksLikeUserToken, verifyUserToken } from "@/lib/userToken";
 
 /**
  * Edge middleware — gates the authenticated app + admin APIs.
@@ -10,13 +11,16 @@ import { NextRequest, NextResponse } from "next/server";
  *   - ADMIN_TOKEN set + cookie `aicos_admin=<TOKEN>` matches:
  *       Authenticated. Pass.
  *
+ *   - ADMIN_TOKEN set + cookie is a u_ per-user token (HMAC-signed at
+ *     invite acceptance) and verifies: Authenticated. Pass.
+ *
  *   - ADMIN_TOKEN set + presented cookie missing/wrong, accessing /signin:
  *       Pass (so the user can submit credentials).
  *
  *   - ADMIN_TOKEN set + presented cookie missing/wrong, accessing protected:
  *       Redirect to /signin?next=<original-path>.
  *
- *   - ADMIN_TOKEN set + Authorization: Bearer <TOKEN> header (for API access):
+ *   - ADMIN_TOKEN set + Authorization: Bearer <TOKEN | u_...> header:
  *       Authenticated. Pass.
  *
  * Public paths (no gate):
@@ -103,7 +107,7 @@ function withNoCDNCache(res: NextResponse): NextResponse {
   return res;
 }
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const expected = process.env.ADMIN_TOKEN;
 
@@ -119,14 +123,26 @@ export function middleware(req: NextRequest) {
   // Check Authorization header (programmatic API access)
   const auth = req.headers.get("authorization") ?? "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
-  if (bearer && constantTimeEquals(bearer, expected)) {
-    return withNoCDNCache(NextResponse.next());
+  if (bearer) {
+    if (constantTimeEquals(bearer, expected)) {
+      return withNoCDNCache(NextResponse.next());
+    }
+    if (looksLikeUserToken(bearer)) {
+      const v = await verifyUserToken(bearer);
+      if (v.ok) return withNoCDNCache(NextResponse.next());
+    }
   }
 
   // Check cookie (browser session)
   const cookie = req.cookies.get("aicos_admin")?.value ?? "";
-  if (cookie && constantTimeEquals(cookie, expected)) {
-    return withNoCDNCache(NextResponse.next());
+  if (cookie) {
+    if (constantTimeEquals(cookie, expected)) {
+      return withNoCDNCache(NextResponse.next());
+    }
+    if (looksLikeUserToken(cookie)) {
+      const v = await verifyUserToken(cookie);
+      if (v.ok) return withNoCDNCache(NextResponse.next());
+    }
   }
 
   // API requests get 401, browser requests redirect to signin

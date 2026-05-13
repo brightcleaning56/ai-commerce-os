@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { requireAdmin } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
@@ -25,7 +25,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; suggestionId: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id, suggestionId } = await params;
@@ -48,12 +48,12 @@ export async function POST(
   }
   if (sug.discardedAt) {
     return NextResponse.json(
-      { error: "This suggestion was discarded — pick a different one or regenerate" },
+      { error: "This suggestion was discarded â€” pick a different one or regenerate" },
       { status: 400 },
     );
   }
 
-  // Resolve buyer email — same lookup as /api/drafts/send. Reuses the
+  // Resolve buyer email â€” same lookup as /api/drafts/send. Reuses the
   // store.getBusiness path for biz_-prefixed ids.
   let buyerEmail: string | undefined;
   if (draft.buyerId.startsWith("biz_")) {
@@ -70,7 +70,7 @@ export async function POST(
     );
   }
 
-  // Send through the standard pipeline — CAN-SPAM footer auto-appends,
+  // Send through the standard pipeline â€” CAN-SPAM footer auto-appends,
   // suppression check fires first, List-Unsubscribe headers attach.
   const sendResult = await sendEmail({
     to: buyerEmail,
@@ -114,7 +114,7 @@ export async function POST(
     subject: sug.subject,
     body: sug.body,
     at: sentAt,
-    summary: `Reply triage · ${sug.actionLabel} (confidence ${sug.confidence}%)`,
+    summary: `Reply triage Â· ${sug.actionLabel} (confidence ${sug.confidence}%)`,
     recommendedAction: sug.actionLabel,
   };
 
@@ -143,7 +143,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; suggestionId: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id, suggestionId } = await params;

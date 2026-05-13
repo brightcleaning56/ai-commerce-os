@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { requireAdmin } from "@/lib/auth";
 import { getOperator } from "@/lib/operator";
@@ -11,15 +11,15 @@ const MAX_BUSINESSES_PER_JOB = 1000;
 const DEFAULT_BATCH_SIZE = 25;
 
 /**
- * GET /api/admin/outreach-jobs — list recent jobs, newest first
+ * GET /api/admin/outreach-jobs â€” list recent jobs, newest first
  * (active jobs always pinned to top via store sort order).
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const jobs = await store.getOutreachJobs();
-  // Strip the full businessIds + outcomes arrays from the list view —
+  // Strip the full businessIds + outcomes arrays from the list view â€”
   // they can be 1000-item arrays each. Per-job detail endpoint returns
   // the full record.
   const summary = jobs.map((j) => ({
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST /api/admin/outreach-jobs — queue a new bulk-draft job.
+ * POST /api/admin/outreach-jobs â€” queue a new bulk-draft job.
  *
  * Body:
  *   businessIds      string[]  (1..1000)
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
  * Returns the created job. Cron picks it up within ~5 min.
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: {
@@ -81,11 +81,11 @@ export async function POST(req: NextRequest) {
     );
   }
   const businessIds = body.businessIds.filter((x): x is string => typeof x === "string");
-  // De-dupe within the job — same business in twice would draft once
+  // De-dupe within the job â€” same business in twice would draft once
   // anyway (dedupe via productName), but we save a wasted cycle.
   const dedupedIds = Array.from(new Set(businessIds));
 
-  // Pitch override validation — same shape as /draft-outreach
+  // Pitch override validation â€” same shape as /draft-outreach
   let pitchOverride: OutreachJob["pitchOverride"];
   if (body.pitchOverride && typeof body.pitchOverride === "object") {
     const po = body.pitchOverride as { currentBrand?: unknown; alternative?: unknown; rationale?: unknown };
@@ -109,8 +109,8 @@ export async function POST(req: NextRequest) {
     typeof body.campaignLabel === "string" && body.campaignLabel.trim()
       ? body.campaignLabel.trim().slice(0, 120)
       : pitchOverride
-        ? `Switch ${pitchOverride.currentBrand} → ${pitchOverride.alternative}`
-        : `Bulk outreach · ${dedupedIds.length} businesses`;
+        ? `Switch ${pitchOverride.currentBrand} â†’ ${pitchOverride.alternative}`
+        : `Bulk outreach Â· ${dedupedIds.length} businesses`;
 
   const op = getOperator();
   const job: OutreachJob = {

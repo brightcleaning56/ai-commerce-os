@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import {
   store,
@@ -32,7 +32,7 @@ type BrandAggregate = {
   // response size predictable; client can request a per-brand detail
   // endpoint when we add one for >50 results.
   topBusinesses: BrandBusiness[];
-  topBusinessIds: string[];        // ALL ids — used for "Draft outreach for all" bulk action
+  topBusinessIds: string[];        // ALL ids â€” used for "Draft outreach for all" bulk action
   sources: Partial<Record<SupplyEdgeSource, number>>;
   transactionObservedCount: number;
   // Map of co-occurring brands (other brands the same businesses also
@@ -44,7 +44,7 @@ type BrandAggregate = {
 };
 
 /**
- * GET /api/admin/edges/brands — aggregate the SupplyEdge graph by
+ * GET /api/admin/edges/brands â€” aggregate the SupplyEdge graph by
  * `toName` (the brand/supplier/distributor side). One row per
  * (brand, kind) pair.
  *
@@ -62,7 +62,7 @@ type BrandAggregate = {
  * outreach pitching an AVYN alternative.
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const sp = req.nextUrl.searchParams;
@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
     return true;
   });
 
-  // Group by (toName lowercased, kind) — case-insensitive but preserve
+  // Group by (toName lowercased, kind) â€” case-insensitive but preserve
   // the first-seen capitalization for display.
   type Bucket = {
     brand: string;
@@ -113,7 +113,7 @@ export async function GET(req: NextRequest) {
     b.fromBusinessIds.add(e.fromBusinessId);
   }
 
-  // For each business, what brands do they source from? — used for
+  // For each business, what brands do they source from? â€” used for
   // co-occurrence (coBrands) calc below. Only computed for
   // sources_from edges since "businesses that distribute through" is
   // a different semantic.

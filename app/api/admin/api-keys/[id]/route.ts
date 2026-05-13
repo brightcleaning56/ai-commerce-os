@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { store } from "@/lib/store";
 
@@ -6,18 +6,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * DELETE /api/admin/api-keys/[id] — revoke a key.
+ * DELETE /api/admin/api-keys/[id] â€” revoke a key.
  *
  * Soft-revoke (status flips to "Revoked", revokedAt stamped). The hash
  * stays in the file so subsequent auth attempts can be distinguished
- * from "unknown key" — useful for incident response if a leaked key
+ * from "unknown key" â€” useful for incident response if a leaked key
  * is being abused. Hard-purge after a grace period is a future cron.
  */
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id } = await params;

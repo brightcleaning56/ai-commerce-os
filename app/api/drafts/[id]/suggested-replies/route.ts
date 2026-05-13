@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { runReplyTriage } from "@/lib/agents/replyTriage";
 import { checkKillSwitch } from "@/lib/killSwitch";
@@ -17,7 +17,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id } = await params;
@@ -48,13 +48,13 @@ export async function GET(
  * Generate suggestions for the latest buyer reply on this draft.
  * Idempotent: if suggestions already exist for the latest buyer message,
  * skip with skipped:"already-suggested". Caller can pass force:true
- * (NOT IMPLEMENTED YET — currently you delete first if you want a regen).
+ * (NOT IMPLEMENTED YET â€” currently you delete first if you want a regen).
  */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const ks = await checkKillSwitch();

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { refundCharge } from "@/lib/payments";
 import { store } from "@/lib/store";
@@ -8,24 +8,24 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/transactions/[id]/resolve  — operator resolves a dispute.
+ * POST /api/transactions/[id]/resolve  â€” operator resolves a dispute.
  * Body: { resolution: "refund_buyer" | "release_supplier" | "split", notes?: string }
  *
  * Transitions:
- *   disputed → refunded         (when resolution = refund_buyer or split with refund)
- *   disputed → released         (when resolution = release_supplier)
+ *   disputed â†’ refunded         (when resolution = refund_buyer or split with refund)
+ *   disputed â†’ released         (when resolution = release_supplier)
  *
  * Money side-effects:
- *   refund_buyer:    full refund to buyer — Stripe refund call in live mode
- *   release_supplier: full payout to supplier — same path as normal release
- *   split:           refund half + release half (50/50) — partial Stripe refund
+ *   refund_buyer:    full refund to buyer â€” Stripe refund call in live mode
+ *   release_supplier: full payout to supplier â€” same path as normal release
+ *   split:           refund half + release half (50/50) â€” partial Stripe refund
  *
- * `notes` (optional, max 500 chars) captures operator rationale — persisted
+ * `notes` (optional, max 500 chars) captures operator rationale â€” persisted
  * on the txn as disputeResolutionNotes + appended to the stateHistory detail
  * line so /admin/audit shows WHY, not just WHAT.
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: {
@@ -44,10 +44,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
-  // Sanitize notes: trim, hard-cap at 500 chars, empty → undefined
+  // Sanitize notes: trim, hard-cap at 500 chars, empty â†’ undefined
   const rawNotes = typeof body.notes === "string" ? body.notes.trim() : "";
   const notes: string | undefined = rawNotes ? rawNotes.slice(0, 500) : undefined;
-  const notesSuffix = notes ? ` · "${notes.slice(0, 80)}${notes.length > 80 ? "…" : ""}"` : "";
+  const notesSuffix = notes ? ` Â· "${notes.slice(0, 80)}${notes.length > 80 ? "â€¦" : ""}"` : "";
 
   const txn = await store.getTransaction(params.id);
   if (!txn) return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
@@ -60,12 +60,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   try {
     if (body.resolution === "release_supplier") {
-      // disputed → released → completed
+      // disputed â†’ released â†’ completed
       await transitionTransaction({
         id: params.id,
         to: "released",
         actor: "operator",
-        detail: `Dispute resolved — escrow released to supplier${notesSuffix}`,
+        detail: `Dispute resolved â€” escrow released to supplier${notesSuffix}`,
         patch: {
           disputeResolution: "release_supplier",
           disputeResolutionNotes: notes,
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         id: params.id,
         to: "refunded",
         actor: "operator",
-        detail: `Dispute resolved — full refund to buyer${notesSuffix}`,
+        detail: `Dispute resolved â€” full refund to buyer${notesSuffix}`,
         patch: {
           disputeResolution: "refund_buyer",
           disputeResolutionNotes: notes,
@@ -128,7 +128,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       id: params.id,
       to: "refunded",
       actor: "operator",
-      detail: `Dispute resolved — 50/50 split (buyer refunded $${(halfCents / 100).toFixed(2)})${notesSuffix}`,
+      detail: `Dispute resolved â€” 50/50 split (buyer refunded $${(halfCents / 100).toFixed(2)})${notesSuffix}`,
       patch: {
         disputeResolution: "split",
         disputeResolutionNotes: notes,

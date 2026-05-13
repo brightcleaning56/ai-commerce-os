@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/admin/postmark-status — live snapshot of the operator's
+ * GET /api/admin/postmark-status â€” live snapshot of the operator's
  * Postmark account so we can answer "is email actually working" without
  * making the operator dig through the Postmark dashboard.
  *
@@ -24,7 +24,7 @@ export const dynamic = "force-dynamic";
  * NEVER returns the Postmark token itself, only derived state.
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const token = process.env.POSTMARK_TOKEN;
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     "X-Postmark-Server-Token": token,
   };
 
-  // Run the four requests in parallel — they're independent.
+  // Run the four requests in parallel â€” they're independent.
   const [serverRes, statsRes, messagesRes, bouncesRes] = await Promise.allSettled([
     fetch("https://api.postmarkapp.com/server", { headers, cache: "no-store" }),
     fetch("https://api.postmarkapp.com/stats/outbound", { headers, cache: "no-store" }),
@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     fetch("https://api.postmarkapp.com/bounces?count=5&offset=0", { headers, cache: "no-store" }),
   ]);
 
-  // Parse server config (most important — tells us approval state)
+  // Parse server config (most important â€” tells us approval state)
   let server: ServerInfo | null = null;
   let serverError: string | null = null;
   if (serverRes.status === "fulfilled") {
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
         id: j.ID,
         name: j.Name,
         color: j.Color,
-        // Postmark uses "ApprovalState" — approved accounts return "Approved",
+        // Postmark uses "ApprovalState" â€” approved accounts return "Approved",
         // new accounts return "Pending" (can only send to verified senders).
         approvalState: j.ApprovalState ?? "Approved",
         smtpApiActivated: j.SmtpApiActivated ?? false,
@@ -120,12 +120,12 @@ export async function GET(req: NextRequest) {
   const issues: string[] = [];
   if (server?.approvalState === "Pending") {
     issues.push(
-      "Account in PENDING APPROVAL — Postmark will only deliver to addresses you've verified as senders. Submit your account for approval in Postmark dashboard.",
+      "Account in PENDING APPROVAL â€” Postmark will only deliver to addresses you've verified as senders. Submit your account for approval in Postmark dashboard.",
     );
   }
   if (server?.deliveryType !== "Live") {
     issues.push(
-      `Server delivery type is "${server?.deliveryType}" — flip to Live in Postmark dashboard for real delivery.`,
+      `Server delivery type is "${server?.deliveryType}" â€” flip to Live in Postmark dashboard for real delivery.`,
     );
   }
   if (stats && stats.bounceRate > 5) {
@@ -151,7 +151,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// ─── Postmark API response types ─────────────────────────────────────
+// â”€â”€â”€ Postmark API response types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type PostmarkServer = {
   ID: number;
@@ -188,7 +188,7 @@ type PostmarkBounce = {
   BouncedAt?: string;
 };
 
-// ─── Normalized response types ───────────────────────────────────────
+// â”€â”€â”€ Normalized response types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type ServerInfo = {
   id: number;

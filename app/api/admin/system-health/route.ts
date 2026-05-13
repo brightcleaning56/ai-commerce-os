@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { describeSchedule, PIPELINE_CRON_SCHEDULE, nextCronFire } from "@/lib/cron";
 import { getKillSwitch } from "@/lib/killSwitch";
@@ -8,29 +8,29 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/admin/system-health — admin-only.
+ * GET /api/admin/system-health â€” admin-only.
  *
  * Answers the one question every operator asks: "Is the AI outreach actually
  * going to work right now?" Each section reports whether its env config is
  * present, what features depend on it, and what severity a miss has.
  *
  * Severity model:
- *  - "blocking" — the feature literally does not run without this
- *  - "warning"  — degraded mode (e.g. fallback template, no SMS) but emails
+ *  - "blocking" â€” the feature literally does not run without this
+ *  - "warning"  â€” degraded mode (e.g. fallback template, no SMS) but emails
  *                 still land
- *  - "info"     — purely cosmetic / optional
+ *  - "info"     â€” purely cosmetic / optional
  *
  * Never reveals secret values. Only reports presence + the minimum metadata
  * needed for the operator to debug ("masked tail" of the From-email, the
  * 4-char prefix of the Anthropic key, etc).
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
 
-  // ── Anthropic / AI generation ──────────────────────────────────────────
+  // â”€â”€ Anthropic / AI generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const anthropicConfigured = !!anthropicKey && anthropicKey !== "sk-ant-...";
   const anthropic = {
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
     ],
     detail: anthropicConfigured
       ? {
-          keyPrefix: anthropicKey!.slice(0, 8) + "…",
+          keyPrefix: anthropicKey!.slice(0, 8) + "â€¦",
           modelCheap: process.env.ANTHROPIC_MODEL_CHEAP || "claude-haiku-4-5",
           modelSmart: process.env.ANTHROPIC_MODEL_SMART || "claude-sonnet-4-6",
           dailyBudgetUsd:
@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
       : { fixHint: "Set ANTHROPIC_API_KEY in Netlify env vars. Without it every agent falls back to deterministic templates." },
   };
 
-  // ── Postmark / outbound email ─────────────────────────────────────────
+  // â”€â”€ Postmark / outbound email â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const postmarkToken = process.env.POSTMARK_TOKEN;
   const resendToken = process.env.RESEND_TOKEN;
   const fromAddress = process.env.EMAIL_FROM || process.env.OPERATOR_EMAIL || null;
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
     ok: !!provider && !!fromAddress,
     severity: "blocking" as const,
     affects: [
-      "All outbound mail — AI replies, followups, operator notifications, outreach drafts",
+      "All outbound mail â€” AI replies, followups, operator notifications, outreach drafts",
       "CAN-SPAM compliance footers (won't matter if no mail goes out)",
     ],
     detail:
@@ -78,8 +78,8 @@ export async function GET(req: NextRequest) {
             liveMode: emailLive,
             testRecipient,
             note: emailLive
-              ? "Live mode is ON — every recipient gets the real email."
-              : "Live mode is OFF — every send is routed to the test recipient (or skipped). Flip EMAIL_LIVE=true to ship.",
+              ? "Live mode is ON â€” every recipient gets the real email."
+              : "Live mode is OFF â€” every send is routed to the test recipient (or skipped). Flip EMAIL_LIVE=true to ship.",
           }
         : {
             fixHint:
@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
           },
   };
 
-  // ── Twilio / outbound SMS ─────────────────────────────────────────────
+  // â”€â”€ Twilio / outbound SMS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const twilioSid = process.env.TWILIO_ACCOUNT_SID;
   const twilioToken = process.env.TWILIO_AUTH_TOKEN;
   const twilioFrom = process.env.TWILIO_FROM;
@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
     detail:
       twilioSid && twilioToken && twilioFrom
         ? {
-            sidPrefix: twilioSid.slice(0, 6) + "…",
+            sidPrefix: twilioSid.slice(0, 6) + "â€¦",
             fromNumber: twilioFrom,
             liveMode: smsLive,
             testRecipient: smsTestRecipient,
@@ -108,7 +108,7 @@ export async function GET(req: NextRequest) {
         : { fixHint: "Set TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM. Without these, SMS is silently skipped and only email goes out." },
   };
 
-  // ── CAN-SPAM compliance ───────────────────────────────────────────────
+  // â”€â”€ CAN-SPAM compliance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const operatorEmail = process.env.OPERATOR_EMAIL || null;
   const operatorCompany = process.env.OPERATOR_COMPANY || null;
   const operatorName = process.env.OPERATOR_NAME || null;
@@ -119,7 +119,7 @@ export async function GET(req: NextRequest) {
     ok: !!(operatorEmail && operatorCompany && operatorPostal && unsubscribeSecret),
     severity: "blocking" as const,
     affects: [
-      "CAN-SPAM § 7704 footers on every outbound email",
+      "CAN-SPAM Â§ 7704 footers on every outbound email",
       "RFC 8058 List-Unsubscribe one-click",
       "Penalties up to $50,120/violation if you scale sending without these",
     ],
@@ -128,16 +128,16 @@ export async function GET(req: NextRequest) {
       operatorCompany: operatorCompany ?? "MISSING",
       operatorName: operatorName ?? "(optional)",
       operatorTitle: operatorTitle ?? "(optional)",
-      operatorPostalAddress: operatorPostal ?? "MISSING — physical address required",
+      operatorPostalAddress: operatorPostal ?? "MISSING â€” physical address required",
       unsubscribeSecretConfigured: !!unsubscribeSecret,
       fixHint:
         !operatorEmail || !operatorCompany || !operatorPostal || !unsubscribeSecret
           ? "Set OPERATOR_EMAIL, OPERATOR_COMPANY, OPERATOR_POSTAL_ADDRESS (full mailing address), and UNSUBSCRIBE_SECRET (random hex). The footer auto-renders into every send."
-          : "All set — every outbound email now ships with the compliant footer and the List-Unsubscribe header.",
+          : "All set â€” every outbound email now ships with the compliant footer and the List-Unsubscribe header.",
     },
   };
 
-  // ── Postmark webhook ──────────────────────────────────────────────────
+  // â”€â”€ Postmark webhook â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const postmarkWebhookSecret = process.env.POSTMARK_WEBHOOK_SECRET;
   const postmarkWebhook = {
     ok: !!postmarkWebhookSecret,
@@ -158,7 +158,7 @@ export async function GET(req: NextRequest) {
         },
   };
 
-  // ── Cron / scheduled work ─────────────────────────────────────────────
+  // â”€â”€ Cron / scheduled work â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const cronSecret = process.env.CRON_SECRET;
   const cronEnabled = process.env.CRON_ENABLED !== "false";
   const deployed = !!(process.env.VERCEL || process.env.NETLIFY || process.env.URL);
@@ -186,14 +186,14 @@ export async function GET(req: NextRequest) {
         !cronSecret
           ? "Set CRON_SECRET in env. Cron handlers reject requests without a matching Bearer token."
           : !cronEnabled
-            ? "CRON_ENABLED=false — set to true (or remove) to re-enable scheduled work."
+            ? "CRON_ENABLED=false â€” set to true (or remove) to re-enable scheduled work."
             : !deployed
-              ? "Local environment detected — cron only fires when deployed to Netlify or Vercel. The schedules are live in production."
-              : "All set — schedules are firing on platform.",
+              ? "Local environment detected â€” cron only fires when deployed to Netlify or Vercel. The schedules are live in production."
+              : "All set â€” schedules are firing on platform.",
     },
   };
 
-  // ── Auth ──────────────────────────────────────────────────────────────
+  // â”€â”€ Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const adminToken = process.env.ADMIN_TOKEN;
   const authConfig = {
     ok: !!adminToken && adminToken !== "change-me",
@@ -203,7 +203,7 @@ export async function GET(req: NextRequest) {
       ? {
           configured: true,
           isDefault: adminToken === "change-me",
-          tokenPrefix: adminToken.slice(0, 4) + "…",
+          tokenPrefix: adminToken.slice(0, 4) + "â€¦",
           fixHint:
             adminToken === "change-me"
               ? "ADMIN_TOKEN is still the default placeholder. Rotate it before exposing the deploy."
@@ -212,7 +212,7 @@ export async function GET(req: NextRequest) {
       : { fixHint: "Set ADMIN_TOKEN (random hex). Every admin route requires this." },
   };
 
-  // ── Voice / phone calls ────────────────────────────────────────────
+  // â”€â”€ Voice / phone calls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Surfaces which provider is configured (if any) so the operator sees
   // whether /tasks is using tel:-fallback or a real browser dialer + AI
   // outbound capability.
@@ -222,7 +222,7 @@ export async function GET(req: NextRequest) {
     severity: "warning" as const,
     affects: [
       "Operator browser calling from /tasks call session (tel: fallback works without)",
-      "AI agent placing outbound calls (Vapi / Bland only — Twilio needs ConversationRelay wiring)",
+      "AI agent placing outbound calls (Vapi / Bland only â€” Twilio needs ConversationRelay wiring)",
     ],
     detail: voiceInfo.configured
       ? {
@@ -259,7 +259,7 @@ export async function GET(req: NextRequest) {
           },
   };
 
-  // ── Booking link for AI reply CTA ─────────────────────────────────────
+  // â”€â”€ Booking link for AI reply CTA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const bookingUrl = process.env.BOOKING_URL || null;
   const booking = {
     ok: !!bookingUrl,
@@ -273,11 +273,11 @@ export async function GET(req: NextRequest) {
       : { fixHint: "Optional. Set BOOKING_URL to your Calendly / Cal.com / SavvyCal link. Lead-followup agent will weave it into the body." },
   };
 
-  // ── Kill switch — surfaces the global pause so the operator sees it
+  // â”€â”€ Kill switch â€” surfaces the global pause so the operator sees it
   // at the top of every health snapshot, not buried in /admin.
   const killSwitchState = await getKillSwitch();
   const killSwitch = {
-    // "ok" here means NOT killed — green icon when agents are running normally,
+    // "ok" here means NOT killed â€” green icon when agents are running normally,
     // amber when the operator has explicitly paused everything.
     ok: !killSwitchState.active,
     severity: "warning" as const,
@@ -295,7 +295,7 @@ export async function GET(req: NextRequest) {
       : { active: false },
   };
 
-  // ── Roll-up ───────────────────────────────────────────────────────────
+  // â”€â”€ Roll-up â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const checks = {
     anthropic,
     email,

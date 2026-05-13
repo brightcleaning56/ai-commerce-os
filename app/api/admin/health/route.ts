@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { getBackend, store } from "@/lib/store";
 
@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Operator health check — surfaces backend status, today's spend, and key
+ * Operator health check â€” surfaces backend status, today's spend, and key
  * configuration. Useful for monitoring + sanity-checking after deploy.
  *
  * Returns:
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  *   - counts: rough size of each entity store
  */
 export async function GET(req: Request) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const backend = getBackend();
@@ -61,7 +61,7 @@ export async function GET(req: Request) {
       firstViewWebhookSigned: !!process.env.SHARE_FIRSTVIEW_WEBHOOK_SECRET,
       sentryConfigured: !!process.env.SENTRY_DSN,
       storeBackend: backend.name,
-      // ── Setup-status surface (consumed by /admin Setup panel) ────────
+      // â”€â”€ Setup-status surface (consumed by /admin Setup panel) â”€â”€â”€â”€â”€â”€â”€â”€
       stripeConfigured: !!process.env.STRIPE_SECRET_KEY,
       stripeLive:
         !!process.env.STRIPE_SECRET_KEY &&
@@ -79,12 +79,12 @@ export async function GET(req: Request) {
       cronRuns: cron.length,
       leads: leads.length,
     },
-    // ── AI health (catches silent fallback / 401 storms) ─────────────────
+    // â”€â”€ AI health (catches silent fallback / 401 storms) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // The agents fall back to deterministic templates when Anthropic 401s
     // or hits any error. The platform keeps working but the AI personalization
     // is silently degraded. This rollup makes that visible at a glance.
     aiHealth: aiHealthSummary(runs),
-    // ── Auto-promote summary (lead → buyer automation) ───────────────────
+    // â”€â”€ Auto-promote summary (lead â†’ buyer automation) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Shows whether the lead-auto-promote rule is firing and how often.
     // If it's set high enough to be disabled, threshold === null.
     autoPromote: autoPromoteSummary(leads),
@@ -140,10 +140,10 @@ function aiHealthSummary(runs: AgentRunLike[]) {
   const recent401 = recent.filter((r) => /\b401\b|unauthor/i.test(r.errorMessage || "")).length;
 
   // Status logic:
-  //   "ok"        — no recent errors and no fallbacks
-  //   "degraded"  — some errors or fallbacks but not all
-  //   "down"      — every recent run failed (likely auth)
-  //   "idle"      — no runs in the last 24h
+  //   "ok"        â€” no recent errors and no fallbacks
+  //   "degraded"  â€” some errors or fallbacks but not all
+  //   "down"      â€” every recent run failed (likely auth)
+  //   "idle"      â€” no runs in the last 24h
   let status: "ok" | "degraded" | "down" | "idle";
   if (total === 0) status = "idle";
   else if (errors === total) status = "down";
@@ -162,7 +162,7 @@ function aiHealthSummary(runs: AgentRunLike[]) {
     // If many 401s in a row, surface the action operator should take
     suggestedAction:
       recent401 >= 3
-        ? "Anthropic returning 401 — verify ANTHROPIC_API_KEY at https://platform.claude.com/settings/keys, then redeploy"
+        ? "Anthropic returning 401 â€” verify ANTHROPIC_API_KEY at https://platform.claude.com/settings/keys, then redeploy"
         : null,
   };
 }

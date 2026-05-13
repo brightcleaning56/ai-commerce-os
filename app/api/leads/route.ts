@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { store, type Lead } from "@/lib/store";
 import { sendEmail } from "@/lib/email";
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  // Loose email check — full RFC validation is not worth the complexity.
+  // Loose email check â€” full RFC validation is not worth the complexity.
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.json({ error: "Invalid email" }, { status: 400 });
   }
@@ -101,15 +101,15 @@ export async function POST(req: NextRequest) {
     message: trim(body.message, 5000),
   };
 
-  // ── Dedup by email ──────────────────────────────────────────────────
+  // â”€â”€ Dedup by email â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // If a lead with this email already exists in the store, merge into it
   // instead of creating a duplicate. Same person submitting twice (form
   // refresh, accidental double-submit, returning visitor) should never
   // produce N records the operator has to reconcile.
   //
-  //  - within 5 min of a prior submission → silent dedupe (no audit entry,
+  //  - within 5 min of a prior submission â†’ silent dedupe (no audit entry,
   //    no AI re-trigger). Catches double-clicks + form refreshes.
-  //  - longer than 5 min → real resubmission: append an audit entry, merge
+  //  - longer than 5 min â†’ real resubmission: append an audit entry, merge
   //    new non-empty fields, fire a fresh AI reply (since the conversation
   //    may have gone cold and they're re-engaging).
   const existing = await store.getLeadByEmail(email);
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
     const sinceMs = Date.now() - lastTouchMs;
     const silentDedup = sinceMs < SILENT_DEDUP_WINDOW_MS;
 
-    // Diff incoming vs stored — fields only "merge" when incoming has a
+    // Diff incoming vs stored â€” fields only "merge" when incoming has a
     // value AND stored is empty. Never overwrite a value with another value
     // (we can't tell which is more accurate; operator can edit manually).
     const patch: Partial<Lead> = {};
@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
         changedFields.push(f);
       }
     }
-    // useCases — union the lists
+    // useCases â€” union the lists
     if (incoming.useCases.length > 0) {
       const merged = Array.from(new Set([...(existing.useCases ?? []), ...incoming.useCases]));
       if (merged.length !== existing.useCases.length) {
@@ -190,7 +190,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // ── New lead ────────────────────────────────────────────────────────
+  // â”€â”€ New lead â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const lead: Lead = {
     id: `lead_${crypto.randomBytes(8).toString("hex")}`,
     createdAt: new Date().toISOString(),
@@ -206,7 +206,7 @@ export async function POST(req: NextRequest) {
   await store.addLead(lead);
 
   // CRITICAL: do NOT fire-and-forget on Netlify. Lambdas terminate as soon
-  // as the response is returned — any in-flight `void promise` is killed
+  // as the response is returned â€” any in-flight `void promise` is killed
   // before the work completes, so the AI reply never sends and the lead
   // stays stuck at aiReply.status = "pending". Awaiting both in parallel
   // keeps total latency ~3-5s (Anthropic dominates) and well under the
@@ -237,10 +237,10 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * GET — operator-only list of leads. Used by /leads admin page.
+ * GET â€” operator-only list of leads. Used by /leads admin page.
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const leads = await store.getLeads();
   return NextResponse.json({ leads });
@@ -252,7 +252,7 @@ async function notifyOperator(lead: Lead): Promise<void> {
   const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://avyncommerce.com";
   const linesText = [
     `New AVYN lead from ${lead.name} <${lead.email}>`,
-    `Company: ${lead.company}${lead.industry ? ` · ${lead.industry}` : ""}${lead.companySize ? ` · ${lead.companySize}` : ""}`,
+    `Company: ${lead.company}${lead.industry ? ` Â· ${lead.industry}` : ""}${lead.companySize ? ` Â· ${lead.companySize}` : ""}`,
     lead.phone ? `Phone: ${lead.phone}` : null,
     lead.useCases.length ? `Interested in: ${lead.useCases.join(", ")}` : null,
     lead.timeline ? `Timeline: ${lead.timeline}` : null,
@@ -264,7 +264,7 @@ async function notifyOperator(lead: Lead): Promise<void> {
 
   await sendEmail({
     to: operatorEmail,
-    subject: `New lead · ${lead.company} (${lead.name})`,
+    subject: `New lead Â· ${lead.company} (${lead.name})`,
     textBody: linesText,
     replyTo: lead.email,
     metadata: { lead_id: lead.id, source: lead.source },

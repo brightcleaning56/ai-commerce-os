@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { markVoicemailRead } from "@/lib/voicemails";
 
@@ -6,14 +6,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * PATCH /api/voice/voicemails/[id] — toggle read status.
+ * PATCH /api/voice/voicemails/[id] â€” toggle read status.
  * Body: { read: boolean }
  */
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id } = await params;

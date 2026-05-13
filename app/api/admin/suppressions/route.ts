@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { getOperator } from "@/lib/operator";
 import { store, type EmailSuppressionSource } from "@/lib/store";
@@ -15,7 +15,7 @@ const VALID_SOURCES: EmailSuppressionSource[] = [
 ];
 
 /**
- * GET /api/admin/suppressions — list every email on the suppression
+ * GET /api/admin/suppressions â€” list every email on the suppression
  * list. Sorted newest-first. Supports filtering by source + query.
  *
  * Query params:
@@ -27,7 +27,7 @@ const VALID_SOURCES: EmailSuppressionSource[] = [
  *   { suppressions, total, filteredTotal, counts: { bySource } }
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const sp = req.nextUrl.searchParams;
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
     .slice()
     .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
 
-  // Counts BEFORE filtering — operator sees the real distribution
+  // Counts BEFORE filtering â€” operator sees the real distribution
   const bySource: Record<string, number> = {};
   for (const s of sorted) {
     bySource[s.source] = (bySource[s.source] ?? 0) + 1;
@@ -67,12 +67,12 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST /api/admin/suppressions — operator manually adds an email to
+ * POST /api/admin/suppressions â€” operator manually adds an email to
  * the suppression list. Source is forced to "operator" for audit
  * clarity. The body's reason is preserved.
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: { email?: unknown; reason?: unknown };
@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
     reason: reason ?? `Manually added by ${op.email}`,
   });
 
-  // Same defense-in-depth as the public unsubscribe endpoint —
+  // Same defense-in-depth as the public unsubscribe endpoint â€”
   // propagate DNC to BusinessRecord + Lead.
   try {
     const biz = await store.getBusinessByEmail(email);

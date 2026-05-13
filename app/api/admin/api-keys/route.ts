@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { requireAdmin } from "@/lib/auth";
 import { getOperator } from "@/lib/operator";
@@ -23,12 +23,12 @@ const VALID_SCOPES: ApiKeyScope[] = [
 const VALID_ENVS: ApiKeyEnvironment[] = ["Production", "Test"];
 
 /**
- * GET /api/admin/api-keys — list keys for the operator dashboard.
+ * GET /api/admin/api-keys â€” list keys for the operator dashboard.
  * Strips `hashedSecret` from the response so the secret never leaves
  * the server. The operator sees prefix + name + scopes + usage.
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const all = await store.getApiKeys();
@@ -40,14 +40,14 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST /api/admin/api-keys — create a new key.
+ * POST /api/admin/api-keys â€” create a new key.
  *
  * Returns the raw secret EXACTLY ONCE in this response. Operator must
  * copy it now; the server stores only the hash and will refuse to
  * recover it later. Same model as Stripe / GitHub.
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: Record<string, unknown> = {};
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
 
   await store.addApiKey(key);
 
-  // Strip the hash from the response too — UI never needs it.
+  // Strip the hash from the response too â€” UI never needs it.
   const { hashedSecret: _h, ...rest } = key;
   return NextResponse.json({
     ok: true,

@@ -1,9 +1,14 @@
 /**
  * Auth scaffold — production hardening.
  *
- * Two enforcement modes:
+ * Enforcement modes:
  *   1. ADMIN_TOKEN env var set → routes calling requireAdmin() check for
- *      `Authorization: Bearer <ADMIN_TOKEN>`. Matches → ok. Else 401.
+ *      either:
+ *        a. `Authorization: Bearer <ADMIN_TOKEN>` (global admin)
+ *        b. `Authorization: Bearer u_...` (per-user invite token — see
+ *           lib/userToken.ts)
+ *        c. Cookie aicos_admin=<one of the above>
+ *      Matches → ok. Else 401.
  *   2. ADMIN_TOKEN unset → DEV MODE. requireAdmin() always returns ok.
  *      Logs a warning so you don't ship without setting it.
  *
@@ -19,10 +24,14 @@
  *   - / (welcome)  → marketing landing
  *
  * Everything else (the (app) route group + admin APIs) should call requireAdmin().
+ *
+ * requireAdmin is async because per-user token verification uses Web
+ * Crypto subtle.verify which is async. All call sites pass `await`.
  */
+import { looksLikeUserToken, verifyUserToken, type UserTokenPayload } from "./userToken";
 
 export type AuthResult =
-  | { ok: true; mode: "production" | "dev" }
+  | { ok: true; mode: "production" | "dev"; user?: UserTokenPayload }
   | { ok: false; status: 401 | 403; reason: string };
 
 /**
@@ -31,8 +40,13 @@ export type AuthResult =
  *
  * Accepts either a Request or a Next-style { headers: Headers } shape so
  * route handlers can pass `req` directly.
+ *
+ * If matched on a per-user token, the returned AuthResult includes the
+ * decoded payload (`user`) so call sites can read the role/email later.
  */
-export function requireAdmin(req: { headers: Headers } | Request): AuthResult {
+export async function requireAdmin(
+  req: { headers: Headers } | Request,
+): Promise<AuthResult> {
   const expected = process.env.ADMIN_TOKEN;
   if (!expected) {
     if (process.env.NODE_ENV === "production") {
@@ -49,6 +63,11 @@ export function requireAdmin(req: { headers: Headers } | Request): AuthResult {
   const headerToken = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : auth;
   if (headerToken) {
     if (constantTimeEquals(headerToken, expected)) return { ok: true, mode: "production" };
+    if (looksLikeUserToken(headerToken)) {
+      const v = await verifyUserToken(headerToken);
+      if (v.ok) return { ok: true, mode: "production", user: v.payload };
+      return { ok: false, status: 401, reason: `Invalid user token: ${v.reason}` };
+    }
     return { ok: false, status: 401, reason: "Invalid admin token" };
   }
 
@@ -62,8 +81,14 @@ export function requireAdmin(req: { headers: Headers } | Request): AuthResult {
   const cookieHeader = req.headers.get("cookie") ?? "";
   const match = /(?:^|;\s*)aicos_admin=([^;]+)/.exec(cookieHeader);
   const cookieToken = match ? decodeURIComponent(match[1]) : "";
-  if (cookieToken && constantTimeEquals(cookieToken, expected)) {
-    return { ok: true, mode: "production" };
+  if (cookieToken) {
+    if (constantTimeEquals(cookieToken, expected)) {
+      return { ok: true, mode: "production" };
+    }
+    if (looksLikeUserToken(cookieToken)) {
+      const v = await verifyUserToken(cookieToken);
+      if (v.ok) return { ok: true, mode: "production", user: v.payload };
+    }
   }
 
   return { ok: false, status: 401, reason: "Missing Authorization header or session cookie" };

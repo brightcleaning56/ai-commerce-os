@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { runBusinessProfileScan } from "@/lib/agents/businessProfile";
 import { checkKillSwitch } from "@/lib/killSwitch";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * POST /api/admin/businesses/[id]/profile — run the AI Profile Scan
+ * POST /api/admin/businesses/[id]/profile â€” run the AI Profile Scan
  * on a single business. Fetches the homepage, asks Claude to extract
  * what they sell + likely suppliers + distributors, and persists the
  * result on the business record.
@@ -22,7 +22,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const ks = await checkKillSwitch();

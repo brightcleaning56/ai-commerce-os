@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { getVoiceRecordingsByCallSids } from "@/lib/voiceRecordings";
 
@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/voice/recordings?callSids=sid1,sid2,sid3 — admin-only.
+ * GET /api/voice/recordings?callSids=sid1,sid2,sid3 â€” admin-only.
  *
  * Joins client-side CallAttempts (which carry the CallSid we captured
  * from the SDK at call time) with server-side recording metadata
@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
  * Empty input -> empty result. Unknown SIDs are silently omitted.
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const url = new URL(req.url);

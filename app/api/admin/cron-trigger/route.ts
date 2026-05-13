@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * POST /api/admin/cron-trigger — admin-only.
+ * POST /api/admin/cron-trigger â€” admin-only.
  *
  * Lets the operator manually fire a cron handler from /admin/system-health
  * instead of waiting for the next scheduled tick. Useful for:
@@ -23,7 +23,7 @@ export const maxDuration = 60;
  *               "auto-promote-sweep" | "daily-digest" }
  *
  * Pipeline (the most expensive cron) is intentionally NOT triggerable
- * here — that's what the /pipeline page's "Run Pipeline" button is for,
+ * here â€” that's what the /pipeline page's "Run Pipeline" button is for,
  * with proper config inputs.
  */
 type TriggerableKind =
@@ -44,7 +44,7 @@ const KIND_TO_PATH: Record<TriggerableKind, string> = {
 const VALID_KINDS = Object.keys(KIND_TO_PATH) as TriggerableKind[];
 
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }

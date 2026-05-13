@@ -3,6 +3,9 @@ import {
   AlertCircle,
   ArrowRight,
   CheckCircle2,
+  Copy,
+  Eye,
+  EyeOff,
   Loader2,
   ShieldCheck,
   Sparkles,
@@ -42,6 +45,8 @@ export default function InviteAcceptPage() {
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [userToken, setUserToken] = useState<string>("");
+  const [tokenError, setTokenError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +89,8 @@ export default function InviteAcceptPage() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? `Accept failed (${r.status})`);
+      if (typeof d.userToken === "string") setUserToken(d.userToken);
+      if (typeof d.tokenError === "string") setTokenError(d.tokenError);
       setAccepted(true);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Couldn't accept invite");
@@ -122,7 +129,7 @@ export default function InviteAcceptPage() {
             icon="expired"
           />
         ) : accepted && invite ? (
-          <AcceptedCard invite={invite} />
+          <AcceptedCard invite={invite} userToken={userToken} tokenError={tokenError} />
         ) : invite ? (
           <div className="space-y-6">
             <div>
@@ -159,15 +166,15 @@ export default function InviteAcceptPage() {
               </div>
             </div>
 
-            {/* Honesty note — Eric's rule: never lie to a user about capability */}
+            {/* Honesty note: per-role permissions aren't enforced yet. */}
             <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-4 text-[12px]">
               <div className="flex items-start gap-2">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-accent-amber" />
                 <div className="text-ink-secondary">
                   <strong className="font-semibold text-accent-amber">Heads up:</strong>
-                  {" "}per-user sign-in for AVYN Commerce isn&apos;t live yet. Accepting confirms
-                  you&apos;re joining and notifies {invite.invitedBy.name.split(" ")[0]} — you&apos;ll get
-                  a follow-up email with a sign-in link once it ships. Nothing to install or set up today.
+                  {" "}accepting will give you a personal sign-in token on the next screen.
+                  Until per-role permissions ship, the token grants full workspace access
+                  regardless of role — same as {invite.invitedBy.name.split(" ")[0]} has today.
                 </div>
               </div>
             </div>
@@ -211,34 +218,122 @@ export default function InviteAcceptPage() {
   );
 }
 
-function AcceptedCard({ invite }: { invite: InvitePayload }) {
+function AcceptedCard({
+  invite,
+  userToken,
+  tokenError,
+}: {
+  invite: InvitePayload;
+  userToken: string;
+  tokenError: string | null;
+}) {
+  const [show, setShow] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    if (!userToken) return;
+    try {
+      await navigator.clipboard.writeText(userToken);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // clipboard blocked — fall back to selecting via Reveal
+      setShow(true);
+    }
+  }
+
+  // If token mint failed (e.g. ADMIN_TOKEN not set in dev) we fall back
+  // to the old "we'll email you" message so the page still confirms.
+  if (!userToken || tokenError) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-accent-green">
+          <CheckCircle2 className="h-6 w-6" />
+          <h1 className="text-xl font-bold">You&apos;re in</h1>
+        </div>
+        <p className="text-sm text-ink-secondary">
+          We let <span className="font-medium text-ink-primary">{invite.invitedBy.name}</span>{" "}
+          know you accepted the{" "}
+          <span className="font-semibold text-brand-200">{invite.role}</span> seat at{" "}
+          <span className="font-medium text-ink-primary">{invite.workspace}</span>.
+        </p>
+        <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-4 text-[12px] text-ink-secondary">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-accent-amber" />
+            <div>
+              We couldn&apos;t generate your sign-in token right now
+              {tokenError ? <> ({tokenError})</> : null}. {invite.invitedBy.name.split(" ")[0]}{" "}
+              will follow up once it&apos;s sorted.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="flex items-center gap-2 text-accent-green">
         <CheckCircle2 className="h-6 w-6" />
         <h1 className="text-xl font-bold">You&apos;re in</h1>
       </div>
       <p className="text-sm text-ink-secondary">
-        We let <span className="font-medium text-ink-primary">{invite.invitedBy.name}</span> know
-        you accepted the <span className="font-semibold text-brand-200">{invite.role}</span> seat
-        at <span className="font-medium text-ink-primary">{invite.workspace}</span>.
+        Welcome to <span className="font-medium text-ink-primary">{invite.workspace}</span>.
+        Below is your personal sign-in token. Save it somewhere safe — we won&apos;t show it
+        again.
       </p>
+
+      <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+            Your sign-in token
+          </div>
+          <button
+            type="button"
+            onClick={() => setShow((s) => !s)}
+            className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-app px-2 py-1 text-[11px] text-ink-secondary hover:bg-bg-border"
+          >
+            {show ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+            {show ? "Hide" : "Reveal"}
+          </button>
+        </div>
+        <div
+          className="mt-2 break-all rounded-md border border-bg-border bg-bg-app px-3 py-2 font-mono text-[11px] text-ink-primary"
+          style={{ filter: show ? undefined : "blur(5px)" }}
+        >
+          {userToken}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={copy}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-bg-border bg-bg-app px-3 py-2 text-[12px] font-medium text-ink-primary hover:bg-bg-border"
+          >
+            <Copy className="h-3.5 w-3.5" />
+            {copied ? "Copied" : "Copy token"}
+          </button>
+          <a
+            href={`/signin?next=/`}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-gradient-brand px-3 py-2 text-[12px] font-semibold shadow-glow"
+          >
+            Sign in
+            <ArrowRight className="h-3.5 w-3.5" />
+          </a>
+        </div>
+        <div className="mt-3 text-[10px] text-ink-tertiary">
+          Token expires in 90 days. Paste it into the Access Token field on the sign-in page.
+        </div>
+      </div>
+
       <div className="rounded-xl border border-bg-border bg-bg-card p-4 text-[12px] text-ink-secondary">
         <div className="flex items-start gap-2">
           <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-accent-green" />
           <div>
-            Next step is on us — when per-user sign-in ships, we&apos;ll email you a link to set
-            up your account. No action needed from you today.
+            Treat this token like a password — anyone who has it can sign in as you. If you
+            lose it, ask {invite.invitedBy.name.split(" ")[0]} to resend your invite.
           </div>
         </div>
       </div>
-      <a
-        href="https://avyncommerce.com"
-        className="inline-flex items-center gap-1 text-sm text-brand-200 hover:underline"
-      >
-        Learn more about AVYN Commerce
-        <ArrowRight className="h-3.5 w-3.5" />
-      </a>
     </div>
   );
 }

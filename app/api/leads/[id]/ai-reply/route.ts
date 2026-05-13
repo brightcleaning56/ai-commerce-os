@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { runLeadFirstReply } from "@/lib/leadFirstReply";
 import { runLeadFollowup } from "@/lib/leadFollowup";
@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/leads/[id]/ai-reply — admin-only manual trigger for the AI
+ * POST /api/leads/[id]/ai-reply â€” admin-only manual trigger for the AI
  * outreach to a single lead. Operator-facing button companion to the
  * auto-trigger in /api/leads (which fires on form submission).
  *
@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
  *  - If `aiReply.status === "sent"`: fire a SECOND-touch followup, appended
  *    to aiFollowups[]. Same engine the daily cron uses, but on-demand.
  *
- * Idempotency: not strictly idempotent — each call generates and sends a
+ * Idempotency: not strictly idempotent â€” each call generates and sends a
  * fresh message. The UI button is debounced via `pending` state to prevent
  * accidental double-clicks.
  *
@@ -30,7 +30,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
@@ -60,7 +60,7 @@ export async function POST(
     });
   }
 
-  // Followup branch — aiReply was already sent successfully.
+  // Followup branch â€” aiReply was already sent successfully.
   const result = await runLeadFollowup(lead);
   const updated = await store.getLead(id);
   return NextResponse.json({

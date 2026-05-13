@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { listVoiceRecordings } from "@/lib/voiceRecordings";
 
@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/voice/recording-proxy/[recordingSid] — admin-only.
+ * GET /api/voice/recording-proxy/[recordingSid] â€” admin-only.
  *
  * Streams a Twilio-hosted .mp3 recording through our origin so the
  * browser <audio> tag can play it. Twilio's recording URLs require
@@ -23,7 +23,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ recordingSid: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { recordingSid } = await params;

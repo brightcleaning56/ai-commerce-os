@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { store } from "@/lib/store";
 
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  *   - subscription: honest Stripe state (not configured / configured /
  *                   live). When STRIPE_SECRET_KEY isn't set, returns
  *                   { configured: false } so the UI shows "no
- *                   subscription active — wire Stripe to enable"
+ *                   subscription active â€” wire Stripe to enable"
  *                   instead of pretending the operator is on Growth.
  *   - invoices:     []. Real Stripe invoice fetch ships when subscriptions
  *                   are wired; until then we never invent rows.
@@ -24,10 +24,10 @@ export const dynamic = "force-dynamic";
  * What we deliberately do NOT do:
  *   - Pretend the operator is on a paid plan they never bought
  *   - Show fake usage numbers ("4,120,000 AI tokens" was hardcoded
- *     before this slice — now it's the real spend-ledger month total)
+ *     before this slice â€” now it's the real spend-ledger month total)
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const [drafts, buyers, suppliers, products, apiKeys, ledger] = await Promise.all([
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     store.getSpendLedger().catch(() => []),
   ]);
 
-  // ── Usage (calendar month) ───────────────────────────────────────────
+  // â”€â”€ Usage (calendar month) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   const monthStartMs = new Date(monthStart).getTime();
@@ -60,10 +60,10 @@ export async function GET(req: NextRequest) {
       { cost: 0, calls: 0 },
     );
 
-  // API calls in the last 24h — sum of usageWindow lengths across active keys
+  // API calls in the last 24h â€” sum of usageWindow lengths across active keys
   const apiCalls24h = apiKeys.reduce((acc, k) => acc + (k.usageWindow?.length ?? 0), 0);
 
-  // ── Subscription state (honest) ──────────────────────────────────────
+  // â”€â”€ Subscription state (honest) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const stripeKey = process.env.STRIPE_SECRET_KEY ?? "";
   const stripeConfigured = !!stripeKey;
   const stripeLive =
@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
       currentPeriodEnd: null,
       message: stripeConfigured
         ? `Stripe ${stripeMode === "live" ? "LIVE" : "TEST"} mode key detected. Subscription fetch ships in the next slice.`
-        : "No Stripe key configured. Set STRIPE_SECRET_KEY (sk_live_… for production, STRIPE_LIVE=true) in Netlify env to enable subscription billing.",
+        : "No Stripe key configured. Set STRIPE_SECRET_KEY (sk_live_â€¦ for production, STRIPE_LIVE=true) in Netlify env to enable subscription billing.",
     },
     usage: {
       monthLabel: now.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
@@ -90,13 +90,13 @@ export async function GET(req: NextRequest) {
           label: "Products discovered (lifetime)",
           used: products.length,
           cap: null,
-          hint: "Lifetime, not month — products accumulate",
+          hint: "Lifetime, not month â€” products accumulate",
         },
         {
           label: "Buyers discovered (lifetime)",
           used: buyers.length,
           cap: null,
-          hint: "Lifetime — buyers accumulate across pipeline runs",
+          hint: "Lifetime â€” buyers accumulate across pipeline runs",
         },
         {
           label: "Suppliers discovered (lifetime)",
@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
           used: Math.round(monthSpend.cost * 10000) / 10000,
           unit: "$",
           cap: null,
-          hint: `${monthSpend.calls.toLocaleString()} Anthropic calls · daily budget = $${process.env.ANTHROPIC_DAILY_BUDGET_USD ?? "50"}`,
+          hint: `${monthSpend.calls.toLocaleString()} Anthropic calls Â· daily budget = $${process.env.ANTHROPIC_DAILY_BUDGET_USD ?? "50"}`,
         },
         {
           label: "API calls (last 24h)",
@@ -128,6 +128,6 @@ export async function GET(req: NextRequest) {
     invoices: [],
     invoicesNote: stripeConfigured
       ? "Real Stripe invoice fetch ships in the next slice."
-      : "No invoices to show — billing isn't configured yet.",
+      : "No invoices to show â€” billing isn't configured yet.",
   });
 }

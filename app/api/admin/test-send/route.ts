@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/admin/test-send — admin-only.
+ * POST /api/admin/test-send â€” admin-only.
  *
  * Lets the operator verify that the email + SMS transport is actually
  * working BEFORE any real lead lands. Critical when:
@@ -21,12 +21,12 @@ export const dynamic = "force-dynamic";
  * Always returns the SendResult shape so the page can render exact provider
  * feedback (errorMessage from Postmark, status code, suppressed flag, etc).
  *
- * skipFooter is true because a test send is transactional, not marketing —
+ * skipFooter is true because a test send is transactional, not marketing â€”
  * we don't want to imply the operator has unsubscribed when they were
  * just smoke-testing.
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
   if (channel === "email") {
     const subject =
       (typeof body.subject === "string" && body.subject.trim()) ||
-      `AVYN test email · ${new Date().toLocaleString()}`;
+      `AVYN test email Â· ${new Date().toLocaleString()}`;
     const text =
       (typeof body.body === "string" && body.body.trim()) ||
       "This is a smoke-test email from /admin/system-health. " +
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
   // SMS branch
   const smsBody =
     (typeof body.body === "string" && body.body.trim()) ||
-    "AVYN test SMS — outbound SMS works. " +
+    "AVYN test SMS â€” outbound SMS works. " +
       new Date().toLocaleTimeString();
 
   const res = await sendSms({ to, body: smsBody });

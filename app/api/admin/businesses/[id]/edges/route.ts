@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import {
   store,
@@ -30,7 +30,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id } = await params;
@@ -73,7 +73,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id } = await params;
@@ -99,7 +99,7 @@ export async function POST(
       { status: 400 },
     );
   }
-  // We accept any source value but force "operator" for this endpoint —
+  // We accept any source value but force "operator" for this endpoint â€”
   // AI-generated and transaction-observed edges go through their own paths.
   void VALID_SOURCES; // silence unused warning when only used at type level
 

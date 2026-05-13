@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { runBusinessOutreach } from "@/lib/agents/businessOutreach";
 import { checkKillSwitch } from "@/lib/killSwitch";
@@ -27,7 +27,7 @@ type PerBusinessOutcome =
  *   4. Marks the business status: "queued" and bumps outreachCount + lastDraftId
  *
  * Drafts land in /outreach where the operator reviews + sends via the
- * existing /api/drafts/send flow. NO email is sent by this endpoint —
+ * existing /api/drafts/send flow. NO email is sent by this endpoint â€”
  * drafts only. Send is a separate operator action so they can review
  * the AI's pitch before it leaves the building.
  *
@@ -36,7 +36,7 @@ type PerBusinessOutcome =
  * each request well under the 60s function timeout.
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const ks = await checkKillSwitch();
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Optional pitch override — used when the Brand Alternatives flow
+  // Optional pitch override â€” used when the Brand Alternatives flow
   // bulk-drafts a specific "switch from X to Y" pitch instead of the
   // generic AVYN intro. All three fields required if present.
   type IncomingPitchOverride = {
@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
       outcomes.push({
         businessId: id,
         status: "skipped",
-        reason: "no email or phone on record — cannot send",
+        reason: "no email or phone on record â€” cannot send",
       });
       continue;
     }
@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
 
       // Mark business as queued + bump outreach metadata. We use
       // "queued" rather than "contacted" because the draft hasn't
-      // sent yet — operator review + /api/drafts/send flips
+      // sent yet â€” operator review + /api/drafts/send flips
       // status to "contacted" via the send-side patch (next slice
       // wires that callback; for now the operator can flip manually).
       await store.updateBusiness(biz.id, {

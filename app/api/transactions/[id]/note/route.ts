@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { store } from "@/lib/store";
 
@@ -6,11 +6,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/transactions/[id]/note — set or clear the operator's free-text note.
+ * POST /api/transactions/[id]/note â€” set or clear the operator's free-text note.
  *
  * Body: { note?: string }   (empty string OR omitted clears the note)
  *
- * Notes are private to operators — they're NOT exposed in the public
+ * Notes are private to operators â€” they're NOT exposed in the public
  * buyer-facing transaction API. They live alongside structured fields
  * like disputeReason / disputeResolutionNotes for context that isn't
  * captured by the state machine.
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  * Max 1000 chars (hard cap, server-side). Whitespace trimmed.
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const txn = await store.getTransaction(params.id);

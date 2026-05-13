@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { requireAdmin } from "@/lib/auth";
 import { getOperator } from "@/lib/operator";
@@ -12,7 +12,7 @@ const VALID_ROLES: InviteRole[] = ["Admin", "Operator", "Viewer", "Billing"];
 const INVITE_EXPIRY_DAYS = 14;
 
 /**
- * POST /api/admin/invites — create a pending workspace invite.
+ * POST /api/admin/invites â€” create a pending workspace invite.
  *
  * Persists the invite to the store, sends a notification email to the
  * invitee (best-effort, doesn't block on send failure), and returns the
@@ -25,7 +25,7 @@ const INVITE_EXPIRY_DAYS = 14;
  * acceptance + role enforcement ships in a follow-up.
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: Record<string, unknown> = {};
@@ -48,11 +48,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Don't invite the owner's own email — that's never valid.
+  // Don't invite the owner's own email â€” that's never valid.
   const op = getOperator();
   if (rawEmail === op.email.trim().toLowerCase()) {
     return NextResponse.json(
-      { error: "That's the owner email — they're already a member." },
+      { error: "That's the owner email â€” they're already a member." },
       { status: 400 },
     );
   }
@@ -105,12 +105,12 @@ export async function POST(req: NextRequest) {
       ``,
       `(Heads up: per-user sign-in is still being finalized, so accepting`,
       `today confirms you're joining and tells ${op.name.split(" ")[0]} to expect you.`,
-      `You'll get a follow-up with the actual sign-in link when it ships —`,
+      `You'll get a follow-up with the actual sign-in link when it ships â€”`,
       `nothing for you to set up in the meantime.)`,
       ``,
       `Questions? Reply to this email and ${op.name} will get it directly.`,
       ``,
-      `— The AVYN Commerce team`,
+      `â€” The AVYN Commerce team`,
       `${origin}`,
     ].join("\n"),
     replyTo: op.email,
@@ -142,12 +142,12 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * GET /api/admin/invites — list all invites. Mostly redundant with
+ * GET /api/admin/invites â€” list all invites. Mostly redundant with
  * /api/admin/users which already includes invites; provided for direct
  * access from scripts / future per-invite drill-down pages.
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const invites = await store.getInvites();
   return NextResponse.json({ invites });

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { getOperator } from "@/lib/operator";
 import { store } from "@/lib/store";
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Real /admin/users data — owner identity from OPERATOR_* env vars,
+ * Real /admin/users data â€” owner identity from OPERATOR_* env vars,
  * invites from the persistent store. No SAMPLE rows.
  *
  * Today the workspace is single-operator: there's exactly one row in
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  * will appear here as additional members.
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const op = getOperator();
@@ -30,9 +30,9 @@ export async function GET(req: NextRequest) {
     company: op.company,
     initials: op.initials,
     // 2FA state isn't tracked yet (single ADMIN_TOKEN auth model). Return
-    // null so the UI can render "—" honestly instead of a fake checkmark.
+    // null so the UI can render "â€”" honestly instead of a fake checkmark.
     twoFactor: null as boolean | null,
-    // No per-user activity tracking yet — operator is "currently logged in"
+    // No per-user activity tracking yet â€” operator is "currently logged in"
     // since they made this request.
     lastActive: new Date().toISOString(),
   };

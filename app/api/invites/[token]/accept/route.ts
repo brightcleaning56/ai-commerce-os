@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOperator } from "@/lib/operator";
 import { sendEmail } from "@/lib/email";
 import { store } from "@/lib/store";
+import { mintUserToken } from "@/lib/userToken";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,16 +12,17 @@ export const dynamic = "force-dynamic";
  *
  * The invitee provides a display name (used to address them in operator
  * notifications + future per-user UI). We flip status to "accepted",
- * stamp acceptedAt + acceptedName, and best-effort email the operator so
- * they know to expect a new teammate showing up.
+ * stamp acceptedAt + acceptedName, mint a per-user HMAC-signed bearer
+ * token (lib/userToken.ts) so they can sign in to /signin, and
+ * best-effort email the operator so they know to expect a new teammate.
  *
- * SECURITY NOTE: this slice does NOT yet wire per-user authentication.
- * Accepting an invite today does NOT log the invitee in or grant any
- * in-app access. The operator gets visibility ("Sarah accepted!"); the
- * actual sign-in + role enforcement requires the auth-overhaul slice.
+ * Idempotent: re-accepting an already-accepted invite returns the
+ * existing state but does NOT re-mint the token — the user already got
+ * one on first accept. Expired/cancelled invites are rejected.
  *
- * Idempotent: re-accepting an already-accepted invite is a no-op (returns
- * the current state). Expired/cancelled invites are rejected.
+ * The minted user token is included in the JSON response so the
+ * /invite/[token] page can display it once. We never store the raw
+ * token server-side — it's stateless (HMAC-verified on every request).
  */
 export async function POST(
   req: NextRequest,
@@ -78,9 +80,25 @@ export async function POST(
     acceptedName: rawName,
   });
 
+  // Mint the per-user sign-in token. If ADMIN_TOKEN isn't set we're in
+  // dev mode and the rest of the app is wide open anyway — emit an empty
+  // string so the UI knows there's nothing to sign in with.
+  let userToken = "";
+  let tokenError: string | null = null;
+  try {
+    userToken = await mintUserToken({
+      inviteId: invite.id,
+      email: invite.email,
+      role: invite.role,
+    });
+  } catch (err) {
+    tokenError = err instanceof Error ? err.message : String(err);
+    console.warn("[invites/accept] mintUserToken failed:", tokenError);
+  }
+
   // Best-effort operator notification — don't block the invitee on email.
-  // They get a confirmation in the UI either way.
   const op = getOperator();
+  const origin = process.env.NEXT_PUBLIC_APP_ORIGIN || "https://avyncommerce.com";
   await sendEmail({
     to: op.email,
     subject: `${rawName} accepted your AVYN Commerce invite`,
@@ -88,11 +106,12 @@ export async function POST(
       `${rawName} (${invite.email}) accepted the ${invite.role} invite to`,
       `${op.company} on AVYN Commerce.`,
       ``,
-      `Note: per-user sign-in isn't wired yet, so they can't access the`,
-      `dashboard until the auth-overhaul slice ships. They've been told`,
-      `to expect a follow-up email when it does.`,
+      `They were issued a personal sign-in token (HMAC-signed against`,
+      `ADMIN_TOKEN, 90-day expiry). They can sign in at ${origin}/signin`,
+      `with that token. Until per-role permissions ship, the token`,
+      `grants full admin access — keep that in mind for non-Owner roles.`,
       ``,
-      `Manage at: ${process.env.NEXT_PUBLIC_APP_ORIGIN || "https://avyncommerce.com"}/admin/users`,
+      `Manage at: ${origin}/admin/users`,
     ].join("\n"),
     metadata: { invite_id: invite.id, kind: "invite-accepted" },
   }).catch((err) => {
@@ -107,5 +126,8 @@ export async function POST(
       status: updated?.status ?? "accepted",
       acceptedAt,
     },
+    userToken,
+    tokenError,
+    signinUrl: `${origin}/signin`,
   });
 }

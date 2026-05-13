@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { looksLikeUserToken, verifyUserToken } from "@/lib/userToken";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * Sign-in: accept the admin token, set a session cookie if it matches.
- * Cookie is HttpOnly + Secure + SameSite=lax + 30d.
+ * Sign-in: accept either ADMIN_TOKEN (global) or a u_ per-user invite
+ * token (HMAC-signed at /api/invites/[token]/accept). Sets the same
+ * aicos_admin session cookie either way — cookie is HttpOnly + Secure +
+ * SameSite=lax + 30d for ADMIN_TOKEN, and the token's own exp (90d) for
+ * per-user tokens.
  *
  * Rate-limited per-IP to slow down brute-force attempts.
  */
@@ -54,19 +58,48 @@ export async function POST(req: NextRequest) {
   if (!body.token) {
     return NextResponse.json({ error: "Missing token" }, { status: 400 });
   }
-  if (!constantTimeEquals(body.token, expected)) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+
+  // Path 1: matches global ADMIN_TOKEN — owner/dev path.
+  if (constantTimeEquals(body.token, expected)) {
+    const res = NextResponse.json({ ok: true, mode: "production", as: "admin" });
+    res.cookies.set("aicos_admin", body.token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 30 * 24 * 60 * 60, // 30 days
+    });
+    return res;
   }
 
-  const res = NextResponse.json({ ok: true, mode: "production" });
-  res.cookies.set("aicos_admin", body.token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
-  });
-  return res;
+  // Path 2: looks like a per-user token issued at invite acceptance.
+  if (looksLikeUserToken(body.token)) {
+    const v = await verifyUserToken(body.token);
+    if (v.ok) {
+      const ttlSec = Math.max(0, v.payload.exp - Math.floor(Date.now() / 1000));
+      const res = NextResponse.json({
+        ok: true,
+        mode: "production",
+        as: "user",
+        email: v.payload.email,
+        role: v.payload.role,
+      });
+      res.cookies.set("aicos_admin", body.token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: ttlSec,
+      });
+      return res;
+    }
+    return NextResponse.json(
+      { error: `Invalid invite token: ${v.reason}` },
+      { status: 401 },
+    );
+  }
+
+  return NextResponse.json({ error: "Invalid token" }, { status: 401 });
 }
 
 /**

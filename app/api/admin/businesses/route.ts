@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { requireAdmin } from "@/lib/auth";
 import {
@@ -22,7 +22,7 @@ const VALID_STATUSES: BusinessStatus[] = [
 ];
 
 /**
- * GET /api/admin/businesses — list with optional filters.
+ * GET /api/admin/businesses â€” list with optional filters.
  *
  * Query params (all optional):
  *   q       text search across name/email/website/notes
@@ -39,7 +39,7 @@ const VALID_STATUSES: BusinessStatus[] = [
  * Returns: { businesses, total, filteredTotal, counts: { byStatus, byState } }
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const sp = req.nextUrl.searchParams;
@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
 
   const all = await store.getBusinesses();
 
-  // Build per-status + per-state counts BEFORE filtering — operator sees true totals
+  // Build per-status + per-state counts BEFORE filtering â€” operator sees true totals
   const byStatus: Record<string, number> = {};
   const byState: Record<string, number> = {};
   for (const b of all) {
@@ -101,11 +101,11 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST /api/admin/businesses — create one record.
+ * POST /api/admin/businesses â€” create one record.
  * Body: BusinessRecord-shaped fields except id/createdAt/updatedAt.
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: Record<string, unknown> = {};

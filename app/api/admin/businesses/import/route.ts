@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { mapCsvToBusinesses, parseCsv } from "@/lib/businessImport";
 import { store } from "@/lib/store";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * POST /api/admin/businesses/import — bulk CSV import.
+ * POST /api/admin/businesses/import â€” bulk CSV import.
  *
  * Body shape (JSON):
  *   { csv: string, defaultStatus?: BusinessStatus, defaultSource?: BusinessSource }
@@ -27,7 +27,7 @@ export const maxDuration = 60;
  * cron job instead of synchronous POST.)
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: { csv?: unknown; defaultStatus?: unknown; defaultSource?: unknown };

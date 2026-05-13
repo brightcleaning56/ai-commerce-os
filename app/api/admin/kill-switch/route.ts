@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { getKillSwitch, setKillSwitch } from "@/lib/killSwitch";
 
@@ -6,22 +6,22 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/admin/kill-switch — current state of the global agent kill switch.
- * POST /api/admin/kill-switch — toggle.
+ * GET /api/admin/kill-switch â€” current state of the global agent kill switch.
+ * POST /api/admin/kill-switch â€” toggle.
  *
  * Both admin-only. The /admin Super Admin page hits this on mount and on
  * every toggle so the state is server-authoritative and applies to every
  * code path that reads it (crons, lead auto-reply, retry-stuck, etc).
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const state = await getKillSwitch();
   return NextResponse.json(state);
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const body = await req.json().catch(() => ({}));

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { store } from "@/lib/store";
 
@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/admin/outreach-jobs/[id] — fetch full job detail.
+ * GET /api/admin/outreach-jobs/[id] â€” fetch full job detail.
  * Returns the complete businessIds + outcomes arrays (the list
  * endpoint strips these for performance).
  */
@@ -14,7 +14,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id } = await params;
@@ -24,7 +24,7 @@ export async function GET(
 }
 
 /**
- * DELETE /api/admin/outreach-jobs/[id] — cancel a pending or running
+ * DELETE /api/admin/outreach-jobs/[id] â€” cancel a pending or running
  * job. Already-drafted outcomes stay (operator can't un-draft); the
  * cron stops touching this job after the next tick.
  *
@@ -34,7 +34,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id } = await params;

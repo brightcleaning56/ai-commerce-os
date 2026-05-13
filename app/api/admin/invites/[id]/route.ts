@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { store } from "@/lib/store";
 
@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * DELETE /api/admin/invites/[id] — cancel a pending invite.
+ * DELETE /api/admin/invites/[id] â€” cancel a pending invite.
  *
  * We don't hard-delete; we flip status to "cancelled" so the audit trail
  * survives. Already-cancelled / expired / accepted invites return 200
@@ -16,7 +16,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id } = await params;
@@ -36,14 +36,14 @@ export async function DELETE(
 }
 
 /**
- * GET /api/admin/invites/[id] — single invite lookup. Useful for the
+ * GET /api/admin/invites/[id] â€” single invite lookup. Useful for the
  * future acceptance page that hits this with a token-derived id.
  */
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const { id } = await params;
   const invite = await store.getInvite(id);

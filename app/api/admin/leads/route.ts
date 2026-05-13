@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { requireAdmin } from "@/lib/auth";
 import { autoPromoteIfHot } from "@/lib/leadAutoPromote";
@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/admin/leads — admin-only manual lead creation.
+ * POST /api/admin/leads â€” admin-only manual lead creation.
  *
  * For when the operator gets a referral over text, captures someone at
  * a trade show, or transcribes a phone call -- they can add the lead
@@ -44,7 +44,7 @@ function trimArray(v: unknown, max = 50, perItem = 100): string[] {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
     message: trim(body.message, 5000),
   };
 
-  // Dedupe — same email = merge, just like the public endpoint, but record
+  // Dedupe â€” same email = merge, just like the public endpoint, but record
   // an explicit "operator-add" resubmission so the audit trail is honest.
   const existing = await store.getLeadByEmail(email);
   if (existing) {

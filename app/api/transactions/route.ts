@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { createTransactionFromQuote } from "@/lib/transactions";
 import { store } from "@/lib/store";
@@ -7,10 +7,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/transactions  — list all transactions (operator-gated)
+ * GET /api/transactions  â€” list all transactions (operator-gated)
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const txns = await store.getTransactions();
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST /api/transactions  — create a new transaction from an existing quote.
+ * POST /api/transactions  â€” create a new transaction from an existing quote.
  * Body: {
  *   quoteId: string,
  *   shippingCents?: number,
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
  * }
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: {

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { store } from "@/lib/store";
 import { transitionTransaction } from "@/lib/transactions";
 import { requireAdmin } from "@/lib/auth";
@@ -7,13 +7,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/transactions/[id]/deliver  — mark as delivered.
+ * POST /api/transactions/[id]/deliver  â€” mark as delivered.
  *
  * Two callers:
- *   - Buyer: body has { token, confirmedBy: "buyer" } — public access via share token
- *   - Operator: bearer/cookie auth — body has { confirmedBy: "operator"|"carrier" }
+ *   - Buyer: body has { token, confirmedBy: "buyer" } â€” public access via share token
+ *   - Operator: bearer/cookie auth â€” body has { confirmedBy: "operator"|"carrier" }
  *
- * Transitions: shipped → delivered.
+ * Transitions: shipped â†’ delivered.
  *
  * After delivery, the system enters a 7-day inspection window. If buyer doesn't
  * dispute within that window, an automated cron (future slice) will release.
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     confirmedBy = "buyer_confirmed";
   } else {
     // Operator path: require bearer/cookie auth
-    const auth = requireAdmin(req);
+    const auth = await requireAdmin(req);
     if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
     confirmedBy =
       body.confirmedBy === "carrier"

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { getOperator } from "@/lib/operator";
 import { mintAccessToken } from "@/lib/twilioVoice";
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/voice/token — admin-only.
+ * GET /api/voice/token â€” admin-only.
  *
  * Returns a short-lived (1h) Twilio Voice Access Token the browser
  * @twilio/voice-sdk Device uses to authenticate. Identity is the
@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * with a clear message so the client can fall back to tel: links.
  */
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { store } from "@/lib/store";
 import type { NextRequest } from "next/server";
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/admin/audit — aggregates the real audit trail.
+ * GET /api/admin/audit â€” aggregates the real audit trail.
  *
  * Sources:
  *   - transaction.stateHistory[]   every state transition (signed, escrow_held,
@@ -80,7 +80,7 @@ function shortHash(input: string): string {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const [
@@ -109,13 +109,13 @@ export async function GET(req: NextRequest) {
 
   const events: Event[] = [];
 
-  // ── Transaction state-history events ─────────────────────────────────
+  // â”€â”€ Transaction state-history events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   for (const t of transactions) {
     const history = t.stateHistory ?? [];
     for (let i = 0; i < history.length; i++) {
       const ev = history[i];
       // The TransactionEvent records the new state in `state`. The previous
-      // state, when we want a from→to diff, is the prior history entry.
+      // state, when we want a fromâ†’to diff, is the prior history entry.
       const prevState = i > 0 ? history[i - 1].state : null;
       const actorType: "human" | "agent" | "system" =
         ev.actor === "buyer" || ev.actor === "operator"
@@ -135,15 +135,15 @@ export async function GET(req: NextRequest) {
           : "System";
       const id = `${t.id}-h${i}`;
       const action = prevState
-        ? `Transaction ${prevState} → ${ev.state}${ev.detail ? ` · ${ev.detail.slice(0, 80)}` : ""}`
-        : `Transaction created in ${ev.state}${ev.detail ? ` · ${ev.detail.slice(0, 80)}` : ""}`;
+        ? `Transaction ${prevState} â†’ ${ev.state}${ev.detail ? ` Â· ${ev.detail.slice(0, 80)}` : ""}`
+        : `Transaction created in ${ev.state}${ev.detail ? ` Â· ${ev.detail.slice(0, 80)}` : ""}`;
       events.push({
         id,
         ts: ev.ts,
         actor: { type: actorType, name: actorName, initials: initialsOf(actorName) },
         action,
         resource: "Transaction",
-        resourceId: `${t.id} · ${t.buyerCompany}`,
+        resourceId: `${t.id} Â· ${t.buyerCompany}`,
         category: "Transaction",
         diff: prevState ? [{ field: "state", from: String(prevState), to: String(ev.state) }] : undefined,
         hash: shortHash(`${id}|${ev.ts}|${ev.state}`),
@@ -151,7 +151,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Agent runs ───────────────────────────────────────────────────────
+  // â”€â”€ Agent runs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   for (const r of runs) {
     const id = `run-${r.id}`;
     events.push({
@@ -159,8 +159,8 @@ export async function GET(req: NextRequest) {
       ts: r.startedAt,
       actor: { type: "agent", name: AGENT_LABEL[r.agent] ?? r.agent, initials: initialsOf(AGENT_LABEL[r.agent] ?? r.agent) },
       action: r.status === "success"
-        ? `Run completed${r.productCount ? ` · ${r.productCount} products` : ""}${r.buyerCount ? ` · ${r.buyerCount} buyers` : ""}${r.supplierCount ? ` · ${r.supplierCount} suppliers` : ""}`
-        : `Run failed${r.errorMessage ? ` · ${r.errorMessage.slice(0, 100)}` : ""}`,
+        ? `Run completed${r.productCount ? ` Â· ${r.productCount} products` : ""}${r.buyerCount ? ` Â· ${r.buyerCount} buyers` : ""}${r.supplierCount ? ` Â· ${r.supplierCount} suppliers` : ""}`
+        : `Run failed${r.errorMessage ? ` Â· ${r.errorMessage.slice(0, 100)}` : ""}`,
       resource: "Agent Run",
       resourceId: r.id,
       category: "Agent",
@@ -172,26 +172,26 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // ── Risk flags ───────────────────────────────────────────────────────
+  // â”€â”€ Risk flags â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   for (const f of riskFlags) {
     const id = `risk-${f.id}`;
     events.push({
       id,
       ts: f.createdAt,
       actor: { type: "agent", name: "Risk Agent", initials: "RA" },
-      action: `${f.severity} risk flag raised · ${f.title.slice(0, 80)}`,
+      action: `${f.severity} risk flag raised Â· ${f.title.slice(0, 80)}`,
       resource: f.subjectType === "buyer" ? "Buyer" : f.subjectType === "supplier" ? "Supplier" : f.subjectType === "product" ? "Product" : "General",
-      resourceId: f.subjectId ? `${f.subjectId} · ${f.subjectName ?? ""}` : "—",
+      resourceId: f.subjectId ? `${f.subjectId} Â· ${f.subjectName ?? ""}` : "â€”",
       category: "Risk",
       diff: [
-        { field: "severity", from: "—", to: f.severity },
-        { field: "category", from: "—", to: f.category },
+        { field: "severity", from: "â€”", to: f.severity },
+        { field: "category", from: "â€”", to: f.category },
       ],
       hash: shortHash(`${id}|${f.createdAt}|${f.severity}`),
     });
   }
 
-  // ── Draft sends ──────────────────────────────────────────────────────
+  // â”€â”€ Draft sends â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   for (const d of drafts) {
     if (d.status === "sent" || d.status === "approved" || d.status === "rejected") {
       const id = `draft-${d.id}-${d.status}`;
@@ -214,18 +214,18 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Quote lifecycle ──────────────────────────────────────────────────
+  // â”€â”€ Quote lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   for (const q of quotes) {
     const id = `quote-${q.id}`;
     events.push({
       id,
       ts: q.createdAt,
       actor: { type: "agent", name: "Quote Agent", initials: "QA" },
-      action: `Quote generated for ${q.buyerCompany} · $${q.total.toLocaleString()}`,
+      action: `Quote generated for ${q.buyerCompany} Â· $${q.total.toLocaleString()}`,
       resource: "Quote",
-      resourceId: `${q.id} · ${q.productName}`,
+      resourceId: `${q.id} Â· ${q.productName}`,
       category: "Billing",
-      diff: [{ field: "status", from: "—", to: q.status }],
+      diff: [{ field: "status", from: "â€”", to: q.status }],
       hash: shortHash(`${id}|${q.createdAt}|${q.status}`),
     });
     if (q.acceptedAt) {
@@ -244,7 +244,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Lead lifecycle ───────────────────────────────────────────────────
+  // â”€â”€ Lead lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   for (const l of leads) {
     // Capture
     {
@@ -254,12 +254,12 @@ export async function GET(req: NextRequest) {
         ts: l.createdAt,
         actor: { type: "human", name: l.name, initials: initialsOf(l.name) },
         action: l.source === "signup-form"
-          ? `Submitted signup form (${l.company}${l.industry ? ` · ${l.industry}` : ""})`
-          : `Submitted contact form (${l.company}${l.industry ? ` · ${l.industry}` : ""})`,
+          ? `Submitted signup form (${l.company}${l.industry ? ` Â· ${l.industry}` : ""})`
+          : `Submitted contact form (${l.company}${l.industry ? ` Â· ${l.industry}` : ""})`,
         resource: "Lead",
-        resourceId: `${l.id} · ${l.email}`,
+        resourceId: `${l.id} Â· ${l.email}`,
         category: "Lead",
-        diff: [{ field: "status", from: "—", to: "new" }],
+        diff: [{ field: "status", from: "â€”", to: "new" }],
         hash: shortHash(`${id}|${l.createdAt}|capture`),
       });
     }
@@ -276,13 +276,13 @@ export async function GET(req: NextRequest) {
           : r.status === "skipped"
             ? `AI welcome reply skipped (no transport)`
             : r.status === "error"
-              ? `AI welcome reply failed${r.errorMessage ? ` · ${r.errorMessage.slice(0, 60)}` : ""}`
+              ? `AI welcome reply failed${r.errorMessage ? ` Â· ${r.errorMessage.slice(0, 60)}` : ""}`
               : `AI welcome reply queued`,
         resource: "Lead",
         resourceId: l.id,
         category: "Lead",
         diff: [
-          { field: "ai_reply_status", from: "—", to: r.status },
+          { field: "ai_reply_status", from: "â€”", to: r.status },
           ...(r.estCostUsd != null ? [{ field: "spend", from: "0", to: `$${r.estCostUsd.toFixed(5)}` }] : []),
         ],
         hash: shortHash(`${id}|${r.at}|${r.status}`),
@@ -304,7 +304,7 @@ export async function GET(req: NextRequest) {
         resourceId: l.id,
         category: "Lead",
         diff: [
-          { field: "followup_status", from: "—", to: fu.status },
+          { field: "followup_status", from: "â€”", to: fu.status },
           ...(fu.estCostUsd != null ? [{ field: "spend", from: "0", to: `$${fu.estCostUsd.toFixed(5)}` }] : []),
         ],
         hash: shortHash(`${id}|${fu.at}|${fu.status}`),
@@ -318,7 +318,7 @@ export async function GET(req: NextRequest) {
         ts: rs.at,
         actor: { type: "human", name: l.name, initials: initialsOf(l.name) },
         action: rs.changedFields.length
-          ? `Re-submitted lead · added ${rs.changedFields.join(", ")}`
+          ? `Re-submitted lead Â· added ${rs.changedFields.join(", ")}`
           : `Re-submitted lead`,
         resource: "Lead",
         resourceId: l.id,
@@ -342,13 +342,13 @@ export async function GET(req: NextRequest) {
         resource: "Lead",
         resourceId: l.id,
         category: "Lead",
-        diff: [{ field: "promotedToBuyerId", from: "—", to: l.promotedToBuyerId }],
+        diff: [{ field: "promotedToBuyerId", from: "â€”", to: l.promotedToBuyerId }],
         hash: shortHash(`${id}|${l.promotedAt}|promoted`),
       });
     }
   }
 
-  // ── Workspace invites ────────────────────────────────────────────────
+  // â”€â”€ Workspace invites â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   for (const inv of invites) {
     {
       const id = `invite-created-${inv.id}`;
@@ -360,7 +360,7 @@ export async function GET(req: NextRequest) {
         resource: "Invite",
         resourceId: inv.id,
         category: "Invite",
-        diff: [{ field: "role", from: "—", to: inv.role }],
+        diff: [{ field: "role", from: "â€”", to: inv.role }],
         hash: shortHash(`${id}|${inv.createdAt}|invite`),
       });
     }
@@ -398,7 +398,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── API keys ─────────────────────────────────────────────────────────
+  // â”€â”€ API keys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   for (const k of apiKeys) {
     {
       const id = `apikey-created-${k.id}`;
@@ -408,11 +408,11 @@ export async function GET(req: NextRequest) {
         actor: { type: "human", name: k.createdBy, initials: initialsOf(k.createdBy.split("@")[0]) },
         action: `Created API key "${k.name}" (${k.environment})`,
         resource: "API Key",
-        resourceId: `${k.id} · ${k.prefix}…`,
+        resourceId: `${k.id} Â· ${k.prefix}â€¦`,
         category: "Auth",
         diff: [
-          { field: "environment", from: "—", to: k.environment },
-          { field: "scopes", from: "—", to: k.scopes.join(", ") },
+          { field: "environment", from: "â€”", to: k.environment },
+          { field: "scopes", from: "â€”", to: k.scopes.join(", ") },
         ],
         hash: shortHash(`${id}|${k.createdAt}|create`),
       });
@@ -425,7 +425,7 @@ export async function GET(req: NextRequest) {
         actor: { type: "human", name: "Operator", initials: "OP" },
         action: `Revoked API key "${k.name}"`,
         resource: "API Key",
-        resourceId: `${k.id} · ${k.prefix}…`,
+        resourceId: `${k.id} Â· ${k.prefix}â€¦`,
         category: "Auth",
         diff: [{ field: "status", from: "Active", to: "Revoked" }],
         hash: shortHash(`${id}|${k.revokedAt}|revoke`),
@@ -433,7 +433,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // ── Cron + pipeline runs ─────────────────────────────────────────────
+  // â”€â”€ Cron + pipeline runs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   for (const c of cronRuns) {
     const id = `cron-${c.id}`;
     // totals is now optional (only set on pipeline-kind runs). Build a
@@ -442,10 +442,10 @@ export async function GET(req: NextRequest) {
     const kindLabel = c.kind ? c.kind : "Pipeline";
     const action =
       c.status === "error"
-        ? `${kindLabel} cron failed${c.errorMessage ? ` · ${c.errorMessage.slice(0, 80)}` : ""}`
+        ? `${kindLabel} cron failed${c.errorMessage ? ` Â· ${c.errorMessage.slice(0, 80)}` : ""}`
         : c.totals
-          ? `${kindLabel} cron tick · ${c.totals.products}p · ${c.totals.buyers}b · ${c.totals.drafts}d`
-          : `${kindLabel} cron tick${c.summary ? ` · ${c.summary.slice(0, 80)}` : ""}`;
+          ? `${kindLabel} cron tick Â· ${c.totals.products}p Â· ${c.totals.buyers}b Â· ${c.totals.drafts}d`
+          : `${kindLabel} cron tick${c.summary ? ` Â· ${c.summary.slice(0, 80)}` : ""}`;
     const diff = [
       { field: "status", from: "started", to: c.status },
       ...(c.totals
@@ -472,7 +472,7 @@ export async function GET(req: NextRequest) {
       actor: p.triggeredBy === "cron"
         ? { type: "system", name: "Pipeline Cron", initials: "PC" }
         : { type: "human", name: "Operator", initials: "OP" },
-      action: `${p.triggeredBy === "cron" ? "Autonomous" : "Manual"} pipeline run · ${p.totals.products}p · ${p.totals.buyers}b · ${p.totals.suppliers}s · ${p.totals.drafts}d`,
+      action: `${p.triggeredBy === "cron" ? "Autonomous" : "Manual"} pipeline run Â· ${p.totals.products}p Â· ${p.totals.buyers}b Â· ${p.totals.suppliers}s Â· ${p.totals.drafts}d`,
       resource: "Pipeline",
       resourceId: p.id,
       category: "Pipeline",

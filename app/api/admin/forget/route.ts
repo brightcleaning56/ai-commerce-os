@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { store } from "@/lib/store";
 
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  *   - Access log entries for the affected drafts' share-links
  *   - Revokes the affected named share-links so cached references return 410
  *
- * Does NOT touch pipeline-run snapshots beyond access-log filtering — those
+ * Does NOT touch pipeline-run snapshots beyond access-log filtering â€” those
  * snapshots store anonymized buyer summaries (no email is persisted there
  * in the first place).
  *
@@ -30,7 +30,7 @@ export const dynamic = "force-dynamic";
  * fat-finger purges via curl.
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: { email?: string; confirm?: boolean } = {};

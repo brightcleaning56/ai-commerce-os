@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { transitionTransaction } from "@/lib/transactions";
 
@@ -6,14 +6,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/transactions/[id]/send  — operator sends transaction to buyer.
- * Transitions: draft → proposed.
+ * POST /api/transactions/[id]/send  â€” operator sends transaction to buyer.
+ * Transitions: draft â†’ proposed.
  *
  * In production this would also send the buyer an email with the public link.
  * For now: returns the public URL so the operator can copy/paste manually.
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   try {

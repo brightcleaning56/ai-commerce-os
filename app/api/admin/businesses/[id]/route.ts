@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { store, type BusinessRecord, type BusinessStatus } from "@/lib/store";
 
@@ -27,13 +27,13 @@ const PATCHABLE: (keyof BusinessRecord)[] = [
 ];
 
 /**
- * GET /api/admin/businesses/[id] — fetch one record.
+ * GET /api/admin/businesses/[id] â€” fetch one record.
  */
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const { id } = await params;
   const business = await store.getBusiness(id);
@@ -42,14 +42,14 @@ export async function GET(
 }
 
 /**
- * PATCH /api/admin/businesses/[id] — partial update.
+ * PATCH /api/admin/businesses/[id] â€” partial update.
  * Only fields in PATCHABLE allow-list are applied.
  */
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const { id } = await params;
@@ -89,10 +89,10 @@ export async function PATCH(
 }
 
 /**
- * DELETE /api/admin/businesses/[id] — hard-delete from the store.
+ * DELETE /api/admin/businesses/[id] â€” hard-delete from the store.
  *
  * For records that received outreach you may prefer flipping
- * status="do_not_contact" instead — that preserves the audit trail and
+ * status="do_not_contact" instead â€” that preserves the audit trail and
  * the suppression check still blocks future sends. Hard-delete is for
  * removing accidental dupes / test rows.
  */
@@ -100,7 +100,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const { id } = await params;
   const ok = await store.deleteBusiness(id);

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { transitionTransaction } from "@/lib/transactions";
 import type { Carrier } from "@/lib/shipping";
@@ -7,13 +7,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/transactions/[id]/ship  — operator/supplier marks shipped.
+ * POST /api/transactions/[id]/ship  â€” operator/supplier marks shipped.
  * Body: { carrier: Carrier, trackingNumber: string, carrierName?: string }
  *
- * Transitions: escrow_held → shipped.
+ * Transitions: escrow_held â†’ shipped.
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   let body: { carrier?: Carrier; trackingNumber?: string; carrierName?: string } = {};

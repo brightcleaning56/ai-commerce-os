@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { createAccountLink, createConnectedAccount, retrieveConnectedAccount } from "@/lib/payments";
 import { store } from "@/lib/store";
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/transactions/[id]/connect-supplier — onboard the supplier to
+ * POST /api/transactions/[id]/connect-supplier â€” onboard the supplier to
  * Stripe Connect so the platform can route the supplier portion of the
  * payment via destination charges (transfer_data.destination on the
  * checkout session).
@@ -28,7 +28,7 @@ export const dynamic = "force-dynamic";
  *   { url, accountId, mode, alreadyConnected, status: ConnectedAccount }
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const txn = await store.getTransaction(params.id);
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   let accountId = txn.supplierStripeAccountId;
   let alreadyConnected = false;
 
-  // Reuse existing account if we have one — generate an update link so the
+  // Reuse existing account if we have one â€” generate an update link so the
   // supplier can clear any newly-flagged requirements.
   if (accountId) {
     alreadyConnected = true;
@@ -94,11 +94,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 }
 
 /**
- * GET — return current onboarding status for the supplier on this transaction.
+ * GET â€” return current onboarding status for the supplier on this transaction.
  * Used by the operator UI to display chargesEnabled / payoutsEnabled / due-fields.
  */
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const txn = await store.getTransaction(params.id);

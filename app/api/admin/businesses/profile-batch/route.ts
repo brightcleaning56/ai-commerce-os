@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { runBusinessProfileScan } from "@/lib/agents/businessProfile";
 import { checkKillSwitch } from "@/lib/killSwitch";
@@ -21,16 +21,16 @@ type Outcome =
  *
  * Runs the Business Profile Agent against each id. Smaller batch cap
  * than draft-outreach (10 vs 25) because each scan involves a homepage
- * fetch (up to 10s) plus a Claude call — staying under the 60s function
+ * fetch (up to 10s) plus a Claude call â€” staying under the 60s function
  * timeout requires keeping batches modest.
  *
  * Per business:
- *   - 404 → status "skipped" reason "not found"
- *   - No website on record → status "skipped" reason "no website"
- *   - Otherwise → run the scan, persist aiProfile, return short summary
+ *   - 404 â†’ status "skipped" reason "not found"
+ *   - No website on record â†’ status "skipped" reason "no website"
+ *   - Otherwise â†’ run the scan, persist aiProfile, return short summary
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
 
   const ks = await checkKillSwitch();

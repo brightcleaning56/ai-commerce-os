@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { runLeadFirstReply } from "@/lib/leadFirstReply";
 import { store } from "@/lib/store";
@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/leads/retry-stuck — admin-only.
+ * POST /api/leads/retry-stuck â€” admin-only.
  *
  * Bulk-retries the AI first-touch reply for every lead whose aiReply is
  * missing, errored, or skipped. Designed for the recovery case after:
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  *  - A transient provider outage caused a batch to fail
  *
  * Optional body:
- *   { max?: number }   — cap per-request batch size (default 20, max 100)
+ *   { max?: number }   â€” cap per-request batch size (default 20, max 100)
  *                         to stay inside the platform 60s function timeout.
  *                         Each Anthropic call is ~1-3s, each Postmark call
  *                         ~0.3s, so 20 = ~60s worst-case.
@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
  * the operator (status !== "new" means they've engaged).
  */
 export async function POST(req: NextRequest) {
-  const auth = requireAdmin(req);
+  const auth = await requireAdmin(req);
   if (!auth.ok) {
     return NextResponse.json({ error: auth.reason }, { status: auth.status });
   }
