@@ -230,15 +230,18 @@ export async function GET(req: NextRequest) {
           supportsAiOutbound: voiceInfo.supportsAiOutbound,
           supportsBrowserCalls: voiceInfo.supportsBrowserCalls,
           ...voiceInfo.detail,
-          // Twilio-specific: confirm the TwiML webhook is reachable. The
-          // operator needs to set this URL in Twilio Console for the
-          // browser-side Device.connect() to actually place calls.
+          // Twilio-specific: confirm the TwiML webhooks are reachable.
+          // Operator needs to set both in Twilio Console (one on the
+          // TwiML App for outbound, one on the phone number for inbound).
           ...(voiceInfo.provider === "twilio"
             ? {
-                twimlWebhookUrl: `${process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://YOUR-DOMAIN"}/api/voice/twiml`,
+                outboundTwimlUrl: `${process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://YOUR-DOMAIN"}/api/voice/twiml`,
+                inboundTwimlUrl: `${process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://YOUR-DOMAIN"}/api/voice/inbound`,
+                recordingStatusUrl: `${process.env.NEXT_PUBLIC_APP_ORIGIN ?? "https://YOUR-DOMAIN"}/api/voice/recording-status`,
                 tokenEndpoint: "/api/voice/token (admin-only GET)",
+                recordingEnabled: process.env.TWILIO_RECORD_CALLS === "true",
                 setupHint:
-                  "In Twilio Console: Voice > TwiML > Apps > <your-app> > Voice Configuration > set Request URL to the twimlWebhookUrl above (POST). Then put the App SID in TWILIO_TWIML_APP_SID.",
+                  "OUTBOUND: Voice > TwiML > Apps > <your-app> > Voice Configuration > Request URL = outboundTwimlUrl (POST). Put App SID in TWILIO_TWIML_APP_SID. INBOUND: Phone Numbers > <your-number> > Voice Configuration > Webhook = inboundTwimlUrl (POST). RECORDING: set TWILIO_RECORD_CALLS=true.",
               }
             : {}),
         }
