@@ -775,6 +775,20 @@ function TaskDetail({
     const device = deviceRef.current as
       | { connect: (opts: { params: Record<string, string> }) => Promise<unknown> }
       | null;
+    // Only fall back to tel: when voice is GENUINELY not configured. If
+    // voice is partially configured (mic denied / register failed / token
+    // failed) the operator's intent is "call from the browser" -- silently
+    // handing off to the OS dialer surprises them with Windows Phone Link
+    // or FaceTime which is NOT what they want. Surface the failure instead.
+    if (!twilioReady && voiceFailReason && voiceFailReason !== "not-configured") {
+      toast(
+        `Voice failed: ${voiceFailReason}. Fix in /admin/system-health (TopBar badge has details).`,
+        "error",
+      );
+      cancelCall();
+      return;
+    }
+
     if (twilioReady && device) {
       try {
         setTwilioInFlight("connecting");
@@ -818,7 +832,13 @@ function TaskDetail({
         window.open(`tel:${contact.phone}`, "_self");
       }
     } else {
-      // tel: fallback — opens the device dialer
+      // tel: fallback -- opens whatever app the OS registered for tel:
+      // (Phone Link on Windows, FaceTime on Mac, the dialer on mobile).
+      // Toast first so the operator knows WHY their browser isn't dialing.
+      toast(
+        "In-browser calling isn't configured — opening your OS dialer. To dial from the browser, set VOICE_PROVIDER=twilio + Twilio keys in env (see /admin/system-health).",
+        "info",
+      );
       window.open(`tel:${contact.phone}`, "_self");
     }
   }
