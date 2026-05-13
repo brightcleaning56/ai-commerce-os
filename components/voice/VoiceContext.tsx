@@ -65,6 +65,19 @@ export type VoiceContextValue = {
    */
   answerIncoming: () => string | null;
   declineIncoming: () => void;
+  /**
+   * Place an outbound call from anywhere in the app. Used by the
+   * /admin/system-health voice diagnostics card so the operator can
+   * place a test call without going through /tasks. Returns the Call
+   * object (typed as unknown to keep the SDK type out of the public
+   * context type) or null if the Device isn't ready.
+   */
+  placeOutboundCall: (toNumber: string) => Promise<unknown>;
+  /**
+   * Hang up the in-flight call (if any). Convenience for callers that
+   * don't want to reach into currentCallRef themselves.
+   */
+  hangup: () => void;
 };
 
 const VoiceContextObj = createContext<VoiceContextValue | null>(null);
@@ -315,6 +328,62 @@ export default function VoiceProvider({ children }: { children: React.ReactNode 
     setIncomingFrom(null);
   }, []);
 
+  const placeOutboundCall = useCallback(
+    async (toNumber: string): Promise<unknown> => {
+      const device = deviceRef.current as
+        | { connect: (opts: { params: Record<string, string> }) => Promise<unknown> }
+        | null;
+      if (!device || !twilioReady) {
+        toast("Voice not ready — check /admin/system-health", "error");
+        return null;
+      }
+      try {
+        setTwilioInFlight("connecting");
+        currentCallSidRef.current = null;
+        const call = (await device.connect({
+          params: { To: toNumber },
+        })) as {
+          on: (ev: string, cb: (...args: unknown[]) => void) => void;
+          parameters?: { CallSid?: string };
+        };
+        currentCallRef.current = call;
+        call.on("ringing", () => setTwilioInFlight("ringing"));
+        call.on("accept", () => {
+          setTwilioInFlight("open");
+          const sid = (call.parameters?.CallSid as string | undefined) ?? null;
+          currentCallSidRef.current = sid;
+        });
+        call.on("disconnect", () => {
+          setTwilioInFlight("idle");
+          currentCallRef.current = null;
+        });
+        call.on("error", (...args) => {
+          const err = args[0] as { message?: string } | undefined;
+          setTwilioInFlight("idle");
+          currentCallRef.current = null;
+          toast(`Call error: ${err?.message ?? "unknown"}`, "error");
+        });
+        return call;
+      } catch (e) {
+        setTwilioInFlight("idle");
+        toast(`Call failed: ${e instanceof Error ? e.message : "unknown"}`, "error");
+        return null;
+      }
+    },
+    [twilioReady, toast],
+  );
+
+  const hangup = useCallback(() => {
+    const call = currentCallRef.current as { disconnect: () => void } | null;
+    if (call) {
+      try {
+        call.disconnect();
+      } catch {}
+      currentCallRef.current = null;
+    }
+    setTwilioInFlight("idle");
+  }, []);
+
   const value: VoiceContextValue = {
     deviceRef,
     currentCallRef,
@@ -328,6 +397,8 @@ export default function VoiceProvider({ children }: { children: React.ReactNode 
     incomingFrom,
     answerIncoming,
     declineIncoming,
+    placeOutboundCall,
+    hangup,
   };
 
   return <VoiceContextObj.Provider value={value}>{children}</VoiceContextObj.Provider>;

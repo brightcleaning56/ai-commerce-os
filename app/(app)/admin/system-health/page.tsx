@@ -6,9 +6,12 @@ import {
   Bot,
   CheckCircle2,
   Clock,
+  Headphones,
   Loader2,
   Mail,
+  Mic,
   PhoneCall,
+  PhoneOff,
   Power,
   RefreshCw,
   Send,
@@ -20,6 +23,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/Toast";
+import { useVoice } from "@/components/voice/VoiceContext";
 
 type CheckResult = {
   ok: boolean;
@@ -417,6 +421,12 @@ export default function SystemHealthPage() {
             </div>
           </div>
 
+          {/* Voice diagnostics — mic test + place test call to verify the
+              full audio path before any real lead. Lives next to the
+              transport-test card since it serves the same purpose:
+              prove things work without waiting for a real event. */}
+          <VoiceDiagnosticsCard />
+
           {/* Recent cron activity — shows what actually fired vs the
               schedule. All 6 crons now record CronRun objects, so each
               kind appears here as soon as it fires (or skips). */}
@@ -708,4 +718,270 @@ function relTime(iso: string): string {
   if (ms < 5_000) return "just now";
   if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
   return `${Math.floor(ms / 60_000)}m ago`;
+}
+
+// ─── Voice diagnostics card ──────────────────────────────────────────
+//
+// Three smoke tests so the operator can verify voice end-to-end without
+// going through /tasks:
+//
+//  1. Mic test — getUserMedia() prompts permission + measures input level
+//     for 5s. Operator sees a live VU meter that responds to their voice.
+//  2. Audio devices — lists available input + output devices via
+//     enumerateDevices() so operator knows which mic/speaker is active.
+//  3. Test call — operator types their own phone, clicks Place, the
+//     browser bridges to PSTN and their phone rings. They answer +
+//     hear themselves echoed via Twilio. Verifies full audio path:
+//     mic → browser → Twilio → PSTN → operator's phone (and back).
+//
+function VoiceDiagnosticsCard() {
+  const { toast } = useToast();
+  const v = useVoice();
+
+  // Mic test state
+  const [micTesting, setMicTesting] = useState(false);
+  const [micLevel, setMicLevel] = useState(0); // 0..100
+
+  // Audio device list
+  const [devices, setDevices] = useState<{ inputs: MediaDeviceInfo[]; outputs: MediaDeviceInfo[] }>({
+    inputs: [],
+    outputs: [],
+  });
+
+  // Test-call state
+  const [testNumber, setTestNumber] = useState("");
+  const [testCallActive, setTestCallActive] = useState(false);
+
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) return;
+    navigator.mediaDevices
+      .enumerateDevices()
+      .then((all) => {
+        setDevices({
+          inputs: all.filter((d) => d.kind === "audioinput"),
+          outputs: all.filter((d) => d.kind === "audiooutput"),
+        });
+      })
+      .catch(() => {});
+  }, [v.micPermission]);
+
+  /**
+   * Mic test: 5s VU meter using AudioContext + AnalyserNode. Tells the
+   * operator their mic is actually capturing audio (vs just "permission
+   * granted but the device is muted at the OS level").
+   */
+  async function runMicTest() {
+    setMicTesting(true);
+    setMicLevel(0);
+    let stream: MediaStream | null = null;
+    let ctx: AudioContext | null = null;
+    let raf = 0;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const AudioCtx = window.AudioContext || (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) {
+        toast("AudioContext not supported in this browser", "error");
+        return;
+      }
+      ctx = new AudioCtx();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const start = Date.now();
+      function tick() {
+        analyser.getByteTimeDomainData(data);
+        // Compute peak deviation from 128 (silent baseline)
+        let peak = 0;
+        for (let i = 0; i < data.length; i++) {
+          const dev = Math.abs(data[i] - 128);
+          if (dev > peak) peak = dev;
+        }
+        setMicLevel(Math.min(100, Math.round((peak / 128) * 200)));
+        if (Date.now() - start < 5000) {
+          raf = requestAnimationFrame(tick);
+        }
+      }
+      tick();
+      // Auto-stop after 5s
+      await new Promise((r) => setTimeout(r, 5000));
+      toast("Mic test complete — you should have seen the meter respond", "success");
+    } catch (err) {
+      const e = err as { name?: string; message?: string };
+      if (e.name === "NotAllowedError") {
+        toast("Mic permission denied", "error");
+      } else {
+        toast(`Mic test failed: ${e.message ?? "unknown"}`, "error");
+      }
+    } finally {
+      cancelAnimationFrame(raf);
+      stream?.getTracks().forEach((t) => t.stop());
+      ctx?.close().catch(() => {});
+      setMicTesting(false);
+      setTimeout(() => setMicLevel(0), 500);
+    }
+  }
+
+  async function placeTest() {
+    if (!testNumber.trim()) {
+      toast("Enter your phone number first", "error");
+      return;
+    }
+    if (!v.twilioReady) {
+      toast("Voice not ready — see the badge in TopBar", "error");
+      return;
+    }
+    setTestCallActive(true);
+    const call = await v.placeOutboundCall(testNumber.trim());
+    if (!call) {
+      setTestCallActive(false);
+      return;
+    }
+    // Auto-hang after 60s if operator forgets to end the call
+    setTimeout(() => {
+      v.hangup();
+      setTestCallActive(false);
+    }, 60_000);
+  }
+
+  function endTestCall() {
+    v.hangup();
+    setTestCallActive(false);
+  }
+
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-5">
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        <Headphones className="h-4 w-4 text-brand-300" /> Voice diagnostics
+      </div>
+      <p className="mt-1 text-[11px] text-ink-tertiary">
+        Verify mic + audio path before you place a real call. Test call rings the number you enter and
+        bridges audio so you hear yourself.
+      </p>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {/* Mic test */}
+        <div className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-secondary">
+            <Mic className="h-3 w-3 text-brand-300" /> Microphone test
+            <span
+              className={`ml-auto rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${
+                v.micPermission === "granted"
+                  ? "bg-accent-green/15 text-accent-green"
+                  : v.micPermission === "denied"
+                    ? "bg-accent-red/15 text-accent-red"
+                    : "bg-bg-hover text-ink-tertiary"
+              }`}
+            >
+              {v.micPermission}
+            </span>
+          </div>
+          {/* VU meter */}
+          <div className="mt-3 h-3 overflow-hidden rounded-full bg-bg-card">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-accent-green via-accent-amber to-accent-red transition-all duration-75"
+              style={{ width: `${micLevel}%` }}
+            />
+          </div>
+          <button
+            onClick={runMicTest}
+            disabled={micTesting}
+            className="mt-3 w-full rounded-md bg-gradient-brand py-1.5 text-[11px] font-semibold shadow-glow disabled:opacity-60"
+          >
+            {micTesting ? (
+              <span className="flex items-center justify-center gap-1.5">
+                <Loader2 className="h-3 w-3 animate-spin" /> Speak now… (5s)
+              </span>
+            ) : (
+              "Run 5-second mic test"
+            )}
+          </button>
+          <p className="mt-2 text-[10px] text-ink-tertiary">
+            Speak normally — the meter should jump green/amber. If it stays flat, your mic is muted at
+            the OS level or the browser captured a different device.
+          </p>
+        </div>
+
+        {/* Test call */}
+        <div className="rounded-lg border border-bg-border bg-bg-hover/30 p-3">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-ink-secondary">
+            <PhoneCall className="h-3 w-3 text-brand-300" /> Test outbound call
+            <span
+              className={`ml-auto rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${
+                v.twilioReady
+                  ? "bg-accent-green/15 text-accent-green"
+                  : "bg-bg-hover text-ink-tertiary"
+              }`}
+            >
+              {v.twilioReady ? "ready" : "not ready"}
+            </span>
+          </div>
+          <input
+            type="tel"
+            value={testNumber}
+            onChange={(e) => setTestNumber(e.target.value)}
+            placeholder="+1 555 555 0123 (your phone)"
+            disabled={testCallActive}
+            className="mt-3 h-9 w-full rounded-md border border-bg-border bg-bg-card px-2 text-xs placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none disabled:opacity-60"
+          />
+          {testCallActive ? (
+            <button
+              onClick={endTestCall}
+              className="mt-2 w-full rounded-md bg-accent-red/15 py-1.5 text-[11px] font-semibold text-accent-red hover:bg-accent-red/25"
+            >
+              <PhoneOff className="mr-1 inline h-3 w-3" /> End test call
+            </button>
+          ) : (
+            <button
+              onClick={placeTest}
+              disabled={!v.twilioReady || !testNumber.trim()}
+              className="mt-2 w-full rounded-md bg-gradient-brand py-1.5 text-[11px] font-semibold shadow-glow disabled:opacity-60"
+            >
+              <PhoneCall className="mr-1 inline h-3 w-3" /> Place test call
+            </button>
+          )}
+          <p className="mt-2 text-[10px] text-ink-tertiary">
+            Calls the number, you answer + hear yourself. Verifies mic → browser → Twilio → PSTN. Auto-ends after 60s.
+          </p>
+        </div>
+      </div>
+
+      {/* Audio device list */}
+      {(devices.inputs.length > 0 || devices.outputs.length > 0) && (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+              Input devices ({devices.inputs.length})
+            </div>
+            <ul className="mt-1 space-y-0.5 text-[11px] text-ink-secondary">
+              {devices.inputs.map((d) => (
+                <li key={d.deviceId} className="truncate">
+                  · {d.label || `(unnamed ${d.deviceId.slice(0, 8)})`}
+                </li>
+              ))}
+              {devices.inputs.length === 0 && (
+                <li className="text-ink-tertiary">No input devices visible. Grant mic permission to populate.</li>
+              )}
+            </ul>
+          </div>
+          <div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+              Output devices ({devices.outputs.length})
+            </div>
+            <ul className="mt-1 space-y-0.5 text-[11px] text-ink-secondary">
+              {devices.outputs.map((d) => (
+                <li key={d.deviceId} className="truncate">
+                  · {d.label || `(unnamed ${d.deviceId.slice(0, 8)})`}
+                </li>
+              ))}
+              {devices.outputs.length === 0 && (
+                <li className="text-ink-tertiary">No output devices visible.</li>
+              )}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
