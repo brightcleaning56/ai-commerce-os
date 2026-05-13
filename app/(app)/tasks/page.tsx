@@ -19,9 +19,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 import Drawer from "@/components/ui/Drawer";
+import { useVoice } from "@/components/voice/VoiceContext";
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -169,109 +170,13 @@ function TasksInner() {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // ─── Twilio Voice (page-scoped) ──────────────────────────────────────
-  // Hoisted from TaskDetail so the Device lives as long as /tasks is
-  // mounted -- inbound calls then fire even when no task drawer is
-  // currently open. TaskDetail receives the refs/state via props and
-  // uses them in its placeCall / cancelCall / saveAttempt handlers.
-  const deviceRef = useRef<unknown>(null);
-  const currentCallRef = useRef<unknown>(null);
-  const currentCallSidRef = useRef<string | null>(null);
-  const [twilioReady, setTwilioReady] = useState(false);
-  const [twilioInFlight, setTwilioInFlight] = useState<"idle" | "connecting" | "ringing" | "open">("idle");
-  // Incoming-call state — set when Device.on("incoming") fires.
-  const incomingCallRef = useRef<unknown>(null);
-  const [incomingFrom, setIncomingFrom] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    let cleanup: (() => void) | null = null;
-
-    async function initDevice() {
-      try {
-        const r = await fetch("/api/voice/token", { credentials: "include" });
-        if (!r.ok) return;
-        const d = await r.json();
-        if (!d?.token) return;
-
-        const mod: { Device: new (token: string, opts?: Record<string, unknown>) => unknown } =
-          await import("@twilio/voice-sdk");
-        if (cancelled) return;
-
-        const Device = mod.Device;
-        const device = new Device(d.token, {
-          logLevel: 1,
-          codecPreferences: ["opus" as never, "pcmu" as never],
-        }) as {
-          register: () => Promise<void>;
-          on: (ev: string, cb: (...args: unknown[]) => void) => void;
-          updateToken: (t: string) => void;
-          destroy: () => void;
-          connect: (opts: { params: Record<string, string> }) => Promise<unknown>;
-        };
-        deviceRef.current = device;
-
-        device.on("tokenWillExpire", async () => {
-          try {
-            const rr = await fetch("/api/voice/token", { credentials: "include" });
-            const dd = await rr.json();
-            if (dd?.token) device.updateToken(dd.token);
-          } catch (e) {
-            console.warn("[twilio voice] token refresh failed", e);
-          }
-        });
-
-        device.on("error", (...args) => {
-          const err = args[0] as { message?: string } | undefined;
-          console.warn("[twilio voice] device error", err);
-          if (err?.message) toast(`Voice: ${err.message}`, "error");
-        });
-
-        // Inbound call: someone dialed our Twilio number, the inbound
-        // TwiML route bridged to <Client>operator</Client>. Show the
-        // floating answer widget so the operator can pick up.
-        device.on("incoming", (...args) => {
-          const incomingCall = args[0] as
-            | {
-                parameters?: { From?: string; CallSid?: string };
-                accept: () => void;
-                reject: () => void;
-                on: (ev: string, cb: () => void) => void;
-              }
-            | undefined;
-          if (!incomingCall) return;
-          incomingCallRef.current = incomingCall;
-          const from = incomingCall.parameters?.From ?? "unknown caller";
-          setIncomingFrom(from);
-          incomingCall.on("cancel", () => {
-            incomingCallRef.current = null;
-            setIncomingFrom(null);
-          });
-          incomingCall.on("disconnect", () => {
-            incomingCallRef.current = null;
-            setIncomingFrom(null);
-          });
-        });
-
-        await device.register();
-        if (cancelled) {
-          device.destroy();
-          return;
-        }
-        setTwilioReady(true);
-        cleanup = () => device.destroy();
-      } catch (e) {
-        console.info("[twilio voice] not active:", e instanceof Error ? e.message : e);
-      }
-    }
-    initDevice();
-    return () => {
-      cancelled = true;
-      if (cleanup) cleanup();
-      deviceRef.current = null;
-      currentCallRef.current = null;
-    };
-  }, [toast]);
+  // Voice context — owned by the global VoiceProvider in app/(app)/layout.
+  // Device init happens at app shell so inbound calls ring on every page,
+  // not just /tasks. The IncomingCallWidget (also global) handles the
+  // ring/answer/decline UX. /tasks just consumes the refs + state to
+  // pass through to TaskDetail's call-session handlers.
+  const voice = useVoice();
+  const { deviceRef, currentCallRef, currentCallSidRef, twilioReady, twilioInFlight, setTwilioInFlight } = voice;
 
   // Auto-open the focused task once tasks are loaded. We can't open before
   // load because the task might not exist in localStorage yet (race with
@@ -377,94 +282,8 @@ function TasksInner() {
 
   const openTask = openTaskId ? tasks.find((t) => t.id === openTaskId) ?? null : null;
 
-  function answerIncoming() {
-    const call = incomingCallRef.current as
-      | {
-          accept: () => void;
-          parameters?: { CallSid?: string };
-          on: (ev: string, cb: () => void) => void;
-        }
-      | null;
-    if (!call) return;
-    try {
-      call.accept();
-      setTwilioInFlight("open");
-      currentCallRef.current = call;
-      currentCallSidRef.current = call.parameters?.CallSid ?? null;
-      // Wire disconnect so the in-flight state clears + operator can
-      // log the call afterward via the matching task (or create one)
-      call.on("disconnect", () => {
-        setTwilioInFlight("idle");
-        currentCallRef.current = null;
-      });
-
-      // Try to find a task for this caller's phone so the operator
-      // lands in the right context. Match against snapshot OR live buyer.
-      const from = incomingFrom;
-      if (from) {
-        const matching = tasks.find((t) => {
-          const c = contactFor(t);
-          return c.phone === from;
-        });
-        if (matching) {
-          setOpenTaskId(matching.id);
-          toast(`Connected — opened ${matching.buyerName}'s task to log the call`, "success");
-        } else {
-          toast(`Connected to ${from} — no matching task. Create one to log this call.`, "info");
-        }
-      }
-      setIncomingFrom(null); // hide the widget; call is in-flight
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "Answer failed", "error");
-    }
-  }
-
-  function declineIncoming() {
-    const call = incomingCallRef.current as { reject: () => void } | null;
-    if (call) {
-      try {
-        call.reject();
-      } catch {}
-    }
-    incomingCallRef.current = null;
-    setIncomingFrom(null);
-  }
-
   return (
     <div className="space-y-5">
-      {/* Incoming-call alert — shown when Device.on("incoming") fired.
-          Animated pulse on the phone icon so it visually grabs attention.
-          Operator picks Answer (bridges to call session) or Decline.
-          NOTE: only fires while /tasks is open. Future slice hoists the
-          Device init to a global provider so this works on any page. */}
-      {incomingFrom && (
-        <div className="rounded-xl border-2 border-accent-green/60 bg-accent-green/10 px-5 py-4 shadow-glow">
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-accent-green/25">
-              <PhoneIncoming className="h-5 w-5 animate-pulse text-accent-green" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-accent-green">Incoming call</div>
-              <div className="font-mono text-xs text-ink-secondary">{incomingFrom}</div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                onClick={answerIncoming}
-                className="flex items-center gap-1.5 rounded-md bg-accent-green px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
-              >
-                <PhoneCall className="h-4 w-4" /> Answer
-              </button>
-              <button
-                onClick={declineIncoming}
-                className="flex items-center gap-1.5 rounded-md border border-accent-red/40 bg-accent-red/10 px-3 py-2 text-sm font-semibold text-accent-red hover:bg-accent-red/20"
-              >
-                <PhoneOff className="h-4 w-4" /> Decline
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-brand shadow-glow">
