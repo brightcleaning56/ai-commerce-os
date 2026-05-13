@@ -2,6 +2,10 @@
 import {
   AlertCircle,
   Check,
+  Copy,
+  Eye,
+  EyeOff,
+  KeyRound,
   Loader2,
   Mail,
   Search,
@@ -155,6 +159,15 @@ export default function UsersPage() {
   const [inviteRole, setInviteRole] = useState<InviteRole>("Operator");
   const [submitting, setSubmitting] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [issuingId, setIssuingId] = useState<string | null>(null);
+  // Modal state for the freshly-minted sign-in token. We hold it in state
+  // (vs alert/prompt) because tokens are long, sensitive, and need to be
+  // copied — UX needs a real overlay with a copy button + reveal toggle.
+  const [issuedToken, setIssuedToken] = useState<{
+    token: string;
+    email: string;
+    signinUrl: string;
+  } | null>(null);
   // Live snapshot of the email check from /api/admin/system-health so we
   // can warn the operator BEFORE they click Invite that delivery won't
   // actually happen. Saves the "I sent the invite but they didn't get it"
@@ -364,6 +377,30 @@ export default function UsersPage() {
       toast(e instanceof Error ? e.message : "Cancel failed", "error");
     } finally {
       setCancellingId(null);
+    }
+  }
+
+  /**
+   * Mint a sign-in token for an already-accepted invite. Covers two
+   * cases: (1) invitees who accepted before per-user tokens shipped and
+   * never got one, (2) invitees who lost theirs. The owner sends them
+   * the resulting token out-of-band (Slack / Signal / etc) since
+   * Postmark may still be in pending approval.
+   *
+   * Token only ever lives in memory in the modal — we never log it,
+   * never persist it server-side beyond what's in the HMAC payload.
+   */
+  async function issueSignInToken(inv: Invite) {
+    setIssuingId(inv.id);
+    try {
+      const r = await fetch(`/api/admin/invites/${inv.id}/issue-token`, { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Issue failed (${r.status})`);
+      setIssuedToken({ token: d.userToken, email: d.email, signinUrl: d.signinUrl });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't issue token", "error");
+    } finally {
+      setIssuingId(null);
     }
   }
 
@@ -708,6 +745,18 @@ export default function UsersPage() {
                                   {cancellingId === inv.id ? "Cancelling…" : "Cancel"}
                                 </button>
                               </div>
+                            ) : inv.status === "accepted" ? (
+                              <div className="flex items-center justify-end gap-2 text-[11px]">
+                                <button
+                                  onClick={() => issueSignInToken(inv)}
+                                  disabled={issuingId === inv.id}
+                                  className="inline-flex items-center gap-1 rounded-md border border-brand-500/40 bg-brand-500/10 px-2 py-1 font-semibold text-brand-200 hover:bg-brand-500/20 disabled:opacity-60"
+                                  title="Mint a fresh sign-in token for this teammate. Send the token to them via Slack / Signal / etc; they paste it at /signin."
+                                >
+                                  <KeyRound className="h-3 w-3" />
+                                  {issuingId === inv.id ? "Issuing…" : "Issue sign-in"}
+                                </button>
+                              </div>
                             ) : (
                               <span className="text-[11px] text-ink-tertiary">—</span>
                             )}
@@ -791,6 +840,123 @@ export default function UsersPage() {
             </div>
           </div>
         </aside>
+      </div>
+
+      {issuedToken && (
+        <IssuedTokenModal
+          token={issuedToken.token}
+          email={issuedToken.email}
+          signinUrl={issuedToken.signinUrl}
+          onClose={() => setIssuedToken(null)}
+          onCopied={() => toast(`Token copied — send it to ${issuedToken.email}`, "success")}
+        />
+      )}
+    </div>
+  );
+}
+
+function IssuedTokenModal({
+  token,
+  email,
+  signinUrl,
+  onClose,
+  onCopied,
+}: {
+  token: string;
+  email: string;
+  signinUrl: string;
+  onClose: () => void;
+  onCopied: () => void;
+}) {
+  const [show, setShow] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+      onCopied();
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setShow(true); // fall back: reveal so they can select manually
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg-app/80 px-5 backdrop-blur-sm">
+      <div className="relative w-full max-w-lg rounded-2xl border border-bg-border bg-bg-card p-6 shadow-2xl">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+        >
+          <X className="h-4 w-4" />
+        </button>
+
+        <div className="flex items-center gap-2">
+          <div className="grid h-9 w-9 place-items-center rounded-lg bg-brand-500/15">
+            <KeyRound className="h-4 w-4 text-brand-200" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold">Sign-in token for {email}</div>
+            <div className="text-[11px] text-ink-tertiary">
+              Won&apos;t be shown again — copy it now and send it to them privately.
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-bg-border bg-bg-app p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+              Token (90-day expiry)
+            </div>
+            <button
+              type="button"
+              onClick={() => setShow((s) => !s)}
+              className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-hover/40 px-2 py-0.5 text-[11px] text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+            >
+              {show ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+              {show ? "Hide" : "Reveal"}
+            </button>
+          </div>
+          <div
+            className="mt-2 max-h-32 overflow-auto break-all rounded-md border border-bg-border bg-bg-card px-3 py-2 font-mono text-[11px] text-ink-primary"
+            style={{ filter: show ? undefined : "blur(5px)" }}
+          >
+            {token}
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={copy}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-bg-border bg-bg-hover/40 px-3 py-2 text-[12px] font-medium text-ink-primary hover:bg-bg-hover"
+          >
+            <Copy className="h-3.5 w-3.5" />
+            {copied ? "Copied" : "Copy token"}
+          </button>
+          <a
+            href={signinUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex flex-1 items-center justify-center rounded-lg border border-bg-border px-3 py-2 text-[12px] font-medium text-ink-secondary hover:text-ink-primary"
+          >
+            Open /signin
+          </a>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-accent-amber/30 bg-accent-amber/5 p-3 text-[11px] text-ink-secondary">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-amber" />
+            <div>
+              Until per-role permissions ship, this token grants full workspace access regardless
+              of the invitee&apos;s role. Send it over a private channel — anyone who sees it can
+              sign in as <span className="font-mono">{email}</span>.
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
