@@ -136,6 +136,39 @@ export default function SystemHealthPage() {
   // signs the internal request with CRON_SECRET. Pipeline is intentionally
   // not triggerable here; /pipeline page has its own Run Pipeline button.
   const [triggering, setTriggering] = useState<string | null>(null);
+
+  /**
+   * Each cron returns a different response shape, so we parse per-kind to
+   * give the operator a meaningful toast instead of a generic "Done". The
+   * raw payload also lands in the recent-activity panel via the row this
+   * trigger creates -- this toast is just immediate feedback.
+   */
+  function summarizeCronResponse(kind: string, p: Record<string, unknown>): string {
+    if (p.skipped === true) {
+      return `Skipped — ${p.reason ?? "no-op"}`;
+    }
+    switch (kind) {
+      case "daily-digest":
+        // `sent` is a boolean here, not a count. simulated:true means
+        // no real provider configured.
+        if (p.sent === true) {
+          return p.simulated ? `Sent (simulated — no provider)` : `Sent to ${p.to ?? "operator"}`;
+        }
+        return "Send failed";
+      case "lead-followups":
+        return `${p.candidateCount ?? 0} candidates · ${p.sent ?? 0} sent · ${p.skipped ?? 0} skipped · ${p.errored ?? 0} errored`;
+      case "followups":
+        return `${p.candidates ?? 0} candidates · ${p.generated ?? 0} generated · ${p.failed ?? 0} failed`;
+      case "auto-promote-sweep":
+        return `Scanned ${p.scanned ?? 0} · promoted ${p.promoted ?? 0} · errored ${p.errored ?? 0}`;
+      case "outreach-jobs":
+        if (p.idle === true) return "No pending jobs";
+        return `Job ${(p.jobId as string | undefined)?.slice(-6) ?? "?"} · ${p.drafted ?? 0} drafted · ${p.processedThisTick ?? 0} this tick${p.done ? " · DONE" : ""}`;
+      default:
+        return "Done";
+    }
+  }
+
   async function triggerCron(kind: string) {
     setTriggering(kind);
     try {
@@ -149,19 +182,12 @@ export default function SystemHealthPage() {
       if (!r.ok) {
         throw new Error(d.error ?? `Trigger failed (${r.status})`);
       }
-      // The cron handler's response is in d.payload — extract its summary
-      // line so the toast tells the operator exactly what happened.
-      const p = d.payload ?? {};
-      const skipped = p.skipped === true;
-      const sentCount = p.sent ?? p.generated ?? p.promoted ?? p.processedThisTick ?? 0;
-      const summary = skipped
-        ? `Skipped — ${p.reason ?? "no-op"}`
-        : sentCount > 0
-          ? `Sent ${sentCount}`
-          : p.candidateCount === 0 || p.scanned === 0 || p.idle
-            ? "No candidates"
-            : "Done";
-      toast(`${kind} · ${summary} (${d.durationMs}ms)`, p.ok === false ? "error" : "success");
+      const p = (d.payload ?? {}) as Record<string, unknown>;
+      const summary = summarizeCronResponse(kind, p);
+      const tone = p.ok === false || (kind === "daily-digest" && p.sent === false && p.skipped !== true)
+        ? "error"
+        : "success";
+      toast(`${kind} · ${summary} (${d.durationMs}ms)`, tone);
       // Reload the cron status so the new row appears in the activity panel.
       await load();
     } catch (err) {
