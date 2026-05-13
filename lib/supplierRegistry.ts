@@ -21,6 +21,7 @@
  */
 import crypto from "node:crypto";
 import { getBackend } from "./store";
+import { computeTrustScore, type TrustScoreBreakdown } from "./supplierTrustScore";
 
 const SUPPLIERS_FILE = "suppliers-registry.json";
 const MAX_RETAINED = 5000;  // ring buffer; plenty for early-stage growth
@@ -84,6 +85,11 @@ export type SupplierRecord = {
   // ── Verification state machine ────────────────────────────────────
   tier: SupplierTier;
   verificationRuns: VerificationRun[];  // append-only audit trail
+  // Cached AI Trust Score — recomputed on every appendVerificationRun.
+  // Optional because pre-existing records (created before scoring
+  // shipped) won't have one until their next verify run.
+  trustScore?: number;
+  trustScoreBreakdown?: TrustScoreBreakdown;
   // ── Lifecycle ─────────────────────────────────────────────────────
   status: "pending" | "active" | "rejected" | "suspended";
   source: "manual" | "self-signup" | "csv-import" | "agent-discovery";
@@ -186,14 +192,21 @@ export const supplierRegistry = {
 
   /**
    * Append a verification run to the supplier's audit trail and re-
-   * derive tier. Tier is the highest level whose latest run `passed`.
+   * derive tier + trust score. Tier is the highest level whose latest
+   * run `passed`. Score is the 0-100 rollup from lib/supplierTrustScore.
    */
   async appendVerificationRun(id: string, run: VerificationRun): Promise<SupplierRecord | null> {
     const supplier = await supplierRegistry.get(id);
     if (!supplier) return null;
     const runs = [...supplier.verificationRuns, run];
     const tier = deriveTier(runs);
-    return supplierRegistry.update(id, { verificationRuns: runs, tier });
+    const trustScoreBreakdown = computeTrustScore({ verificationRuns: runs });
+    return supplierRegistry.update(id, {
+      verificationRuns: runs,
+      tier,
+      trustScore: trustScoreBreakdown.total,
+      trustScoreBreakdown,
+    });
   },
 };
 

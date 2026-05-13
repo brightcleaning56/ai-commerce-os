@@ -87,6 +87,37 @@ type SupplierRecord = {
   moq?: number;
   leadTimeDays?: number;
   capacityUnitsPerMo?: number;
+  // AI Trust Score cached on the record. Older records without one
+  // render as "—" until their next verification run.
+  trustScore?: number;
+  trustScoreBreakdown?: {
+    total: number;
+    l1: number;
+    l2: number;
+    l3plus: number;
+    stalePenalty: number;
+    hasL1: boolean;
+    hasL2: boolean;
+    latestRunAt: string | null;
+    summary: string;
+    computedAt: string;
+  };
+};
+
+type TrustBand = "strong" | "solid" | "baseline" | "weak";
+
+function bandForScore(s: number): TrustBand {
+  if (s >= 80) return "strong";
+  if (s >= 60) return "solid";
+  if (s >= 40) return "baseline";
+  return "weak";
+}
+
+const BAND_TONE: Record<TrustBand, string> = {
+  strong:   "bg-accent-green/15 text-accent-green border-accent-green/30",
+  solid:    "bg-accent-blue/15 text-accent-blue border-accent-blue/30",
+  baseline: "bg-accent-amber/15 text-accent-amber border-accent-amber/30",
+  weak:     "bg-accent-red/15 text-accent-red border-accent-red/30",
 };
 
 type SupplierDocKind =
@@ -162,6 +193,7 @@ export default function AdminSuppliersPage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [tierFilter, setTierFilter] = useState<SupplierTier | "all">("all");
+  const [sortBy, setSortBy] = useState<"updatedAt" | "trustScore" | "legalName">("updatedAt");
   const [selected, setSelected] = useState<SupplierRecord | null>(null);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [openCreate, setOpenCreate] = useState(false);
@@ -196,7 +228,10 @@ export default function AdminSuppliersPage() {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch("/api/admin/suppliers", { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (sortBy !== "updatedAt") params.set("sortBy", sortBy);
+      const qs = params.toString();
+      const r = await fetch(`/api/admin/suppliers${qs ? `?${qs}` : ""}`, { cache: "no-store" });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         throw new Error(d.error ?? `Load failed (${r.status})`);
@@ -208,7 +243,7 @@ export default function AdminSuppliersPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [sortBy]);
 
   useEffect(() => {
     void load();
@@ -263,6 +298,17 @@ export default function AdminSuppliersPage() {
     return c;
   }, [suppliers]);
 
+  // Average trust score across suppliers that have one. Zero-score
+  // (truly unverified) records skew the mean downward intentionally —
+  // operators should see "we have a lot of suppliers we haven't
+  // scored yet" reflected in the average.
+  const avgTrust = useMemo(() => {
+    if (suppliers.length === 0) return null;
+    const scored = suppliers.map((s) => s.trustScore ?? 0);
+    const sum = scored.reduce((a, b) => a + b, 0);
+    return Math.round(sum / scored.length);
+  }, [suppliers]);
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -294,9 +340,21 @@ export default function AdminSuppliersPage() {
         </div>
       </div>
 
-      {/* Tier roll-up tiles */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+      {/* Tier roll-up tiles + avg trust */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
         <Tile label="Total" value={counts.total} tone="brand" />
+        <Tile
+          label="Avg trust"
+          value={avgTrust ?? 0}
+          tone={
+            avgTrust == null ? "muted"
+              : avgTrust >= 80 ? "green"
+              : avgTrust >= 60 ? "blue"
+              : avgTrust >= 40 ? "muted"
+              : "muted"
+          }
+          suffix={avgTrust == null ? "—" : "/100"}
+        />
         <Tile label="Unverified" value={counts.unverified} tone="muted" />
         <Tile label="Basic" value={counts.basic} tone="blue" />
         <Tile label="Verified" value={counts.verified} tone="green" />
@@ -330,6 +388,16 @@ export default function AdminSuppliersPage() {
             </button>
           ))}
         </div>
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+          className="h-9 rounded-lg border border-bg-border bg-bg-card px-2 text-xs text-ink-secondary"
+          title="Sort"
+        >
+          <option value="updatedAt">Sort: Recent</option>
+          <option value="trustScore">Sort: Trust score</option>
+          <option value="legalName">Sort: Name (A-Z)</option>
+        </select>
       </div>
 
       {error && (
@@ -347,6 +415,7 @@ export default function AdminSuppliersPage() {
               <th className="px-3 py-2.5 text-left font-medium">Kind</th>
               <th className="px-3 py-2.5 text-left font-medium">Location</th>
               <th className="px-3 py-2.5 text-left font-medium">Tier</th>
+              <th className="px-3 py-2.5 text-left font-medium">Trust</th>
               <th className="px-3 py-2.5 text-left font-medium">Last verified</th>
               <th className="px-3 py-2.5 text-right font-medium">Action</th>
             </tr>
@@ -354,7 +423,7 @@ export default function AdminSuppliersPage() {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-[12px] text-ink-tertiary">
+                <td colSpan={7} className="px-4 py-10 text-center text-[12px] text-ink-tertiary">
                   {loading
                     ? "Loading…"
                     : suppliers.length === 0
@@ -394,6 +463,19 @@ export default function AdminSuppliersPage() {
                       >
                         {s.tier}
                       </span>
+                    </td>
+                    <td className="px-3 py-3">
+                      {typeof s.trustScore === "number" ? (
+                        <span
+                          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-bold ${BAND_TONE[bandForScore(s.trustScore)]}`}
+                          title={s.trustScoreBreakdown?.summary ?? `Score ${s.trustScore}/100`}
+                        >
+                          {s.trustScore}
+                          <span className="ml-0.5 text-[9px] font-normal opacity-70">/100</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-ink-tertiary">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-3 text-[10px] text-ink-tertiary">
                       {latestL1 ? (
@@ -465,7 +547,7 @@ export default function AdminSuppliersPage() {
   );
 }
 
-function Tile({ label, value, tone }: { label: string; value: number; tone: "brand" | "muted" | "blue" | "green" | "gradient" }) {
+function Tile({ label, value, tone, suffix }: { label: string; value: number; tone: "brand" | "muted" | "blue" | "green" | "gradient"; suffix?: string }) {
   const toneClass =
     tone === "gradient"
       ? "bg-gradient-brand text-white"
@@ -479,7 +561,10 @@ function Tile({ label, value, tone }: { label: string; value: number; tone: "bra
   return (
     <div className={`rounded-xl px-4 py-3 ${toneClass}`}>
       <div className="text-[10px] font-semibold uppercase tracking-wider opacity-80">{label}</div>
-      <div className="mt-0.5 text-2xl font-bold">{value}</div>
+      <div className="mt-0.5 text-2xl font-bold">
+        {value}
+        {suffix && <span className="ml-1 text-sm font-medium opacity-70">{suffix}</span>}
+      </div>
     </div>
   );
 }
@@ -586,6 +671,43 @@ function SupplierDrawer({
               }
             />
           </Section>
+
+          {/* AI Trust Score */}
+          {typeof supplier.trustScore === "number" && (
+            <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                    AI Trust Score
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-ink-secondary">
+                    {supplier.trustScoreBreakdown?.summary ?? "Computed from L1+L2 evidence"}
+                  </div>
+                </div>
+                <div
+                  className={`rounded-lg border px-3 py-1.5 text-right ${BAND_TONE[bandForScore(supplier.trustScore)]}`}
+                >
+                  <div className="text-2xl font-bold leading-none">
+                    {supplier.trustScore}
+                    <span className="ml-0.5 text-xs opacity-70">/100</span>
+                  </div>
+                </div>
+              </div>
+              {supplier.trustScoreBreakdown && (
+                <div className="mt-3 grid grid-cols-4 gap-2 text-[10px]">
+                  <ScoreBucket label="L1 Identity" value={supplier.trustScoreBreakdown.l1} max={40} />
+                  <ScoreBucket label="L2 Business" value={supplier.trustScoreBreakdown.l2} max={40} />
+                  <ScoreBucket label="L3+ Future" value={supplier.trustScoreBreakdown.l3plus} max={20} />
+                  <ScoreBucket
+                    label="Stale"
+                    value={supplier.trustScoreBreakdown.stalePenalty}
+                    max={-10}
+                    isPenalty
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Documents (L2 evidence) */}
           <SupplierDocsPanel supplierId={supplier.id} />
@@ -830,6 +952,33 @@ function CreateSupplierModal({
             Create supplier
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoreBucket({
+  label,
+  value,
+  max,
+  isPenalty,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  isPenalty?: boolean;
+}) {
+  const tone = isPenalty
+    ? value < 0 ? "text-accent-red" : "text-ink-tertiary"
+    : value > 0 ? "text-ink-primary" : "text-ink-tertiary";
+  return (
+    <div className="rounded-md border border-bg-border bg-bg-app px-2 py-1.5">
+      <div className="text-[9px] uppercase tracking-wider text-ink-tertiary">{label}</div>
+      <div className={`mt-0.5 text-sm font-bold ${tone}`}>
+        {value}
+        <span className="ml-0.5 text-[9px] font-normal opacity-60">
+          {isPenalty ? `/${max}` : `/${max}`}
+        </span>
       </div>
     </div>
   );

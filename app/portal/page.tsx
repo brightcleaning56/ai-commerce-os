@@ -67,6 +67,29 @@ type SupplierRecord = {
   tier: SupplierTier;
   verificationRuns: VerificationRun[];
   status: SupplierStatus;
+  trustScore?: number;
+  trustScoreBreakdown?: {
+    total: number;
+    l1: number;
+    l2: number;
+    l3plus: number;
+    stalePenalty: number;
+    summary: string;
+  };
+};
+
+function trustBand(s: number): "strong" | "solid" | "baseline" | "weak" {
+  if (s >= 80) return "strong";
+  if (s >= 60) return "solid";
+  if (s >= 40) return "baseline";
+  return "weak";
+}
+
+const TRUST_BAND_TONE: Record<"strong" | "solid" | "baseline" | "weak", string> = {
+  strong:   "border-accent-green/30 bg-accent-green/10 text-accent-green",
+  solid:    "border-accent-blue/30 bg-accent-blue/10 text-accent-blue",
+  baseline: "border-accent-amber/30 bg-accent-amber/10 text-accent-amber",
+  weak:     "border-accent-red/30 bg-accent-red/10 text-accent-red",
 };
 
 type SupplierDocKind =
@@ -293,6 +316,20 @@ export default function PortalPage() {
             >
               {supplier.tier}
             </div>
+            {typeof supplier.trustScore === "number" && (
+              <div
+                className={`mt-2 inline-block rounded-lg border px-3 py-1 text-right ${TRUST_BAND_TONE[trustBand(supplier.trustScore)]}`}
+                title={supplier.trustScoreBreakdown?.summary ?? "AI Trust Score"}
+              >
+                <div className="text-[9px] font-semibold uppercase tracking-wider opacity-80">
+                  AI Trust Score
+                </div>
+                <div className="text-xl font-bold leading-none">
+                  {supplier.trustScore}
+                  <span className="ml-0.5 text-xs font-medium opacity-70">/100</span>
+                </div>
+              </div>
+            )}
             <div className="mt-2 max-w-[260px] text-[11px] text-ink-secondary">
               {TIER_BLURB[supplier.tier]}
             </div>

@@ -44,6 +44,14 @@ export async function GET(req: NextRequest) {
     query,
   });
 
+  // Optional re-sort. Default order from the store is updatedAt desc.
+  const sortBy = url.searchParams.get("sortBy");
+  if (sortBy === "trustScore") {
+    suppliers.sort((a, b) => (b.trustScore ?? 0) - (a.trustScore ?? 0));
+  } else if (sortBy === "legalName") {
+    suppliers.sort((a, b) => a.legalName.localeCompare(b.legalName));
+  }
+
   return NextResponse.json({ suppliers, count: suppliers.length });
 }
 
