@@ -31,6 +31,7 @@ import {
   ScrollText,
   ArrowLeftRight,
   Inbox,
+  PhoneCall,
   Stethoscope,
 } from "lucide-react";
 
@@ -77,6 +78,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Approvals", href: "/approvals", icon: ShieldCheck, badge: "REVIEW" },
       { label: "Suggestions", href: "/suggestions", icon: Lightbulb, badge: "AI" },
       { label: "Tasks", href: "/tasks", icon: FileText },
+      { label: "Call Log", href: "/calls", icon: PhoneCall, badge: "NEW" },
       { label: "CRM Pipeline", href: "/crm", icon: Workflow },
     ],
   },

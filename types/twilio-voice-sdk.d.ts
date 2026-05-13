@@ -17,4 +17,17 @@ declare module "@twilio/voice-sdk" {
     connect(opts: { params: Record<string, string> }): Promise<unknown>;
     on(event: string, listener: (...args: unknown[]) => void): void;
   }
+
+  /**
+   * Subset of the Call interface we drive from the active-call controls.
+   * Real types come from the package on the Netlify build.
+   */
+  export interface Call {
+    mute(shouldMute?: boolean): void;
+    isMuted(): boolean;
+    sendDigits(digits: string): void;
+    disconnect(): void;
+    parameters?: { CallSid?: string; From?: string };
+    on(event: string, listener: (...args: unknown[]) => void): void;
+  }
 }

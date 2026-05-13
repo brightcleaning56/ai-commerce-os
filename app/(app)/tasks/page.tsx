@@ -5,9 +5,11 @@ import {
   Clock,
   FileText,
   Flame,
+  Hash,
   Loader2,
   Mail,
   MessageSquare,
+  MicOff,
   PhoneCall,
   PhoneOff,
   Phone,
@@ -590,6 +592,42 @@ function TaskDetail({
   // AI talking-points state -- generated on demand, persisted on the task
   const [scriptLoading, setScriptLoading] = useState(false);
 
+  // Active-call controls — only meaningful while twilioInFlight !== "idle"
+  const [muted, setMuted] = useState(false);
+  const [dialPadOpen, setDialPadOpen] = useState(false);
+
+  function toggleMute() {
+    const call = currentCallRef.current as
+      | { mute: (m?: boolean) => void; isMuted: () => boolean }
+      | null;
+    if (!call) return;
+    try {
+      const next = !muted;
+      call.mute(next);
+      setMuted(next);
+    } catch (e) {
+      console.warn("[voice] mute failed", e);
+    }
+  }
+
+  function sendDigit(digit: string) {
+    const call = currentCallRef.current as { sendDigits: (d: string) => void } | null;
+    if (!call) return;
+    try {
+      call.sendDigits(digit);
+    } catch (e) {
+      console.warn("[voice] sendDigits failed", e);
+    }
+  }
+
+  // Reset mute + dial pad when the call session resets (so next call starts clean)
+  useEffect(() => {
+    if (twilioInFlight === "idle") {
+      setMuted(false);
+      setDialPadOpen(false);
+    }
+  }, [twilioInFlight]);
+
   // Recording metadata, keyed by CallSid. Populated by polling
   // /api/voice/recordings whenever this task has attempts with sids
   // but no recording yet. Twilio's recording-status webhook can take
@@ -998,6 +1036,94 @@ function TaskDetail({
                 Pick the outcome below when you hang up.
               </div>
             </div>
+
+            {/* Active-call controls — only render when we have an in-browser
+                Twilio call. tel: fallback calls have no in-app controls
+                (the device dialer handles its own UI). */}
+            {twilioReady && (twilioInFlight === "open" || twilioInFlight === "ringing" || twilioInFlight === "connecting") && (
+              <div className="rounded-md border border-bg-border bg-bg-hover/30 p-3">
+                {/* Top control row: mute + dial pad toggle + hang up */}
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    onClick={toggleMute}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                      muted
+                        ? "bg-accent-amber/15 text-accent-amber"
+                        : "border border-bg-border bg-bg-card text-ink-secondary hover:bg-bg-hover"
+                    }`}
+                    title={muted ? "Unmute your microphone" : "Mute your microphone"}
+                  >
+                    <MicOff className="h-3 w-3" />
+                    {muted ? "Muted" : "Mute"}
+                  </button>
+                  <button
+                    onClick={() => setDialPadOpen((v) => !v)}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition ${
+                      dialPadOpen
+                        ? "bg-brand-500/15 text-brand-200"
+                        : "border border-bg-border bg-bg-card text-ink-secondary hover:bg-bg-hover"
+                    }`}
+                    title="Send DTMF tones — useful for navigating phone trees / IVR"
+                  >
+                    <Hash className="h-3 w-3" />
+                    Dial pad
+                  </button>
+                  <button
+                    onClick={() => {
+                      const call = currentCallRef.current as { disconnect: () => void } | null;
+                      if (call) {
+                        try { call.disconnect(); } catch {}
+                      }
+                    }}
+                    className="ml-auto flex items-center gap-1.5 rounded-md bg-accent-red/15 px-3 py-1.5 text-[11px] font-semibold text-accent-red hover:bg-accent-red/25"
+                  >
+                    <PhoneOff className="h-3 w-3" /> Hang up
+                  </button>
+                </div>
+
+                {/* DTMF dial pad — collapsible. Sends digits via Twilio's
+                    Call.sendDigits() so operator can navigate IVRs without
+                    leaving the page. */}
+                {dialPadOpen && (
+                  <div className="mt-3 grid grid-cols-3 gap-1.5">
+                    {["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"].map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => sendDigit(d)}
+                        className="rounded-md border border-bg-border bg-bg-card py-2 text-sm font-mono font-semibold hover:bg-bg-hover"
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Pinned talking points — script visible during call so
+                    operator doesn't have to scroll. Compact rendering. */}
+                {task.script && (
+                  <div className="mt-3 border-t border-bg-border pt-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                      Talking points (pinned)
+                    </div>
+                    <div className="mt-1.5 space-y-1">
+                      <div className="text-[11px] text-ink-secondary">
+                        <span className="font-semibold text-accent-green">Open:</span>{" "}
+                        &ldquo;{task.script.opener}&rdquo;
+                      </div>
+                      {task.script.talkingPoints.slice(0, 5).map((p, i) => (
+                        <div key={i} className="text-[11px] text-ink-secondary">
+                          <span className="font-mono text-brand-200">{i + 1}.</span> {p}
+                        </div>
+                      ))}
+                      <div className="text-[11px] text-ink-secondary">
+                        <span className="font-semibold text-brand-200">Close:</span>{" "}
+                        &ldquo;{task.script.closer}&rdquo;
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Outcome picker */}
             <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
