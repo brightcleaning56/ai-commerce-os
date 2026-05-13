@@ -15,6 +15,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { downloadCSV } from "@/lib/csv";
+import { useVoice } from "@/components/voice/VoiceContext";
+import { useCapability } from "@/components/CapabilityContext";
 
 /**
  * /calls — central log of every call attempt across every task.
@@ -138,6 +140,29 @@ export default function CallsPage() {
   const [dateWindow, setDateWindow] = useState<DateWindow>("7d");
   const [sortBy, setSortBy] = useState<"date" | "duration">("date");
   const { toast } = useToast();
+
+  // In-app dialer integration. The button on each row dials via the
+  // shared VoiceProvider Device (same Twilio Client identity as
+  // inbound rings). Hidden entirely for roles without voice:write, and
+  // disabled when twilioReady is false (env not configured, mic denied
+  // etc) -- never falls back to tel: because Windows users get
+  // Phone Link instead of a real dial.
+  const canCall = useCapability("voice:write");
+  const { placeOutboundCall, twilioReady, twilioInFlight } = useVoice();
+  const dialing = twilioInFlight !== "idle";
+  async function dial(phone: string | undefined, label: string) {
+    if (!phone) return;
+    if (!twilioReady) {
+      toast("Voice not ready — check /admin/system-health", "error");
+      return;
+    }
+    try {
+      await placeOutboundCall(phone);
+      toast(`Dialing ${label}…`, "info");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Dial failed", "error");
+    }
+  }
 
   function loadVoicemails() {
     fetch("/api/voice/voicemails", { credentials: "include", cache: "no-store" })
@@ -408,13 +433,17 @@ export default function CallsPage() {
                     src={`/api/voice/recording-proxy/${vm.recordingSid}`}
                     className="h-7 max-w-xs"
                   />
-                  <a
-                    href={`tel:${vm.from}`}
-                    title={`Call ${vm.from} back`}
-                    className="flex items-center gap-1.5 rounded-md bg-accent-green/15 px-2.5 py-1 text-[11px] font-semibold text-accent-green hover:bg-accent-green/25"
-                  >
-                    <PhoneCall className="h-3 w-3" /> Call back
-                  </a>
+                  {canCall && (
+                    <button
+                      type="button"
+                      onClick={() => dial(vm.from, vm.from)}
+                      disabled={!twilioReady || dialing}
+                      title={`Call ${vm.from} back from your browser`}
+                      className="flex items-center gap-1.5 rounded-md bg-accent-green/15 px-2.5 py-1 text-[11px] font-semibold text-accent-green hover:bg-accent-green/25 disabled:opacity-50"
+                    >
+                      <PhoneCall className="h-3 w-3" /> Call back
+                    </button>
+                  )}
                 </div>
                 {/* Transcript — landed via /api/voice/transcription-status.
                     Pending state shows while Twilio processes (typically
@@ -497,6 +526,9 @@ export default function CallsPage() {
                   <th className="px-3 py-2.5 text-right font-medium">Duration</th>
                   <th className="px-3 py-2.5 text-left font-medium">Notes</th>
                   <th className="px-4 py-2.5 text-left font-medium">Recording</th>
+                  {canCall && (
+                    <th className="px-3 py-2.5 text-right font-medium">Action</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -564,6 +596,24 @@ export default function CallsPage() {
                           <span className="text-[10px] text-ink-tertiary">—</span>
                         )}
                       </td>
+                      {canCall && (
+                        <td className="px-3 py-3 text-right">
+                          {r.task.buyerPhone ? (
+                            <button
+                              type="button"
+                              onClick={() => dial(r.task.buyerPhone, r.task.buyerName || r.task.buyerCompany)}
+                              disabled={!twilioReady || dialing}
+                              title={`Call ${r.task.buyerName || r.task.buyerCompany} back from your browser`}
+                              className="inline-flex items-center gap-1 rounded-md bg-accent-green/15 px-2 py-1 text-[10px] font-semibold text-accent-green hover:bg-accent-green/25 disabled:opacity-50"
+                            >
+                              <PhoneCall className="h-3 w-3" />
+                              Call
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-ink-tertiary">—</span>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOperator } from "@/lib/operator";
 import { verifyTwilioSignature } from "@/lib/twilioVoice";
+import { getOnlineAgents } from "@/lib/agentPresence";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,16 +13,20 @@ export const dynamic = "force-dynamic";
  *   Phone Numbers > Manage > <your-number> > Voice Configuration
  *   "A call comes in" → Webhook → https://YOUR-DOMAIN/api/voice/inbound (POST)
  *
- * When someone dials your Twilio number, Twilio POSTs here. We respond
- * with TwiML that dials the operator's Client identity (their email),
- * which causes the @twilio/voice-sdk Device in their browser to fire
- * Device.on("incoming") with an answerable Call object.
+ * Multi-agent routing: we look up every agent currently online (their
+ * VoiceProvider is registered + heartbeating against /api/voice/presence)
+ * and emit one <Client> per agent inside a single <Dial>. Twilio rings
+ * them all simultaneously, the first to pick up wins, the rest stop
+ * ringing automatically.
  *
- * If the operator doesn't pick up within 25s OR no Device is currently
- * registered (browser closed), Twilio falls through to <Record> for
- * voicemail. Voicemail recordings land via the same recording-status
- * webhook as outbound calls, so they show in the call-history UI with
- * an inline player.
+ * The operator's Client identity is ALWAYS included as a fallback even
+ * when their browser isn't currently registered — this preserves the
+ * "owner can always be reached" property while a teammate is on-call.
+ * If the operator IS already in the online list, the dedupe step
+ * collapses the duplicate <Client> entry.
+ *
+ * If nobody's online and the owner's Device also isn't reachable
+ * within 25s, the call falls through to <Record> for voicemail.
  *
  * SECURITY: every request is signature-verified using TWILIO_AUTH_TOKEN.
  */
@@ -42,12 +47,23 @@ export async function POST(req: NextRequest) {
   });
   if (!valid) return new NextResponse("Invalid signature", { status: 403 });
 
-  // Identity must match the one mintAccessToken used when issuing the
-  // operator's JWT (we use op.email). If they're different the inbound
-  // bridge will hit "no client registered" and fall through to voicemail.
+  // Build the set of Client identities to ring in parallel. Owner is
+  // always included (so the operator can always be reached, even when
+  // their tab isn't currently registered), plus every agent currently
+  // marked online in lib/agentPresence.
   const op = getOperator();
-  const clientIdentity = op.email || op.name || "operator";
-  const safeIdentity = clientIdentity.replace(/[^a-zA-Z0-9@._+-]/g, "");
+  const ownerIdentity = (op.email || op.name || "operator").replace(/[^a-zA-Z0-9@._+-]/g, "");
+
+  const online = await getOnlineAgents().catch(() => []);
+  const identitySet = new Set<string>();
+  identitySet.add(ownerIdentity);
+  for (const a of online) {
+    const safe = a.identity.replace(/[^a-zA-Z0-9@._+-]/g, "");
+    if (safe) identitySet.add(safe);
+  }
+  const dialClients = Array.from(identitySet)
+    .map((id) => `    <Client>${id}</Client>`)
+    .join("\n");
 
   // Recording: opt-in via env, same flag as outbound. URL is built from
   // this request so the webhook path resolves regardless of deploy host.
@@ -85,7 +101,7 @@ export async function POST(req: NextRequest) {
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial timeout="25" answerOnBridge="true" callerId="${callerId}"${recordAttrs}>
-    <Client>${safeIdentity}</Client>
+${dialClients}
   </Dial>
   <Say voice="Polly.Joanna">${escapeXml(greeting)}</Say>
   <Record maxLength="120" recordingStatusCallback="${escapeXmlAttr(voicemailCallbackUrl.toString())}" recordingStatusCallbackEvent="completed" transcribe="true" transcribeCallback="${escapeXmlAttr(transcribeCallbackUrl.toString())}" />

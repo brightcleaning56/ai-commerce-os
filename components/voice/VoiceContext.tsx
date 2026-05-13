@@ -273,7 +273,38 @@ export default function VoiceProvider({ children }: { children: React.ReactNode 
         }
         setTwilioReady(true);
         setFailReason(null);
-        cleanup = () => device.destroy();
+
+        // Presence heartbeat — tell the server this Device is online so
+        // /api/voice/inbound can include us in the multi-agent <Dial>
+        // fan-out. We fire one immediately so inbound rings us right
+        // after register, then every 30s while we stay registered.
+        // PRESENCE_TTL_MS in lib/agentPresence is 90s so we tolerate
+        // ~2 missed beats before being marked offline.
+        const heartbeat = async () => {
+          try {
+            await fetch("/api/voice/presence", {
+              method: "POST",
+              credentials: "include",
+              cache: "no-store",
+            });
+          } catch {
+            // Silently swallow — next tick will retry.
+          }
+        };
+        void heartbeat();
+        const interval = setInterval(() => void heartbeat(), 30_000);
+
+        cleanup = () => {
+          clearInterval(interval);
+          // Explicit offline — best-effort. If the browser is closing
+          // we use keepalive so the request still flushes.
+          fetch("/api/voice/presence", {
+            method: "DELETE",
+            credentials: "include",
+            keepalive: true,
+          }).catch(() => {});
+          device.destroy();
+        };
       } catch (e) {
         console.info("[voice] not active:", e instanceof Error ? e.message : e);
         if (!cancelled) setFailReason("register-failed");
