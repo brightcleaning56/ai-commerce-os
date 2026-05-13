@@ -145,6 +145,37 @@ export const NAV_SECTIONS: NavSection[] = [
 // Flat list for backwards compat (command palette, etc.)
 export const PRIMARY_NAV: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items);
 
+/**
+ * Look up the capability required to view a given pathname. Used by
+ * the layout-level guard in app/(app)/layout.tsx to render an
+ * unauthorized wall before pages 403 their data fetches.
+ *
+ * Match policy: longest `href` prefix wins. So `/admin/system-health`
+ * matches the System Health nav item (system:read) rather than the
+ * generic `/admin` Super Admin item. Items without `requires` (e.g.
+ * the Command Center landing page) return undefined and the guard
+ * passes through unconditionally.
+ *
+ * Returns undefined for paths that don't match any nav item — those
+ * pages remain ungated by this helper. Public pages (/share/*, /quote/*,
+ * /invite/*) never hit this since they're outside the (app) group.
+ */
+export function requiredCapabilityForPath(pathname: string): string | undefined {
+  const all: NavItem[] = [...PRIMARY_NAV, ...ADMIN_NAV];
+  let bestMatch: NavItem | null = null;
+  let bestLen = -1;
+  for (const item of all) {
+    const matches = item.href === "/"
+      ? pathname === "/"
+      : pathname === item.href || pathname.startsWith(item.href + "/");
+    if (matches && item.href.length > bestLen) {
+      bestMatch = item;
+      bestLen = item.href.length;
+    }
+  }
+  return bestMatch?.requires;
+}
+
 export const ADMIN_NAV: NavItem[] = [
   // Super Admin landing page is system-level — gating on system:read.
   { label: "Super Admin", href: "/admin", icon: ShieldCheck, requires: "system:read" },

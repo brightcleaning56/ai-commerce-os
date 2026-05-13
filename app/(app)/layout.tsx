@@ -7,6 +7,7 @@ import ToastProvider from "@/components/Toast";
 import VoiceProvider from "@/components/voice/VoiceContext";
 import IncomingCallWidget from "@/components/voice/IncomingCallWidget";
 import { CapabilityProvider } from "@/components/CapabilityContext";
+import AppPageGuard from "@/components/AppPageGuard";
 
 export default function AppLayout({
   children,
@@ -27,7 +28,9 @@ export default function AppLayout({
             <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
             <div className="flex flex-1 flex-col min-w-0">
               <TopBar onMenuClick={() => setMobileOpen(true)} />
-              <main className="flex-1 overflow-x-hidden p-4 sm:p-6">{children}</main>
+              <main className="flex-1 overflow-x-hidden p-4 sm:p-6">
+                <AppPageGuard>{children}</AppPageGuard>
+              </main>
             </div>
           </div>
           {/* Floating bottom-right alert when an inbound call rings.

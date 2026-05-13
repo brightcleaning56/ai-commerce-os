@@ -23,6 +23,7 @@ import { ADMIN_NAV, PRIMARY_NAV } from "@/lib/nav";
 import { PRODUCTS } from "@/lib/products";
 import { BUYERS } from "@/lib/buyers";
 import { SUPPLIERS } from "@/lib/suppliers";
+import { useCapabilities } from "@/components/CapabilityContext";
 
 type LiveData = {
   products: Array<{ id: string; name: string; category?: string; emoji?: string; demandScore?: number }>;
@@ -57,6 +58,10 @@ export default function CommandPaletteProvider({
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // Capability check — same filter the sidebar uses, applied to
+  // command-palette nav suggestions so Cmd+K doesn't reveal hidden
+  // routes to non-owner roles.
+  const { can } = useCapabilities();
 
   const open = () => setIsOpen(true);
   const close = () => {
@@ -94,7 +99,7 @@ export default function CommandPaletteProvider({
   // Build search corpus
   const items: Item[] = useMemo(() => {
     const navItems: Item[] = [
-      ...PRIMARY_NAV.map((n) => ({
+      ...PRIMARY_NAV.filter((n) => can(n.requires)).map((n) => ({
         id: `nav-${n.href}`,
         label: n.label,
         hint: "Navigate",
@@ -102,7 +107,7 @@ export default function CommandPaletteProvider({
         group: "Pages",
         icon: n.icon,
       })),
-      ...ADMIN_NAV.map((n) => ({
+      ...ADMIN_NAV.filter((n) => can(n.requires)).map((n) => ({
         id: `admin-${n.href}`,
         label: n.label,
         hint: "Admin",
@@ -178,7 +183,7 @@ export default function CommandPaletteProvider({
       ...buyerItems,
       ...supplierItems,
     ];
-  }, [router, live]);
+  }, [router, live, can]);
 
   // Filter
   const results = useMemo(() => {
