@@ -38,6 +38,14 @@ type CallAttempt = {
   callbackAt?: string;   // ISO if outcome === "callback-scheduled"
 };
 
+type CallScript = {
+  opener: string;
+  talkingPoints: string[];
+  closer: string;
+  generatedAt: string;
+  usedFallback: boolean;
+};
+
 type LocalTask = {
   id: string;
   buyerId: string;
@@ -53,6 +61,10 @@ type LocalTask = {
   notes?: string;
   // Call session history -- one entry per "Place call" → outcome cycle.
   attempts?: CallAttempt[];
+  // AI-generated call script -- opener / 3-5 talking points / closer.
+  // Persists per-task so the operator doesn't burn tokens regenerating
+  // every time they open the drawer. Operator can re-generate on demand.
+  script?: CallScript;
 };
 
 type BuyerContact = {
@@ -124,10 +136,21 @@ const OUTCOME_META: Record<
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<LocalTask[]>([]);
-  const [filter, setFilter] = useState<"all" | "phone" | "sequence" | "open" | "done">("open");
+  const [filter, setFilter] = useState<"all" | "phone" | "sequence" | "open" | "done" | "callbacks">("open");
   const [buyerById, setBuyerById] = useState<Record<string, BuyerContact>>({});
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const { toast } = useToast();
+
+  // Derive the "next callback due" timestamp for a task from its attempts.
+  // Returns null when no callback has been scheduled.
+  function nextCallbackAt(t: LocalTask): string | null {
+    if (!t.attempts || t.attempts.length === 0) return null;
+    const callbacks = t.attempts
+      .filter((a) => a.outcome === "callback-scheduled" && a.callbackAt)
+      .map((a) => a.callbackAt as string)
+      .sort();
+    return callbacks[callbacks.length - 1] ?? null;
+  }
 
   useEffect(() => {
     try {
@@ -182,17 +205,32 @@ export default function TasksPage() {
     };
   }
 
-  const filtered = tasks.filter((t) => {
-    if (filter === "all") return true;
-    if (filter === "open") return !t.done;
-    if (filter === "done") return !!t.done;
-    return t.type === filter;
-  });
+  const filtered = tasks
+    .filter((t) => {
+      if (filter === "all") return true;
+      if (filter === "open") return !t.done;
+      if (filter === "done") return !!t.done;
+      if (filter === "callbacks") return !t.done && nextCallbackAt(t) != null;
+      return t.type === filter;
+    })
+    .sort((a, b) => {
+      // Callbacks-first ordering: tasks with an upcoming callback float
+      // to the top, ordered by callback time. Helps the operator see what
+      // they promised to follow up on without needing the dedicated
+      // filter pill.
+      const ca = nextCallbackAt(a);
+      const cb = nextCallbackAt(b);
+      if (ca && cb) return ca.localeCompare(cb);
+      if (ca) return -1;
+      if (cb) return 1;
+      return 0;
+    });
 
   const open = tasks.filter((t) => !t.done).length;
   const done = tasks.filter((t) => t.done).length;
   const phone = tasks.filter((t) => t.type === "phone" && !t.done).length;
   const seq = tasks.filter((t) => t.type === "sequence" && !t.done).length;
+  const callbackCount = tasks.filter((t) => !t.done && nextCallbackAt(t) != null).length;
 
   const openTask = openTaskId ? tasks.find((t) => t.id === openTaskId) ?? null : null;
 
@@ -252,6 +290,7 @@ export default function TasksPage() {
         {(
           [
             ["open", "Open", open],
+            ["callbacks", "Callbacks", callbackCount],
             ["phone", "Phone", phone],
             ["sequence", "Sequences", seq],
             ["done", "Done", done],
@@ -294,11 +333,28 @@ export default function TasksPage() {
             const { phone: phoneNumber, email: emailAddr } = contactFor(t);
             const lastAttempt = t.attempts && t.attempts.length > 0 ? t.attempts[t.attempts.length - 1] : null;
             const lastOutcome = lastAttempt ? OUTCOME_META[lastAttempt.outcome] : null;
+            const callbackAt = nextCallbackAt(t);
+            // Compute callback-due state: "overdue" if the callback time is
+            // in the past, "soon" if within 24h, otherwise "future". Drives
+            // the row's accent color so the operator can scan the queue.
+            const callbackState: "overdue" | "soon" | "future" | null = callbackAt
+              ? new Date(callbackAt).getTime() < Date.now()
+                ? "overdue"
+                : new Date(callbackAt).getTime() - Date.now() < 24 * 60 * 60 * 1000
+                  ? "soon"
+                  : "future"
+              : null;
             return (
               <li
                 key={t.id}
                 className={`flex flex-wrap items-center gap-3 rounded-xl border bg-bg-card p-4 transition cursor-pointer hover:border-brand-500/40 hover:bg-bg-hover/30 ${
-                  t.done ? "border-bg-border opacity-60" : "border-bg-border"
+                  t.done
+                    ? "border-bg-border opacity-60"
+                    : callbackState === "overdue"
+                      ? "border-accent-red/40"
+                      : callbackState === "soon"
+                        ? "border-accent-amber/40"
+                        : "border-bg-border"
                 }`}
                 onClick={() => setOpenTaskId(t.id)}
                 role="button"
@@ -366,6 +422,33 @@ export default function TasksPage() {
                   </span>
                 )}
 
+                {/* Callback-due badge -- visible only when the latest attempt
+                    scheduled a callback. Tone matches callbackState so the
+                    operator can spot overdue / due-soon at a glance. */}
+                {callbackAt && callbackState && (
+                  <span
+                    className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                      callbackState === "overdue"
+                        ? "bg-accent-red/15 text-accent-red"
+                        : callbackState === "soon"
+                          ? "bg-accent-amber/15 text-accent-amber"
+                          : "bg-brand-500/15 text-brand-200"
+                    }`}
+                    title={`Callback ${callbackState === "overdue" ? "overdue since" : "due"} ${new Date(callbackAt).toLocaleString()}`}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <PhoneIncoming className="h-3 w-3" />
+                    {callbackState === "overdue"
+                      ? `Overdue ${relativeTime(callbackAt)}`
+                      : `Callback ${new Date(callbackAt).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}`}
+                  </span>
+                )}
+
                 <span className="text-[10px] text-ink-tertiary">Open →</span>
                 <button
                   onClick={(e) => {
@@ -429,6 +512,64 @@ function TaskDetail({
     notes: string;
     callbackAt: string;
   } | null>(null);
+  // AI talking-points state -- generated on demand, persisted on the task
+  const [scriptLoading, setScriptLoading] = useState(false);
+
+  /**
+   * Generate AI talking points via /api/agents/call-prep. Pulls everything
+   * we know about the buyer (name, title, intent, rationale, target product)
+   * + recent attempt summary so the points can reference what already
+   * happened on past calls. Persists to task.script so the operator doesn't
+   * burn tokens regenerating every drawer-open.
+   */
+  async function generateScript() {
+    setScriptLoading(true);
+    try {
+      const recentAttempts = (task.attempts ?? []).slice(-3).map((a) => ({
+        outcome: a.outcome,
+        notes: a.notes,
+        daysAgo: Math.floor((Date.now() - new Date(a.at).getTime()) / (24 * 60 * 60 * 1000)),
+      }));
+      const r = await fetch("/api/agents/call-prep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buyerName: task.buyerName,
+          buyerTitle: buyer?.decisionMakerTitle,
+          buyerCompany: task.buyerCompany,
+          buyerIndustry: buyer?.industry,
+          buyerType: buyer?.status,
+          intentScore: buyer?.intentScore,
+          rationale: buyer?.rationale,
+          forProduct: buyer?.forProduct,
+          recentAttempts,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        throw new Error(d.error ?? `Call-prep failed (${r.status})`);
+      }
+      onPatch({
+        script: {
+          opener: d.opener,
+          talkingPoints: d.talkingPoints ?? [],
+          closer: d.closer,
+          generatedAt: new Date().toISOString(),
+          usedFallback: !!d.usedFallback,
+        },
+      });
+      toast(
+        d.usedFallback
+          ? "Generated talking points (fallback — set ANTHROPIC_API_KEY for AI version)"
+          : `Generated talking points · ${d.model}`,
+        d.usedFallback ? "info" : "success",
+      );
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Generate failed", "error");
+    } finally {
+      setScriptLoading(false);
+    }
+  }
 
   // Reset when switching tasks
   useEffect(() => {
@@ -548,6 +689,64 @@ function TaskDetail({
           )}
         </div>
       )}
+
+      {/* AI-generated talking points -- opener / 3-5 bullets / closer.
+          Generates once, persists to task.script. Operator can re-run when
+          context changes (after a previous call, after agreed-on next step). */}
+      <div className="rounded-lg border border-bg-border bg-bg-card p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+            <Bot className="h-3 w-3 text-brand-300" /> AI talking points
+            {task.script && (
+              <span className="normal-case tracking-normal text-ink-tertiary">
+                · generated {relativeTime(task.script.generatedAt)}
+                {task.script.usedFallback && " (fallback)"}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={generateScript}
+            disabled={scriptLoading}
+            className="flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-hover/40 px-2 py-1 text-[11px] hover:bg-bg-hover disabled:opacity-60"
+            title={task.script ? "Regenerate with latest context" : "Generate AI talking points for this call"}
+          >
+            {scriptLoading ? (
+              <Bot className="h-3 w-3 animate-pulse" />
+            ) : (
+              <Bot className="h-3 w-3 text-brand-300" />
+            )}
+            {task.script ? "Regenerate" : "Generate talking points"}
+          </button>
+        </div>
+
+        {task.script ? (
+          <div className="mt-3 space-y-3 text-xs">
+            <div className="rounded-md border border-accent-green/30 bg-accent-green/5 p-2.5">
+              <div className="text-[9px] font-semibold uppercase tracking-wider text-accent-green">Opener</div>
+              <p className="mt-0.5 text-ink-primary">&ldquo;{task.script.opener}&rdquo;</p>
+            </div>
+            <ul className="space-y-1.5">
+              {task.script.talkingPoints.map((p, i) => (
+                <li key={i} className="flex items-start gap-2 rounded-md border border-bg-border bg-bg-hover/30 p-2">
+                  <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-brand-500/20 text-[9px] font-bold text-brand-200">
+                    {i + 1}
+                  </span>
+                  <span className="text-ink-secondary">{p}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="rounded-md border border-brand-500/30 bg-brand-500/5 p-2.5">
+              <div className="text-[9px] font-semibold uppercase tracking-wider text-brand-200">Closer / next step</div>
+              <p className="mt-0.5 text-ink-primary">&ldquo;{task.script.closer}&rdquo;</p>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-2 text-[11px] text-ink-tertiary">
+            Click <span className="font-semibold text-ink-secondary">Generate talking points</span> to get a tailored opener,
+            3-5 bullets, and a suggested closer based on the buyer&apos;s industry, intent score, and call history.
+          </p>
+        )}
+      </div>
 
       {/* Call session — placeholder when idle, live timer when active, then
           outcome form. No backend voice yet; tel: opens the dialer + we
