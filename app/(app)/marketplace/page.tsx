@@ -340,10 +340,24 @@ export default function MarketplacePage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm">
+          {/* Both header buttons are intentionally disabled — they previously
+              had no onClick handler at all, which made them look operational
+              when the entire marketplace surface is preview-only (see banner
+              below). Hover title spells out the same. */}
+          <button
+            type="button"
+            disabled
+            title="Marketplace surface is preview-only — see the banner below"
+            className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm opacity-50 cursor-not-allowed"
+          >
             <Plus className="h-4 w-4" /> Post RFQ
           </button>
-          <button className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow">
+          <button
+            type="button"
+            disabled
+            title="Marketplace surface is preview-only — see the banner below"
+            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow opacity-50 cursor-not-allowed"
+          >
             <Plus className="h-4 w-4" /> List Inventory
           </button>
         </div>

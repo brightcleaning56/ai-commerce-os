@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import Drawer from "@/components/ui/Drawer";
 import Sparkline from "@/components/ui/Sparkline";
 import ProductDetail from "@/components/products/ProductDetail";
+import PreviewBanner from "@/components/PreviewBanner";
 import { PRODUCTS, type Product } from "@/lib/products";
 import { useLocalSet } from "@/lib/useLocalSet";
 
@@ -175,6 +176,14 @@ export default function ProductsPage() {
           </button>
         </div>
       </div>
+
+      {/* Honesty banner — same pattern as /suppliers. The grid mixes
+          AI-discovered products (Live badge) with hardcoded sample
+          rows (Sample badge) so it stays useful when no scans have run. */}
+      <PreviewBanner
+        title="Trend scans + sample data"
+        body='AI-discovered products are badged "Live". The rest are sample seed rows kept so the grid renders something useful before you run a scan. Run "Trend Scan" above to populate real discoveries.'
+      />
 
       {(lastRun || scanError) && (
         <div
@@ -355,9 +364,16 @@ export default function ProductsPage() {
                     p.source === "agent" ? "border-brand-500/40" : "border-bg-border"
                   }`}
                 >
-                  {p.source === "agent" && (
+                  {p.source === "agent" ? (
                     <span className="absolute -top-2 left-3 flex items-center gap-1 rounded-full bg-gradient-brand px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider shadow-glow">
                       <Sparkles className="h-2.5 w-2.5" /> Live
+                    </span>
+                  ) : (
+                    <span
+                      className="absolute -top-2 left-3 flex items-center gap-1 rounded-full border border-accent-amber/40 bg-bg-app px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent-amber"
+                      title="Sample seed data — kept so the grid stays useful when no live discoveries exist."
+                    >
+                      Sample
                     </span>
                   )}
                   <div className="flex items-start justify-between">

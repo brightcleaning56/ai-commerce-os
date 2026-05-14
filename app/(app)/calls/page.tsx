@@ -21,18 +21,19 @@ import { useCapability } from "@/components/CapabilityContext";
 /**
  * /calls — central log of every call attempt across every task.
  *
- * Reads aicos:tasks:v1 from localStorage, flattens task.attempts[] into
- * one timeline. Joins with /api/voice/recordings (server-side store
- * deposited by the Twilio recording-status webhook) so each row gets
- * an inline audio player when a recording is available.
+ * Two data sources merged into one timeline:
+ *   1. Server-side /api/calls log (shipped with the multi-agent call
+ *      center slice). Auto-populated whenever VoiceProvider.placeOutbound
+ *      runs, so any agent's call lands here and is visible to teammates.
+ *   2. Legacy localStorage aicos:tasks:v1 from /tasks page (per-browser).
+ *      Kept as a backstop until /tasks itself moves to the server store.
+ *      Deduped against server rows by CallSid so we don't double-render.
+ *
+ * Joined with /api/voice/recordings + /api/voice/voicemails so each
+ * row can render an inline audio player when a recording landed.
  *
  * Filters: date range, outcome, free-text search across buyer + phone.
- * Sortable by date / duration / outcome. CSV export of the visible
- * rows so the operator can pull the data into a spreadsheet.
- *
- * Pure client-side aggregation -- no server changes. When tasks move
- * to a server-side store later, this page swaps the localStorage read
- * for an /api/calls endpoint without touching the UI.
+ * Sortable by date / duration / outcome. CSV export of visible rows.
  */
 
 // ─── Types (mirrored from /tasks LocalTask) ──────────────────────────

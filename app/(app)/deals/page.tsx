@@ -66,7 +66,6 @@ export default function DealsPage() {
     { id: "L1", product: "Portable Blender Cup", sku: "PBC-001", qty: 500, cost: 6.4, price: 18.5 },
     { id: "L2", product: "Pet Hair Remover Roller", sku: "PHR-014", qty: 300, cost: 4.2, price: 13.5 },
   ]);
-  const [sentTo, setSentTo] = useState<string | null>(null);
   const [realQuotes, setRealQuotes] = useState<RealQuote[] | null>(null);
   const { toast } = useToast();
 
@@ -145,14 +144,10 @@ export default function DealsPage() {
     toast(`Quote exported · $${totals.total.toFixed(2)} for ${buyer}`);
   }
 
-  function handleSend() {
-    if (lines.length === 0) {
-      toast("Add at least one line item before sending", "error");
-      return;
-    }
-    setSentTo(`${contact} (${buyer})`);
-    toast(`Quote sent to ${buyer} · $${totals.total.toFixed(2)} · valid ${validDays}d`);
-  }
+  // handleSend was removed alongside the "Send Quote" button — it only
+  // showed a toast and didn't actually persist a Quote, which made the
+  // builder feel functional when it isn't. Bulk-quote persistence is
+  // queued as a real slice; until then Export CSV is the honest action.
 
   return (
     <div className="space-y-5">
@@ -170,23 +165,20 @@ export default function DealsPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {sentTo && (
-            <span className="rounded-md bg-accent-green/15 px-2 py-1 text-[11px] font-semibold text-accent-green">
-              Sent to {sentTo}
-            </span>
-          )}
           <button
             onClick={handleExport}
             className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
+            title="Download the bulk-quote draft below as a CSV. The actual quote isn't stored — see the banner below the export button."
           >
             <Download className="h-4 w-4" /> Export CSV
           </button>
-          <button
-            onClick={handleSend}
-            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
-          >
-            <Send className="h-4 w-4" /> Send Quote
-          </button>
+          {/*
+            "Send Quote" button removed — it called handleSend() which only
+            showed a toast and did NOT create a Quote in the store. Misleading.
+            Real quotes are auto-generated from accepted outreach drafts (the
+            "Live quotes" panel below). The bulk builder is a preview for a
+            future feature; for now Export CSV is the only honest action.
+          */}
         </div>
       </div>
 

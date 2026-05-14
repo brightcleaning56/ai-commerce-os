@@ -22,6 +22,7 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
+import PreviewBanner from "@/components/PreviewBanner";
 import { useToast } from "@/components/Toast";
 import Drawer from "@/components/ui/Drawer";
 import { useVoice } from "@/components/voice/VoiceContext";
@@ -314,6 +315,19 @@ function TasksInner() {
         <Stat label="Sequences" v={seq} Icon={MessageSquare} onClick={() => setFilter("sequence")} active={filter === "sequence"} />
         <Stat label="Completed" v={done} Icon={CheckCircle2} onClick={() => setFilter("done")} active={filter === "done"} />
       </div>
+
+      {/* Honesty banner — tasks + notes typed here save to localStorage
+          on this browser only. Outbound calls placed via the dialer DO
+          land in the shared server log (/api/calls), but task notes
+          and disposition won't sync to teammates until the server-side
+          tasks migration ships. */}
+      <PreviewBanner
+        title="Notes save to this browser only"
+        body="Tasks + per-attempt notes here persist to localStorage on this device. Outbound calls placed via the dialer DO land in the shared server-side call log, but the task list itself doesn't sync between devices or teammates yet."
+        href="/calls"
+        linkLabel="Open the shared Call Log"
+      />
+
 
       {/* How it works — sets expectations about today's flow vs roadmap */}
       <div className="rounded-xl border border-brand-500/30 bg-brand-500/5 px-4 py-3">

@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import Drawer from "@/components/ui/Drawer";
 import SupplierHistory from "@/components/suppliers/SupplierHistory";
+import PreviewBanner from "@/components/PreviewBanner";
 import { useToast } from "@/components/Toast";
 import { SUPPLIERS, type Supplier } from "@/lib/suppliers";
 
@@ -295,7 +296,10 @@ export default function SuppliersPage() {
               )}
             </p>
             <p className="text-[11px] text-ink-tertiary">
-              scanning Alibaba, 1688, Made-in-China + 4 directories
+              {/* Honesty: the supplier-finder agent uses LLM completion to
+                  suggest plausible suppliers, not real scraping. The real
+                  external-data discovery flow lives at /admin/suppliers. */}
+              AI agent suggests plausible suppliers per product
             </p>
           </div>
         </div>
@@ -308,6 +312,17 @@ export default function SuppliersPage() {
           {scanning ? "Finding suppliers…" : "Find New Suppliers"}
         </button>
       </div>
+
+      {/* Honesty banner — operators kept asking why "FitLife Stores" was
+          showing up alongside their real discoveries. This page mixes
+          AI-suggested results (Live badge) with sample seed data
+          (Sample badge). Verified onboarded suppliers live elsewhere. */}
+      <PreviewBanner
+        title="Browse + sample data"
+        body='This page mixes AI-suggested suppliers (badged "Live") with hardcoded sample rows (badged "Sample") so the grid stays useful when you have no live discoveries. Real verified, document-checked suppliers with trust scores live at /admin/suppliers.'
+        href="/admin/suppliers"
+        linkLabel="Open the real Supplier Registry"
+      />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[260px_1fr]">
         <aside className="space-y-4 rounded-xl border border-bg-border bg-bg-card p-4">
@@ -420,9 +435,16 @@ export default function SuppliersPage() {
                   isLive ? "border-brand-500/40" : "border-bg-border"
                 }`}
               >
-                {isLive && (
+                {isLive ? (
                   <span className="absolute -top-2 left-3 flex items-center gap-1 rounded-full bg-gradient-brand px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider shadow-glow">
                     <Sparkles className="h-2.5 w-2.5" /> Live
+                  </span>
+                ) : (
+                  <span
+                    className="absolute -top-2 left-3 flex items-center gap-1 rounded-full border border-accent-amber/40 bg-bg-app px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-accent-amber"
+                    title="Sample data — used to demo the page when there are no live discoveries. Real verified suppliers live at /admin/suppliers."
+                  >
+                    Sample
                   </span>
                 )}
                 <div className="flex items-start justify-between gap-2">

@@ -167,10 +167,11 @@ function AgentDetail({
         ) : (
           <button
             onClick={() => onToggleInstall(a)}
+            title="Adds to your local shortlist. The runtime install pipeline isn't wired yet — see the banner at the top of the page."
             className="col-span-2 flex items-center justify-center gap-2 rounded-lg bg-gradient-brand py-2.5 text-sm font-semibold shadow-glow"
           >
             <Plug className="h-4 w-4" />
-            {a.monthly === 0 ? "Install for Free" : `Install · $${a.monthly}/mo`}
+            {a.monthly === 0 ? "Add to shortlist (free)" : `Add to shortlist · $${a.monthly}/mo`}
           </button>
         )}
       </div>
@@ -396,10 +397,10 @@ export default function AgentStorePage() {
                 {a.monthly === 0 ? "Free" : `$${a.monthly}/mo`}
               </span>
               {isInstalled(a) ? (
-                <span className="text-accent-green">Installed</span>
+                <span className="text-accent-green" title="In your local shortlist (runtime install isn't wired yet)">Shortlisted</span>
               ) : (
                 <span className="rounded-md bg-gradient-brand px-2 py-1 text-[11px] font-semibold">
-                  Install
+                  Add
                 </span>
               )}
             </div>
