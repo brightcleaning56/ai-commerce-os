@@ -2,6 +2,7 @@
 import Link from "next/link";
 import {
   AlertCircle,
+  Brain,
   Building2,
   CheckCircle2,
   Compass,
@@ -130,6 +131,23 @@ type SupplierDocKind =
 
 type SupplierDocStatus = "pending" | "approved" | "rejected";
 
+type DocAIParseSummary = {
+  ok: boolean;
+  docKindGuess?: SupplierDocKind;
+  businessNameOnDoc?: string;
+  documentNumber?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  summary?: string;
+  confidence?: number;
+  redFlags?: string[];
+  recommendation?: "approve" | "reject" | "needs-review";
+  modelUsed?: string;
+  estCostUsd?: number;
+  parsedAt: string;
+  reason?: string;
+};
+
 type SupplierDocMeta = {
   id: string;
   supplierId: string;
@@ -143,6 +161,7 @@ type SupplierDocMeta = {
   reviewNotes?: string;
   reviewedAt?: string;
   reviewedBy?: string;
+  aiParse?: DocAIParseSummary;
 };
 
 const DOC_KIND_LABEL: Record<SupplierDocKind, string> = {
@@ -1348,6 +1367,96 @@ function formatUsd(n: number): string {
   return `${Math.round(n)}`;
 }
 
+function DocAiParseRender({ parse, doc }: { parse: DocAIParseSummary; doc: SupplierDocMeta }) {
+  if (!parse.ok) {
+    return (
+      <div className="mt-2 rounded-md border border-accent-amber/30 bg-accent-amber/5 px-2 py-1.5 text-[10px] text-ink-secondary">
+        <span className="text-accent-amber font-semibold">AI parse failed:</span> {parse.reason ?? "unknown"}
+        <span className="ml-1 text-ink-tertiary">· {relTime(parse.parsedAt)}</span>
+      </div>
+    );
+  }
+
+  const recoTone =
+    parse.recommendation === "approve"
+      ? "border-accent-green/30 bg-accent-green/5 text-accent-green"
+      : parse.recommendation === "reject"
+        ? "border-accent-red/30 bg-accent-red/5 text-accent-red"
+        : "border-accent-amber/30 bg-accent-amber/5 text-accent-amber";
+
+  // Highlight kind mismatch — operator labeled it X but AI says it's Y
+  const kindMismatch = parse.docKindGuess && parse.docKindGuess !== doc.kind;
+
+  return (
+    <div className={`mt-2 rounded-md border px-2.5 py-2 text-[11px] ${recoTone}`}>
+      <div className="flex flex-wrap items-center gap-2 text-[10px]">
+        <span className="inline-flex items-center gap-1 font-semibold uppercase tracking-wider">
+          <Brain className="h-3 w-3" /> AI · {parse.recommendation}
+        </span>
+        {parse.confidence != null && (
+          <span className="text-ink-secondary">{parse.confidence}% confidence</span>
+        )}
+        {parse.modelUsed && <span className="text-ink-tertiary">{parse.modelUsed}</span>}
+        {parse.estCostUsd != null && (
+          <span className="text-ink-tertiary">${parse.estCostUsd.toFixed(4)}</span>
+        )}
+        <span className="text-ink-tertiary">· {relTime(parse.parsedAt)}</span>
+      </div>
+
+      {parse.summary && (
+        <div className="mt-1 text-ink-primary">{parse.summary}</div>
+      )}
+
+      {(parse.businessNameOnDoc || parse.documentNumber || parse.issueDate || parse.expiryDate || kindMismatch) && (
+        <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] md:grid-cols-3">
+          {parse.businessNameOnDoc && (
+            <div>
+              <span className="text-ink-tertiary">Name on doc: </span>
+              <span className="font-mono">{parse.businessNameOnDoc}</span>
+            </div>
+          )}
+          {parse.documentNumber && (
+            <div>
+              <span className="text-ink-tertiary">Doc #: </span>
+              <span className="font-mono">{parse.documentNumber}</span>
+            </div>
+          )}
+          {parse.issueDate && (
+            <div>
+              <span className="text-ink-tertiary">Issued: </span>
+              <span className="font-mono">{parse.issueDate}</span>
+            </div>
+          )}
+          {parse.expiryDate && (
+            <div>
+              <span className="text-ink-tertiary">Expires: </span>
+              <span className="font-mono">{parse.expiryDate}</span>
+            </div>
+          )}
+          {kindMismatch && (
+            <div className="col-span-2 md:col-span-3">
+              <span className="text-ink-tertiary">AI thinks this is: </span>
+              <span className="font-mono text-accent-amber">{parse.docKindGuess}</span>
+              <span className="text-ink-tertiary"> (you labeled it {doc.kind})</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {parse.redFlags && parse.redFlags.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5 text-[10px]">
+          {parse.redFlags.map((f, i) => (
+            <li key={i} className="flex items-start gap-1">
+              <AlertCircle className="mt-0.5 h-2.5 w-2.5 shrink-0" />
+              <span>{f}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function ScoreBucket({
   label,
   value,
@@ -1852,6 +1961,7 @@ function SupplierDocsPanel({ supplierId }: { supplierId: string }) {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [parsingId, setParsingId] = useState<string | null>(null);
   const [uploadKind, setUploadKind] = useState<SupplierDocKind>("business-license");
 
   const load = useCallback(async () => {
@@ -1919,6 +2029,32 @@ function SupplierDocsPanel({ supplierId }: { supplierId: string }) {
       toast(e instanceof Error ? e.message : "Review failed", "error");
     } finally {
       setReviewingId(null);
+    }
+  }
+
+  async function parseWithAi(docId: string) {
+    setParsingId(docId);
+    try {
+      const r = await fetch(
+        `/api/admin/suppliers/${supplierId}/documents/${docId}/parse`,
+        { method: "POST" },
+      );
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Parse failed (${r.status})`);
+      setDocs((prev) => prev.map((x) => (x.id === docId ? (d.document as SupplierDocMeta) : x)));
+      const p = d.parse as DocAIParseSummary;
+      if (p.ok) {
+        toast(
+          `AI parsed: ${p.recommendation} (${p.confidence ?? 0}% confidence${p.estCostUsd ? `, $${p.estCostUsd.toFixed(4)}` : ""})`,
+          p.recommendation === "reject" || (p.redFlags?.length ?? 0) > 0 ? "info" : "success",
+        );
+      } else {
+        toast(`AI parse failed: ${p.reason ?? "unknown"}`, "error");
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Parse failed", "error");
+    } finally {
+      setParsingId(null);
     }
   }
 
@@ -2004,6 +2140,19 @@ function SupplierDocsPanel({ supplierId }: { supplierId: string }) {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => parseWithAi(d.id)}
+                    disabled={parsingId === d.id}
+                    title="Run Claude over this document — extracts fields, flags inconsistencies, suggests approve/reject"
+                    className="grid h-6 w-6 place-items-center rounded-md border border-brand-500/40 bg-brand-500/10 text-brand-200 hover:bg-brand-500/20 disabled:opacity-50"
+                  >
+                    {parsingId === d.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Brain className="h-3 w-3" />
+                    )}
+                  </button>
                   <a
                     href={`/api/admin/suppliers/${supplierId}/documents/${d.id}?download=1`}
                     title="Download"
@@ -2044,6 +2193,9 @@ function SupplierDocsPanel({ supplierId }: { supplierId: string }) {
                   </button>
                 </div>
               </div>
+
+              {/* AI Parse summary — collapsed-style render below the row */}
+              {d.aiParse && <DocAiParseRender parse={d.aiParse} doc={d} />}
             </li>
           ))}
         </ul>
