@@ -286,6 +286,21 @@ export type Transaction = {
   supplierStripeAccountId?: string;  // Connect account
   supplierPayoutId?: string;
   supplierPayoutAt?: string;
+  /**
+   * Link to a record in the supplier registry (lib/supplierRegistry.ts).
+   * Lets us aggregate transactions per supplier for L3 Operational
+   * verification (auto-validate self-reported MOQ/capacity vs actual
+   * deliveries) and Layer 6 Distribution Intelligence (shipping lane
+   * inference from supplier address → buyer destination).
+   *
+   * Set via POST /api/transactions/[id]/link-supplier. Optional; old
+   * transactions stay unlinked unless an operator wires them up.
+   * Does NOT affect Stripe Connect routing — supplierStripeAccountId
+   * remains the source of truth for payouts.
+   */
+  supplierRegistryId?: string;
+  supplierLinkedAt?: string;
+  supplierLinkedBy?: string;
 
   // Dispute / refund
   disputedAt?: string;
@@ -1981,6 +1996,11 @@ export const store = {
   async getTransactionByQuote(quoteId: string): Promise<Transaction | null> {
     const txns = await store.getTransactions();
     return txns.find((t) => t.quoteId === quoteId) ?? null;
+  },
+  async getTransactionsBySupplierRegistryId(supplierRegistryId: string): Promise<Transaction[]> {
+    if (!supplierRegistryId) return [];
+    const txns = await store.getTransactions();
+    return txns.filter((t) => t.supplierRegistryId === supplierRegistryId);
   },
   async saveTransaction(t: Transaction): Promise<void> {
     const existing = await store.getTransactions();

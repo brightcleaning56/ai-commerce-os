@@ -742,6 +742,9 @@ function SupplierDrawer({
             </div>
           )}
 
+          {/* Linked transactions */}
+          <SupplierTransactionsPanel supplierId={supplier.id} />
+
           {/* Documents (L2 evidence) */}
           <SupplierDocsPanel supplierId={supplier.id} />
 
@@ -1502,6 +1505,190 @@ function PortalTokenModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+type SupplierTxRollup = {
+  count: number;
+  totalRevenueCents: number;
+  totalUnits: number;
+  completedCount: number;
+  lastTransactionAt: string | null;
+};
+
+type SupplierTxSlim = {
+  id: string;
+  productName: string;
+  buyerCompany: string;
+  buyerName: string;
+  quantity: number;
+  unitPriceCents: number;
+  productTotalCents: number;
+  supplierPayoutCents: number;
+  state: string;
+  createdAt: string;
+  deliveredAt?: string;
+  escrowReleasedAt?: string;
+};
+
+function SupplierTransactionsPanel({ supplierId }: { supplierId: string }) {
+  const { toast } = useToast();
+  const [data, setData] = useState<{ transactions: SupplierTxSlim[]; rollup: SupplierTxRollup } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [linkTxnId, setLinkTxnId] = useState("");
+  const [linking, setLinking] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/admin/suppliers/${supplierId}/transactions`, { cache: "no-store" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Load failed (${r.status})`);
+      setData({ transactions: d.transactions ?? [], rollup: d.rollup });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load transactions");
+    } finally {
+      setLoading(false);
+    }
+  }, [supplierId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function linkTransaction() {
+    const id = linkTxnId.trim();
+    if (!id) return;
+    setLinking(true);
+    try {
+      const r = await fetch(`/api/transactions/${id}/link-supplier`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supplierRegistryId: supplierId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Link failed (${r.status})`);
+      toast(`Linked transaction ${id}`, "success");
+      setLinkTxnId("");
+      await load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Link failed", "error");
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  const fmtUsd = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+          Linked transactions {data ? `(${data.rollup.count})` : ""}
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-rose-300/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+          {error}
+        </div>
+      )}
+
+      {loading && !data ? (
+        <div className="flex items-center gap-2 rounded-md border border-bg-border bg-bg-card px-3 py-2 text-[11px] text-ink-tertiary">
+          <Loader2 className="h-3 w-3 animate-spin" /> Loading…
+        </div>
+      ) : data && data.rollup.count > 0 ? (
+        <div className="space-y-3">
+          {/* Rollup tiles */}
+          <div className="grid grid-cols-3 gap-2">
+            <RollupTile label="Total revenue" value={fmtUsd(data.rollup.totalRevenueCents)} tone="green" />
+            <RollupTile label="Total units" value={data.rollup.totalUnits.toLocaleString()} tone="brand" />
+            <RollupTile label="Completed" value={`${data.rollup.completedCount}/${data.rollup.count}`} tone="muted" />
+          </div>
+
+          {/* Recent transactions list */}
+          <ul className="max-h-60 overflow-y-auto rounded-md border border-bg-border bg-bg-card divide-y divide-bg-border">
+            {data.transactions.slice(0, 10).map((t) => (
+              <li key={t.id} className="px-3 py-2 text-[11px]">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-ink-primary">{t.productName}</div>
+                    <div className="truncate text-[10px] text-ink-tertiary">
+                      {t.buyerCompany} · {t.quantity} units · {relTime(t.createdAt)}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="font-mono text-[11px] text-ink-primary">
+                      {fmtUsd(t.productTotalCents)}
+                    </div>
+                    <div className="text-[10px] text-ink-tertiary">{t.state}</div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {data.transactions.length > 10 && (
+            <div className="text-[10px] text-ink-tertiary">
+              + {data.transactions.length - 10} more
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-md border border-bg-border bg-bg-card px-3 py-2 text-[11px] text-ink-tertiary">
+          No transactions linked yet. Paste a transaction id below to associate one with this
+          supplier — useful for backfilling old transactions that pre-date the registry.
+        </div>
+      )}
+
+      {/* Link form — always visible so the operator can backfill */}
+      <div className="mt-3 rounded-md border border-bg-border bg-bg-app p-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+          Link a transaction
+        </div>
+        <div className="mt-1 flex items-center gap-2">
+          <input
+            value={linkTxnId}
+            onChange={(e) => setLinkTxnId(e.target.value)}
+            placeholder="t_abc123..."
+            className="h-8 flex-1 rounded-md border border-bg-border bg-bg-card px-2 text-[11px] font-mono"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void linkTransaction();
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void linkTransaction()}
+            disabled={linking || !linkTxnId.trim()}
+            className="inline-flex items-center gap-1 rounded-md border border-brand-500/40 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/20 disabled:opacity-50"
+          >
+            {linking ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+            Link
+          </button>
+        </div>
+        <div className="mt-1 text-[10px] text-ink-tertiary">
+          Find ids on /transactions. Linking unlocks per-supplier revenue rollup + future L3
+          operational verification (auto-validate self-reported MOQ vs actual deliveries).
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RollupTile({ label, value, tone }: { label: string; value: string; tone: "green" | "brand" | "muted" }) {
+  const toneClass =
+    tone === "green"
+      ? "border-accent-green/30 bg-accent-green/10 text-accent-green"
+      : tone === "brand"
+        ? "border-brand-500/30 bg-brand-500/10 text-brand-200"
+        : "border-bg-border bg-bg-card text-ink-secondary";
+  return (
+    <div className={`rounded-md border px-2.5 py-1.5 ${toneClass}`}>
+      <div className="text-[9px] uppercase tracking-wider opacity-80">{label}</div>
+      <div className="mt-0.5 text-sm font-bold">{value}</div>
     </div>
   );
 }
