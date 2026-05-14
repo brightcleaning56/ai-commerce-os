@@ -13,6 +13,8 @@ import {
   Send,
   Sparkles,
   Target,
+  Workflow,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -68,6 +70,17 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"email" | "linkedin" | "sms">("email");
   const [taskAdded, setTaskAdded] = useState<"phone" | "sequence" | null>(null);
+  // Cadence picker state — opens an inline panel that lists active
+  // cadences and enrolls the buyer with one click. Lazy-loaded on
+  // first open so the buyer page doesn't pay for /api/cadences when
+  // the operator never opens the picker.
+  const [cadencePickerOpen, setCadencePickerOpen] = useState(false);
+  const [cadences, setCadences] = useState<
+    | Array<{ id: string; name: string; description?: string; steps: Array<{ channel: string }>; active: boolean }>
+    | null
+  >(null);
+  const [cadencesLoading, setCadencesLoading] = useState(false);
+  const [enrollMessage, setEnrollMessage] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
 
   const targetProduct = b.forProduct || b.matchedProducts[0] || "Trending Product";
   const productCategory = b.industry; // best guess from buyer industry
@@ -123,6 +136,62 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
   function placeCallNow() {
     const id = addTask("phone");
     router.push(`/tasks?focus=${encodeURIComponent(id)}`);
+  }
+
+  async function openCadencePicker() {
+    setCadencePickerOpen(true);
+    if (cadences) return; // already cached
+    setCadencesLoading(true);
+    try {
+      const r = await fetch("/api/cadences", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error(`Load failed (${r.status})`);
+      const d = await r.json();
+      setCadences(d.cadences ?? []);
+    } catch (e) {
+      setEnrollMessage({
+        tone: "err",
+        text: e instanceof Error ? e.message : "Couldn't load cadences",
+      });
+    } finally {
+      setCadencesLoading(false);
+    }
+  }
+
+  async function enrollIn(cadenceId: string) {
+    setEnrollMessage(null);
+    try {
+      const r = await fetch(`/api/cadences/${cadenceId}/enroll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          buyerId: b.id,
+          buyerName: b.decisionMaker,
+          buyerCompany: b.company,
+          buyerEmail: b.email,
+          buyerPhone: b.phone,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        // 409 = already enrolled — surface the duplicate-protection
+        // error verbatim so the operator knows why the click did nothing.
+        throw new Error(d.error ?? `Enroll failed (${r.status})`);
+      }
+      setEnrollMessage({
+        tone: "ok",
+        text: `Enrolled in cadence — first step scheduled.`,
+      });
+      setCadencePickerOpen(false);
+    } catch (e) {
+      setEnrollMessage({
+        tone: "err",
+        text: e instanceof Error ? e.message : "Enroll failed",
+      });
+    }
   }
 
   async function generate() {
@@ -349,6 +418,82 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
         </div>
       )}
 
+      {enrollMessage && (
+        <div
+          className={`flex items-start gap-2 rounded-lg border p-2.5 text-xs ${
+            enrollMessage.tone === "ok"
+              ? "border-accent-green/30 bg-accent-green/5 text-accent-green"
+              : "border-accent-red/30 bg-accent-red/5 text-accent-red"
+          }`}
+        >
+          {enrollMessage.tone === "ok" ? (
+            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          ) : null}
+          <div className="flex-1">{enrollMessage.text}</div>
+          <button onClick={() => setEnrollMessage(null)}>
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
+      {cadencePickerOpen && (
+        <div className="rounded-lg border border-accent-blue/40 bg-accent-blue/5 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[12px] font-semibold">Enroll {b.decisionMaker} in a cadence</div>
+            <button
+              onClick={() => setCadencePickerOpen(false)}
+              className="text-ink-tertiary hover:text-ink-primary"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {cadencesLoading ? (
+            <div className="flex items-center gap-2 py-2 text-[11px] text-ink-tertiary">
+              <Loader2 className="h-3 w-3 animate-spin" /> Loading cadences…
+            </div>
+          ) : cadences == null ? null : cadences.length === 0 ? (
+            <div className="py-2 text-[11px] text-ink-tertiary">
+              No cadences yet.{" "}
+              <Link href="/cadences" className="text-accent-blue underline">
+                Create one
+              </Link>{" "}
+              first.
+            </div>
+          ) : cadences.filter((c) => c.active).length === 0 ? (
+            <div className="py-2 text-[11px] text-ink-tertiary">
+              All cadences are inactive.{" "}
+              <Link href="/cadences" className="text-accent-blue underline">
+                Activate one
+              </Link>{" "}
+              to enroll.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {cadences
+                .filter((c) => c.active)
+                .map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => void enrollIn(c.id)}
+                    className="flex w-full items-center justify-between gap-2 rounded-md border border-bg-border bg-bg-card px-2.5 py-1.5 text-left text-[12px] hover:border-accent-blue/50 hover:bg-bg-hover"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold">{c.name}</div>
+                      {c.description && (
+                        <div className="truncate text-[10px] text-ink-tertiary">{c.description}</div>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-ink-tertiary">
+                      {c.steps.length} step{c.steps.length === 1 ? "" : "s"}
+                    </div>
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-2 pb-2">
         <button
           onClick={generate}
@@ -389,6 +534,13 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
             <PhoneCall className="h-4 w-4" /> Place Call
           </button>
         )}
+        <button
+          onClick={() => void openCadencePicker()}
+          title="Add this buyer to a multi-touch cadence"
+          className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card py-2.5 text-sm hover:bg-bg-hover"
+        >
+          <Workflow className="h-4 w-4" /> Enroll in Cadence
+        </button>
         <Link
           href={`/crm?company=${encodeURIComponent(b.company)}`}
           className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card py-2.5 text-sm hover:bg-bg-hover"
