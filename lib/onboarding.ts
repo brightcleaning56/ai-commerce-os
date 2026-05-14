@@ -1316,19 +1316,265 @@ const supplierFlow: Flow = {
 const distributorFlow: Flow = {
   persona: "distributor",
   steps: [
+    // ── Step 1: Identity ──────────────────────────────────────────
     {
-      id: "placeholder",
-      label: "Tell us what you move",
-      blurb:
-        "Slice 1 placeholder — slice 6 fills in: regions served, freight methods, warehouse network, trucking/shipping capabilities, delivery timelines.",
+      id: "identity",
+      label: "Company identity",
+      blurb: "We use this on your verified-distributor profile + on every shipping lane analysis.",
+      questions: [
+        { id: "legalName", type: "text", label: "Legal company name", required: true, maxLength: 120 },
+        { id: "tradeName", type: "text", label: "Trade name (DBA)", maxLength: 120 },
+        { id: "fullName", type: "text", label: "Your name", required: true, maxLength: 120 },
+        { id: "title", type: "text", label: "Your title", maxLength: 80, placeholder: "Operations Director / Sales Lead" },
+        { id: "email", type: "text", label: "Work email", required: true, maxLength: 200 },
+        { id: "phone", type: "text", label: "Direct phone", maxLength: 40 },
+        { id: "website", type: "text", label: "Company website", maxLength: 200 },
+        {
+          id: "kind",
+          type: "select",
+          label: "What kind of operation are you?",
+          required: true,
+          options: [
+            { value: "3pl", label: "3PL / Fulfillment", description: "You hold inventory + ship for brands." },
+            { value: "freight-forwarder", label: "Freight forwarder", description: "Ocean / air international." },
+            { value: "trucking", label: "Trucking carrier", description: "FTL / LTL domestic." },
+            { value: "last-mile", label: "Last-mile delivery", description: "Final-mile / parcel." },
+            { value: "warehousing", label: "Warehousing only", description: "Storage, no transport." },
+            { value: "broker", label: "Freight broker", description: "Match shippers + carriers." },
+            { value: "full-service", label: "Full-service distributor", description: "Storage + transport + customs." },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 2: Regions served ────────────────────────────────────
+    {
+      id: "regions",
+      label: "Regions you serve",
+      blurb: "Multi-select origin + destination regions. Powers the lane match.",
       questions: [
         {
-          id: "legalName",
-          type: "text",
-          label: "Legal company name",
+          id: "originRegions",
+          type: "multiselect",
+          label: "Origin regions you operate from",
           required: true,
-          maxLength: 120,
+          options: [
+            { value: "us-east", label: "US East" },
+            { value: "us-central", label: "US Central" },
+            { value: "us-west", label: "US West" },
+            { value: "canada", label: "Canada" },
+            { value: "mexico", label: "Mexico" },
+            { value: "eu", label: "European Union" },
+            { value: "uk", label: "United Kingdom" },
+            { value: "asia-china", label: "China" },
+            { value: "asia-india", label: "India" },
+            { value: "asia-vietnam", label: "Vietnam" },
+            { value: "asia-other", label: "Other Asia" },
+            { value: "south-america", label: "South America" },
+            { value: "africa", label: "Africa" },
+            { value: "middle-east", label: "Middle East" },
+          ],
         },
+        {
+          id: "destinationRegions",
+          type: "multiselect",
+          label: "Destination regions you can deliver to",
+          required: true,
+          options: [
+            { value: "us-east", label: "US East" },
+            { value: "us-central", label: "US Central" },
+            { value: "us-west", label: "US West" },
+            { value: "canada", label: "Canada" },
+            { value: "mexico", label: "Mexico" },
+            { value: "eu", label: "European Union" },
+            { value: "uk", label: "United Kingdom" },
+            { value: "asia", label: "Asia (general)" },
+            { value: "south-america", label: "South America" },
+            { value: "africa", label: "Africa" },
+            { value: "middle-east", label: "Middle East" },
+            { value: "global", label: "Global -- deliver anywhere" },
+          ],
+        },
+        {
+          id: "specializedLanes",
+          type: "tags",
+          label: "Specialized lanes (optional)",
+          placeholder: "e.g. China to US West Coast, Mexico to Texas border",
+          helper: "Free-form. Lanes you have a competitive edge on.",
+        },
+      ],
+    },
+
+    // ── Step 3: Freight methods + capabilities ────────────────────
+    {
+      id: "freight",
+      label: "Freight methods + capabilities",
+      questions: [
+        {
+          id: "freightModes",
+          type: "multiselect",
+          label: "Freight modes you operate",
+          required: true,
+          options: [
+            { value: "ocean-fcl", label: "Ocean FCL", description: "Full container." },
+            { value: "ocean-lcl", label: "Ocean LCL", description: "Less than container." },
+            { value: "air-cargo", label: "Air cargo" },
+            { value: "ftl", label: "FTL trucking", description: "Full truckload." },
+            { value: "ltl", label: "LTL trucking", description: "Less than truckload." },
+            { value: "rail", label: "Rail" },
+            { value: "intermodal", label: "Intermodal", description: "Mixed mode (e.g. ocean + rail + truck)." },
+            { value: "parcel", label: "Parcel (UPS/FedEx/USPS partner)" },
+          ],
+        },
+        {
+          id: "specialHandling",
+          type: "multiselect",
+          label: "Special handling capabilities",
+          options: [
+            { value: "refrigerated", label: "Refrigerated (cold chain)" },
+            { value: "frozen", label: "Frozen" },
+            { value: "hazmat", label: "Hazmat / dangerous goods" },
+            { value: "oversized", label: "Oversized / heavy haul" },
+            { value: "high-value", label: "High-value security" },
+            { value: "fragile", label: "Fragile / electronics" },
+            { value: "white-glove", label: "White-glove delivery" },
+          ],
+        },
+        {
+          id: "customsClearance",
+          type: "boolean",
+          label: "Handle customs clearance for international shipments",
+        },
+      ],
+    },
+
+    // ── Step 4: Warehouse network ─────────────────────────────────
+    {
+      id: "warehouses",
+      label: "Warehouse network",
+      blurb: "We use this to surface you for buyers near your warehouses on the lane dashboard.",
+      questions: [
+        {
+          id: "primaryWarehouse",
+          type: "address",
+          label: "Primary warehouse",
+        },
+        {
+          id: "warehouseCount",
+          type: "number",
+          label: "Total warehouses operated",
+          required: true,
+          min: 1,
+          max: 1000,
+        },
+        {
+          id: "totalSqft",
+          type: "number",
+          label: "Total warehouse capacity (sq ft)",
+          min: 0,
+          max: 100_000_000,
+        },
+        {
+          id: "warehouseFeatures",
+          type: "multiselect",
+          label: "Warehouse features",
+          options: [
+            { value: "bonded", label: "Bonded warehouse" },
+            { value: "ftz", label: "FTZ (Foreign Trade Zone)" },
+            { value: "racked", label: "Pallet-racked" },
+            { value: "climate-controlled", label: "Climate-controlled" },
+            { value: "kitting", label: "Kitting / pick-pack" },
+            { value: "returns", label: "Returns processing" },
+            { value: "cross-dock", label: "Cross-docking" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 5: Delivery timelines + reliability ──────────────────
+    {
+      id: "timelines",
+      label: "Delivery timelines",
+      blurb: "Sets buyer expectations on quotes + enables on-time-delivery scoring.",
+      questions: [
+        {
+          id: "domesticTransitDays",
+          type: "number",
+          label: "Domestic transit time (days, average)",
+          min: 1,
+          max: 60,
+        },
+        {
+          id: "internationalTransitDays",
+          type: "number",
+          label: "International transit time (days, average)",
+          min: 1,
+          max: 90,
+        },
+        {
+          id: "onTimeRate",
+          type: "number",
+          label: "On-time delivery rate (%)",
+          min: 0,
+          max: 100,
+          helper: "Self-reported. We'll calculate live from your AVYN shipments after a few months of data.",
+        },
+        {
+          id: "trackingProvided",
+          type: "boolean",
+          label: "Provide buyer-facing tracking",
+        },
+        {
+          id: "guaranteedDelivery",
+          type: "boolean",
+          label: "Offer guaranteed-delivery windows (with refund on miss)",
+          helper: "Boosts your trust score.",
+        },
+      ],
+    },
+
+    // ── Step 6: Pricing + terms ───────────────────────────────────
+    {
+      id: "pricing",
+      label: "Pricing model",
+      blurb: "Helps us pre-quote when buyers request lane analysis.",
+      questions: [
+        {
+          id: "pricingModel",
+          type: "select",
+          label: "Default pricing model",
+          required: true,
+          options: [
+            { value: "spot", label: "Spot pricing", description: "Quote per shipment." },
+            { value: "contract", label: "Contract pricing", description: "Negotiated rate cards." },
+            { value: "tiered-volume", label: "Tiered by volume", description: "Discounts at volume thresholds." },
+            { value: "hybrid", label: "Hybrid (spot + contract)" },
+          ],
+        },
+        {
+          id: "minShipmentValue",
+          type: "number",
+          label: "Minimum shipment value (USD)",
+          min: 0,
+          max: 1_000_000,
+        },
+        {
+          id: "fuelSurcharge",
+          type: "boolean",
+          label: "Pass-through fuel surcharge",
+        },
+      ],
+    },
+
+    // ── Step 7: Verification documents ────────────────────────────
+    {
+      id: "verification",
+      label: "Verification documents",
+      blurb: "Required for verified-distributor status. Slice 7 wires the upload.",
+      questions: [
+        { id: "businessLicense", type: "file", label: "Business license / DOT registration" },
+        { id: "insurance", type: "file", label: "Cargo insurance (COI)", helper: "Min coverage varies by lane / mode." },
+        { id: "carrierAuth", type: "file", label: "Carrier authority (MC# for trucking, FMC for ocean)", helper: "Skip if you're warehousing-only." },
       ],
     },
   ],
