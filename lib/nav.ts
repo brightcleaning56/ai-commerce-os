@@ -92,6 +92,11 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: "Outreach",
     items: [
+      // Unified queue lands first — operator's "what should I do next"
+      // surface across every channel + direction. Backed by /api/queue
+      // which derives items at request time from tasks, voicemails,
+      // lead.inboundSms[], lead-followup candidates, and brand-new leads.
+      { label: "Queue", href: "/queue", icon: Inbox, badge: "NEW", requires: "leads:read" },
       { label: "Inbound Leads", href: "/leads", icon: Inbox, badge: "LIVE", requires: "leads:read" },
       { label: "Outreach Automation", href: "/outreach", icon: Send, requires: "outreach:read" },
       { label: "Job Queue", href: "/admin/outreach-jobs", icon: Layers, badge: "NEW", requires: "outreach:read" },
