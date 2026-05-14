@@ -194,6 +194,10 @@ export const ADMIN_NAV: NavItem[] = [
   { label: "Super Admin", href: "/admin", icon: ShieldCheck, requires: "system:read" },
   { label: "System Health", href: "/admin/system-health", icon: Stethoscope, badge: "NEW", requires: "system:read" },
   { label: "Users & Roles", href: "/admin/users", icon: Users, requires: "users:read" },
+  // Onboarding sessions -- live view of every prospect/teammate
+  // walking through the persona-aware setup flow. Drill in to see
+  // their answers + uploaded docs, delete spam/test sessions.
+  { label: "Onboarding Sessions", href: "/admin/onboarding-sessions", icon: Inbox, badge: "NEW", requires: "users:read" },
   { label: "Billing & Plans", href: "/admin/billing", icon: FileText, requires: "billing:read" },
   { label: "API Keys", href: "/admin/api-keys", icon: Plug, requires: "apikeys:read" },
   { label: "Suppressions", href: "/admin/suppressions", icon: MailX, badge: "NEW", requires: "system:read" },
