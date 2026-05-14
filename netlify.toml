@@ -94,6 +94,14 @@
 [functions."cron-cadences"]
   schedule = "*/15 * * * *"
 
+# Hourly at :05 — scan for cadence touches still pending approval past
+# STALE_APPROVAL_HOURS (default 24) and post a digest to
+# SLACK_WEBHOOK_URL. No-op when there's nothing stale or Slack isn't
+# configured. Useful when the workspace approval mode = first-touch
+# or all and the operator falls behind on signoff.
+[functions."cron-stale-approvals"]
+  schedule = "5 * * * *"
+
 # ─── Headers ───────────────────────────────────────────────────────────────
 # Defense-in-depth: deny framing of the operator dashboard, declare strict
 # content security on the marketing landing.

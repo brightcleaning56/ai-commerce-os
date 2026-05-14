@@ -543,7 +543,8 @@ export type CronRunKind =
   | "auto-promote-sweep"
   | "daily-digest"
   | "supplier-l3-refresh"
-  | "cadences";
+  | "cadences"
+  | "stale-approvals";
 
 export type CronRun = {
   id: string;
