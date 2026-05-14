@@ -1,5 +1,5 @@
 "use client";
-import { Calculator, CheckCircle2, Clock, Download, ExternalLink, FileText, Link2, Plus, Send, Sparkles, Trash2, XCircle } from "lucide-react";
+import { Calculator, CheckCircle2, Clock, Copy, Download, ExternalLink, FileText, Link2, Loader2, Plus, Send, Sparkles, Trash2, X, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
@@ -67,6 +67,10 @@ export default function DealsPage() {
     { id: "L2", product: "Pet Hair Remover Roller", sku: "PHR-014", qty: 300, cost: 4.2, price: 13.5 },
   ]);
   const [realQuotes, setRealQuotes] = useState<RealQuote[] | null>(null);
+  const [bulkCreating, setBulkCreating] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{
+    quotes: Array<{ id: string; productName: string; total: number; shareToken: string; quantity: number }>;
+  } | null>(null);
   const { toast } = useToast();
 
   // Live quotes from /api/quotes — these are AI-generated from accepted
@@ -144,10 +148,63 @@ export default function DealsPage() {
     toast(`Quote exported · $${totals.total.toFixed(2)} for ${buyer}`);
   }
 
-  // handleSend was removed alongside the "Send Quote" button — it only
-  // showed a toast and didn't actually persist a Quote, which made the
-  // builder feel functional when it isn't. Bulk-quote persistence is
-  // queued as a real slice; until then Export CSV is the honest action.
+  // Bulk-quote create — wires the builder to POST /api/quotes which
+  // creates one Quote record per line item. Each quote gets its own
+  // shareToken so the operator can paste a per-line buyer link from
+  // the result modal. Pricing strategy mirrors the builder's own
+  // math (subtotal − discount + pro-rata shipping).
+  async function handleCreateBulk() {
+    if (lines.length === 0) {
+      toast("Add at least one line item before creating quotes", "error");
+      return;
+    }
+    if (!buyer.trim()) {
+      toast("Buyer company is required", "error");
+      return;
+    }
+    setBulkCreating(true);
+    try {
+      const r = await fetch("/api/quotes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          buyerCompany: buyer.trim(),
+          buyerName: contact.trim() || buyer.trim(),
+          paymentTerms: terms,
+          shippingTerms: "FOB Origin",
+          validForDays: validDays,
+          discountPct: discount,
+          shippingCents: Math.round(shipping * 100),
+          lines: lines.map((l) => ({
+            product: l.product,
+            sku: l.sku,
+            qty: l.qty,
+            price: l.price,
+          })),
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Create failed (${r.status})`);
+      const quotes = (d.quotes ?? []) as typeof bulkResult extends null
+        ? never
+        : NonNullable<typeof bulkResult>["quotes"];
+      setBulkResult({ quotes });
+      toast(`Created ${quotes.length} quote${quotes.length === 1 ? "" : "s"}`, "success");
+      // Refresh the live-quotes panel so the new ones appear there too.
+      try {
+        const rr = await fetch("/api/quotes", { cache: "no-store" });
+        const dd = await rr.json();
+        const list: RealQuote[] = dd?.quotes ?? [];
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setRealQuotes(list);
+      } catch {}
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Create failed", "error");
+    } finally {
+      setBulkCreating(false);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -168,37 +225,46 @@ export default function DealsPage() {
           <button
             onClick={handleExport}
             className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
-            title="Download the bulk-quote draft below as a CSV. The actual quote isn't stored — see the banner below the export button."
+            title="Download the bulk-quote draft as a CSV — useful for procurement teams who want the line items in a spreadsheet"
           >
             <Download className="h-4 w-4" /> Export CSV
           </button>
-          {/*
-            "Send Quote" button removed — it called handleSend() which only
-            showed a toast and did NOT create a Quote in the store. Misleading.
-            Real quotes are auto-generated from accepted outreach drafts (the
-            "Live quotes" panel below). The bulk builder is a preview for a
-            future feature; for now Export CSV is the only honest action.
-          */}
+          <button
+            onClick={handleCreateBulk}
+            disabled={bulkCreating || lines.length === 0 || !buyer.trim()}
+            className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow disabled:opacity-60"
+            title="Create one Quote per line in the store. Each quote gets its own shareable buyer link."
+          >
+            {bulkCreating ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Creating…
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4" /> Create {lines.length} quote{lines.length === 1 ? "" : "s"}
+              </>
+            )}
+          </button>
         </div>
       </div>
 
       {/* Live quotes — auto-generated from accepted outreach drafts */}
       <RealQuotesPanel quotes={realQuotes} />
 
-      {/* Preview banner explaining the manual builder below */}
-      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber/5 px-4 py-3">
+      {/* Two-flow note explaining when to use which path. */}
+      <div className="rounded-xl border border-brand-500/30 bg-brand-500/5 px-4 py-3">
         <div className="flex items-start gap-3 text-[12px]">
-          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-amber/15">
-            <Sparkles className="h-3.5 w-3.5 text-accent-amber" />
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-brand-500/15">
+            <Sparkles className="h-3.5 w-3.5 text-brand-300" />
           </div>
           <div className="flex-1">
-            <span className="font-semibold text-accent-amber">Bulk quote preview</span>
+            <span className="font-semibold text-brand-200">Two ways to create quotes</span>
             <span className="text-ink-secondary">
               {" "}
-              — The single-product flow above is how AVYN actually generates quotes today: AI Outreach Agent
-              drafts → buyer accepts → Quote Agent prices it. The multi-line builder below is a preview of
-              the bulk-quote feature; the &quot;Send&quot; button currently exports CSV / shows a toast and
-              does NOT create a Quote in the store.
+              — <strong>Auto:</strong> AI Outreach Agent drafts → buyer accepts → Quote Agent prices.
+              Lands in the panel above. <strong>Manual bulk:</strong> use the builder below for
+              multi-line / RFP-style quotes. <strong>Create N quotes</strong> in the header writes
+              one Quote per line to the store; each gets its own shareable buyer link.
             </span>
           </div>
         </div>
@@ -348,6 +414,137 @@ export default function DealsPage() {
             </p>
           </div>
         </aside>
+      </div>
+
+      {bulkResult && (
+        <BulkResultModal
+          quotes={bulkResult.quotes}
+          buyerName={contact || buyer}
+          onClose={() => setBulkResult(null)}
+          onCopied={(label) => toast(`${label} copied to clipboard`, "success")}
+        />
+      )}
+    </div>
+  );
+}
+
+function BulkResultModal({
+  quotes,
+  buyerName,
+  onClose,
+  onCopied,
+}: {
+  quotes: Array<{ id: string; productName: string; total: number; shareToken: string; quantity: number }>;
+  buyerName: string;
+  onClose: () => void;
+  onCopied: (label: string) => void;
+}) {
+  // Build the per-quote share URL the operator would paste in an email.
+  // Origin comes from window so this works on whatever domain we're on.
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+
+  async function copy(text: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      onCopied(label);
+    } catch {
+      // Older browsers / non-https — fall back to a prompt so the
+      // operator can still grab the value.
+      window.prompt(`Copy this ${label.toLowerCase()}:`, text);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg-app/80 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-2xl rounded-2xl border border-bg-border bg-bg-card p-6 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5 text-accent-green" />
+            <div>
+              <div className="text-base font-semibold">
+                Created {quotes.length} quote{quotes.length === 1 ? "" : "s"}
+              </div>
+              <div className="text-[11px] text-ink-tertiary">
+                For {buyerName} — each line is its own Quote with a shareable buyer link
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-4 max-h-[50vh] overflow-y-auto rounded-md border border-bg-border">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-bg-card">
+              <tr className="border-b border-bg-border text-left text-[10px] uppercase tracking-wider text-ink-tertiary">
+                <th className="px-3 py-2 font-medium">Product</th>
+                <th className="px-3 py-2 text-right font-medium">Qty</th>
+                <th className="px-3 py-2 text-right font-medium">Total</th>
+                <th className="px-3 py-2 text-right font-medium">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {quotes.map((q) => {
+                const url = `${origin}/quote/${q.id}?t=${encodeURIComponent(q.shareToken)}`;
+                return (
+                  <tr key={q.id} className="border-t border-bg-border">
+                    <td className="px-3 py-2">
+                      <div className="font-medium text-ink-primary truncate max-w-[260px]" title={q.productName}>
+                        {q.productName}
+                      </div>
+                      <div className="text-[10px] text-ink-tertiary font-mono">{q.id}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right text-ink-secondary">{q.quantity}</td>
+                    <td className="px-3 py-2 text-right text-ink-primary font-mono">
+                      ${q.total.toFixed(2)}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => copy(url, "Buyer link")}
+                          title="Copy the share URL the buyer can open"
+                          className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-app px-2 py-1 text-[10px] text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+                        >
+                          <Copy className="h-3 w-3" />
+                          Copy link
+                        </button>
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Open the buyer view in a new tab"
+                          className="grid h-6 w-6 place-items-center rounded-md border border-bg-border bg-bg-app text-ink-tertiary hover:text-ink-primary"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between">
+          <div className="text-[10px] text-ink-tertiary">
+            All quotes start in <strong>draft</strong> status — open one + send the link to the buyer.
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-gradient-brand px-3 py-2 text-[12px] font-semibold shadow-glow"
+          >
+            Done
+          </button>
+        </div>
       </div>
     </div>
   );
