@@ -168,6 +168,10 @@ export default function QueuePage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkApprovalConfirm, setBulkApprovalConfirm] = useState(false);
+  // Per-failure drilldown surfaces after a bulk action returns mixed
+  // results -- operator can see which buyer + reason for each failure
+  // without trawling logs.
+  const [bulkFailures, setBulkFailures] = useState<Array<{ id: string; reason: string }>>([]);
   // Cadence rows can expand inline to reveal an action drawer (send /
   // skip / record outcome) so the operator works the queue without
   // navigating away. Non-cadence rows still deep-link.
@@ -261,6 +265,15 @@ export default function QueuePage() {
             ? `${d.summary.succeeded} sent, ${d.summary.failed} failed of ${d.summary.total}`
             : `${d.summary.succeeded} skipped, ${d.summary.failed} failed of ${d.summary.total}`,
       });
+      // Stash per-failure rows so the drilldown panel can render them
+      // after the bulk-action bar disappears.
+      const failures = (d.results ?? [])
+        .filter((r: { ok: boolean }) => !r.ok)
+        .map((r: { id: string; reason?: string }) => ({
+          id: r.id,
+          reason: r.reason ?? "Unknown error",
+        }));
+      setBulkFailures(failures);
       setSelected(new Set());
       setBulkApprovalConfirm(false);
       await load();
@@ -369,6 +382,41 @@ export default function QueuePage() {
     };
   }, [data]);
 
+  // The set of cadence pending items currently visible (after filters).
+  // Drives the select-all checkbox state + the "select all visible" action.
+  const selectableIds = useMemo(
+    () => filtered.filter((i) => i.ref.kind === "cadence" && i.status === "pending").map((i) => i.id),
+    [filtered],
+  );
+  const allVisibleSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+  const someVisibleSelected = !allVisibleSelected && selectableIds.some((id) => selected.has(id));
+
+  function toggleSelectAllVisible() {
+    if (allVisibleSelected) {
+      // Deselect everything visible
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const id of selectableIds) next.delete(id);
+        return next;
+      });
+    } else {
+      // Add all visible to selection
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const id of selectableIds) next.add(id);
+        return next;
+      });
+    }
+  }
+
+  // Buyer lookup by id for the drilldown panel (so we can show
+  // "FitLife Co.: bounced" instead of an opaque cadence-item id).
+  const itemById = useMemo(() => {
+    const map = new Map<string, QueueItem>();
+    for (const i of data?.items ?? []) map.set(i.id, i);
+    return map;
+  }, [data]);
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -475,55 +523,119 @@ export default function QueuePage() {
         </div>
       )}
 
-      {/* Bulk action bar -- floats at top when N items selected */}
-      {selected.size > 0 && (
+      {/* Bulk action bar -- floats at top when N items selected OR
+          when there's at least one selectable item visible (so the
+          select-all checkbox is always reachable). */}
+      {(selected.size > 0 || selectableIds.length > 0) && (
         <div className="sticky top-0 z-30 -mx-1 mb-2 flex flex-wrap items-center gap-3 rounded-xl border border-accent-blue/40 bg-bg-panel/95 px-4 py-3 shadow-lg backdrop-blur">
-          <div className="text-[12px] font-semibold text-accent-blue">
-            {selected.size} item{selected.size === 1 ? "" : "s"} selected
-          </div>
-          {/* Approval confirmation strip (shown only after a 412 came back) */}
-          {actionToast?.tone === "err" && actionToast.text.includes("approval") && (
-            <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-accent-amber">
-              <input
-                type="checkbox"
-                checked={bulkApprovalConfirm}
-                onChange={(e) => setBulkApprovalConfirm(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-bg-border accent-accent-amber"
-              />
-              I reviewed all selected — approve to send
-            </label>
-          )}
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={() => void bulkAct("send")}
-              className="inline-flex items-center gap-1 rounded-md bg-accent-blue px-3 py-1.5 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {bulkBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-              Send all
-            </button>
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={() => void bulkAct("skip")}
-              className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
-            >
-              <SkipForward className="h-3 w-3" />
-              Skip all
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSelected(new Set());
-                setBulkApprovalConfirm(false);
+          {/* Select-all visible -- tri-state: empty / indeterminate / all */}
+          <label className="inline-flex cursor-pointer items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              ref={(el) => {
+                if (el) el.indeterminate = someVisibleSelected;
               }}
-              className="rounded-md border border-bg-border bg-bg-app p-1.5 text-ink-tertiary hover:text-ink-primary"
-              aria-label="Clear selection"
+              onChange={toggleSelectAllVisible}
+              className="h-3.5 w-3.5 rounded border-bg-border accent-accent-blue"
+              aria-label="Select all visible"
+            />
+            <span className="text-[11px] text-ink-secondary">
+              {allVisibleSelected
+                ? `All ${selectableIds.length} selected`
+                : someVisibleSelected
+                  ? `Select all ${selectableIds.length} visible`
+                  : `Select all ${selectableIds.length} visible`}
+            </span>
+          </label>
+          {selected.size > 0 && (
+            <div className="text-[12px] font-semibold text-accent-blue">
+              {selected.size} item{selected.size === 1 ? "" : "s"} selected
+            </div>
+          )}
+          {selected.size > 0 && (
+            <>
+              {/* Approval confirmation strip (shown only after a 412 came back) */}
+              {actionToast?.tone === "err" && actionToast.text.includes("approval") && (
+                <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-accent-amber">
+                  <input
+                    type="checkbox"
+                    checked={bulkApprovalConfirm}
+                    onChange={(e) => setBulkApprovalConfirm(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-bg-border accent-accent-amber"
+                  />
+                  I reviewed all selected — approve to send
+                </label>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={bulkBusy}
+                  onClick={() => void bulkAct("send")}
+                  className="inline-flex items-center gap-1 rounded-md bg-accent-blue px-3 py-1.5 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                >
+                  {bulkBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                  Send all
+                </button>
+                <button
+                  type="button"
+                  disabled={bulkBusy}
+                  onClick={() => void bulkAct("skip")}
+                  className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
+                >
+                  <SkipForward className="h-3 w-3" />
+                  Skip all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelected(new Set());
+                    setBulkApprovalConfirm(false);
+                  }}
+                  className="rounded-md border border-bg-border bg-bg-app p-1.5 text-ink-tertiary hover:text-ink-primary"
+                  aria-label="Clear selection"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Drilldown panel -- shows after a bulk action returns failures.
+          Operator gets buyer name + reason per failure so they can
+          fix root cause + retry, instead of triaging from the toast. */}
+      {bulkFailures.length > 0 && (
+        <div className="rounded-md border border-accent-red/40 bg-accent-red/5 px-3 py-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-[12px] font-semibold text-accent-red">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {bulkFailures.length} failure{bulkFailures.length === 1 ? "" : "s"} from last bulk action
+            </div>
+            <button
+              type="button"
+              onClick={() => setBulkFailures([])}
+              className="text-ink-tertiary hover:text-ink-primary"
+              aria-label="Dismiss"
             >
               <X className="h-3 w-3" />
             </button>
           </div>
+          <ul className="space-y-1">
+            {bulkFailures.map((f) => {
+              const item = itemById.get(f.id);
+              const label = item?.buyerName || item?.buyerCompany || f.id;
+              return (
+                <li key={f.id} className="flex items-start gap-2 text-[11px]">
+                  <span className="font-mono text-ink-tertiary">·</span>
+                  <span className="font-medium text-ink-primary">{label}</span>
+                  <span className="text-ink-tertiary">—</span>
+                  <span className="flex-1 text-accent-red">{f.reason}</span>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       )}
 
