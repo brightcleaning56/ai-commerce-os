@@ -869,18 +869,444 @@ const buyerFlow: Flow = {
 const supplierFlow: Flow = {
   persona: "supplier",
   steps: [
+    // ── Step 1: Identity + legal ──────────────────────────────────
     {
-      id: "placeholder",
-      label: "Tell us what you make",
-      blurb:
-        "Slice 1 placeholder — slice 5 fills in: certifications, manufacturing capabilities, MOQ, warehouse locations, shipping methods, production capacity, distribution regions, plus dynamic industry sub-questions.",
+      id: "identity",
+      label: "Company identity",
+      blurb: "We use this on your public verified-supplier profile + on every contract / quote we generate.",
+      questions: [
+        { id: "legalName", type: "text", label: "Legal company name", required: true, maxLength: 120, placeholder: "As registered with your government" },
+        { id: "tradeName", type: "text", label: "Trade name (DBA)", maxLength: 120, helper: "If different from legal name." },
+        { id: "fullName", type: "text", label: "Your name", required: true, maxLength: 120 },
+        { id: "title", type: "text", label: "Your title", maxLength: 80, placeholder: "Founder / Sales Director / Account Manager" },
+        { id: "email", type: "text", label: "Work email", required: true, maxLength: 200 },
+        { id: "phone", type: "text", label: "Direct phone", maxLength: 40 },
+        { id: "website", type: "text", label: "Company website", maxLength: 200 },
+        {
+          id: "kind",
+          type: "select",
+          label: "What kind of supplier are you?",
+          required: true,
+          options: [
+            { value: "Manufacturer", label: "Manufacturer", description: "You make the product yourself." },
+            { value: "Wholesaler", label: "Wholesaler", description: "You buy at scale + resell." },
+            { value: "Distributor", label: "Distributor", description: "You handle inventory + distribution for brands." },
+            { value: "Dropship", label: "Dropship supplier", description: "You ship direct-to-consumer for retailers." },
+            { value: "Trader", label: "Trader / Broker", description: "You connect manufacturers + buyers." },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 2: Industries ────────────────────────────────────────
+    //
+    // Multi-select. The selection here drives the conditional
+    // industry-specific sub-question steps below (showIf.includes).
+    {
+      id: "industries",
+      label: "What industries do you serve?",
+      blurb: "Multi-select. Pick all that apply -- we'll ask follow-up questions specific to each.",
       questions: [
         {
-          id: "legalName",
-          type: "text",
-          label: "Legal company name",
+          id: "industries",
+          type: "multiselect",
+          label: "Industries",
           required: true,
+          options: [
+            { value: "agriculture", label: "Agriculture & Raw Materials", triggers: ["agri-questions"] },
+            { value: "apparel", label: "Apparel & Accessories", triggers: ["apparel-questions"] },
+            { value: "beauty", label: "Beauty & Personal Care", triggers: ["beauty-questions"] },
+            { value: "electronics", label: "Electronics & Tech", triggers: ["electronics-questions"] },
+            { value: "food-bev", label: "Food & Beverage", triggers: ["food-questions"] },
+            { value: "home-goods", label: "Home Goods & Furniture" },
+            { value: "automotive", label: "Automotive Parts" },
+            { value: "industrial", label: "Industrial / B2B Equipment" },
+            { value: "pet", label: "Pet Products" },
+            { value: "sports", label: "Sports & Outdoors" },
+            { value: "toys", label: "Toys & Hobbies" },
+            { value: "health", label: "Health & Wellness" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 3a: Agriculture-specific sub-questions ───────────────
+    //
+    // Only renders when industries includes "agriculture".
+    // Demonstrates the dynamic-question pattern Eric called out.
+    {
+      id: "agri-questions",
+      label: "Agriculture specifics",
+      blurb: "We ask these only because you selected Agriculture. Skip irrelevant fields.",
+      showIf: { stepId: "industries", questionId: "industries", includes: "agriculture" },
+      questions: [
+        {
+          id: "cropTypes",
+          type: "multiselect",
+          label: "Crop types you produce",
+          options: [
+            { value: "grains", label: "Grains (wheat, rice, corn, oats)" },
+            { value: "produce-fresh", label: "Fresh produce (vegetables / fruit)" },
+            { value: "dairy", label: "Dairy" },
+            { value: "meat", label: "Meat / poultry / seafood" },
+            { value: "coffee-tea", label: "Coffee / tea" },
+            { value: "cocoa-spice", label: "Cocoa / spices" },
+            { value: "fiber", label: "Fiber crops (cotton, hemp, flax)" },
+            { value: "raw-materials", label: "Raw materials (timber, sugar, rubber)" },
+            { value: "specialty", label: "Specialty / heirloom" },
+          ],
+        },
+        {
+          id: "annualProductionVolume",
+          type: "text",
+          label: "Annual production volume",
+          maxLength: 80,
+          placeholder: "e.g. 2,000 metric tons / 50,000 lbs",
+          helper: "Free-form -- we'll parse units in step 5.",
+        },
+        {
+          id: "seasonalAvailability",
+          type: "multiselect",
+          label: "Months you have product available",
+          options: [
+            { value: "jan", label: "Jan" }, { value: "feb", label: "Feb" }, { value: "mar", label: "Mar" },
+            { value: "apr", label: "Apr" }, { value: "may", label: "May" }, { value: "jun", label: "Jun" },
+            { value: "jul", label: "Jul" }, { value: "aug", label: "Aug" }, { value: "sep", label: "Sep" },
+            { value: "oct", label: "Oct" }, { value: "nov", label: "Nov" }, { value: "dec", label: "Dec" },
+          ],
+        },
+        {
+          id: "growingMethod",
+          type: "select",
+          label: "Growing method",
+          options: [
+            { value: "conventional", label: "Conventional" },
+            { value: "organic-certified", label: "Organic (certified)" },
+            { value: "organic-transitioning", label: "Organic (transitioning)" },
+            { value: "regenerative", label: "Regenerative" },
+            { value: "hydroponic", label: "Hydroponic / vertical" },
+            { value: "fair-trade", label: "Fair Trade certified" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 3b: Apparel-specific sub-questions ───────────────────
+    {
+      id: "apparel-questions",
+      label: "Apparel specifics",
+      showIf: { stepId: "industries", questionId: "industries", includes: "apparel" },
+      questions: [
+        {
+          id: "apparelCategories",
+          type: "multiselect",
+          label: "Apparel categories",
+          options: [
+            { value: "tops", label: "Tops / Shirts" },
+            { value: "bottoms", label: "Bottoms / Pants" },
+            { value: "outerwear", label: "Outerwear" },
+            { value: "activewear", label: "Activewear" },
+            { value: "intimate", label: "Intimate apparel" },
+            { value: "accessories", label: "Accessories" },
+            { value: "footwear", label: "Footwear" },
+            { value: "kids", label: "Kids / babywear" },
+          ],
+        },
+        {
+          id: "fabricSpecialties",
+          type: "tags",
+          label: "Fabric specialties",
+          placeholder: "e.g. organic cotton, recycled polyester, merino wool",
+        },
+        {
+          id: "seasonsServed",
+          type: "multiselect",
+          label: "Seasons you collection-cycle for",
+          options: [
+            { value: "spring-summer", label: "Spring/Summer" },
+            { value: "fall-winter", label: "Fall/Winter" },
+            { value: "resort", label: "Resort / Cruise" },
+            { value: "year-round", label: "Year-round basics" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 3c: Beauty / personal care ───────────────────────────
+    {
+      id: "beauty-questions",
+      label: "Beauty specifics",
+      showIf: { stepId: "industries", questionId: "industries", includes: "beauty" },
+      questions: [
+        {
+          id: "beautyCategories",
+          type: "multiselect",
+          label: "Categories",
+          options: [
+            { value: "skincare", label: "Skincare" }, { value: "haircare", label: "Haircare" },
+            { value: "makeup", label: "Color cosmetics / makeup" }, { value: "fragrance", label: "Fragrance" },
+            { value: "personal-care", label: "Personal care (soap, deo, etc.)" },
+            { value: "supplements", label: "Beauty supplements" },
+          ],
+        },
+        {
+          id: "regulatoryMarkets",
+          type: "multiselect",
+          label: "Markets you're regulatory-compliant in",
+          options: [
+            { value: "fda-us", label: "FDA (US)" }, { value: "ec-eu", label: "EC 1223/2009 (EU)" },
+            { value: "mhra-uk", label: "MHRA (UK)" }, { value: "tga-au", label: "TGA (AU)" },
+            { value: "ccpsa-ca", label: "CCPSA (CA)" }, { value: "anvisa-br", label: "ANVISA (BR)" },
+          ],
+        },
+        {
+          id: "claims",
+          type: "multiselect",
+          label: "Product claims / formulations",
+          options: [
+            { value: "vegan", label: "Vegan" }, { value: "cruelty-free", label: "Cruelty-free" },
+            { value: "organic", label: "Organic certified" }, { value: "clean", label: "Clean / non-toxic" },
+            { value: "fragrance-free", label: "Fragrance-free options" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 3d: Electronics ──────────────────────────────────────
+    {
+      id: "electronics-questions",
+      label: "Electronics specifics",
+      showIf: { stepId: "industries", questionId: "industries", includes: "electronics" },
+      questions: [
+        {
+          id: "electronicsCategories",
+          type: "multiselect",
+          label: "Categories",
+          options: [
+            { value: "consumer-electronics", label: "Consumer electronics" },
+            { value: "components", label: "Components / parts" },
+            { value: "wearables", label: "Wearables / IoT" },
+            { value: "smart-home", label: "Smart home" },
+            { value: "audio", label: "Audio / headphones" },
+            { value: "computing", label: "Computing / accessories" },
+          ],
+        },
+        {
+          id: "certificationsElectronics",
+          type: "multiselect",
+          label: "Certifications you carry",
+          options: [
+            { value: "fcc", label: "FCC (US)" }, { value: "ce", label: "CE (EU)" }, { value: "ukca", label: "UKCA (UK)" },
+            { value: "rohs", label: "RoHS" }, { value: "reach", label: "REACH" }, { value: "ul", label: "UL" },
+            { value: "etl", label: "ETL" }, { value: "wpc", label: "Qi (WPC)" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 3e: Food & beverage ──────────────────────────────────
+    {
+      id: "food-questions",
+      label: "Food & Beverage specifics",
+      showIf: { stepId: "industries", questionId: "industries", includes: "food-bev" },
+      questions: [
+        {
+          id: "foodCategories",
+          type: "multiselect",
+          label: "Categories",
+          options: [
+            { value: "snacks", label: "Snacks" }, { value: "beverages", label: "Beverages (non-alc)" },
+            { value: "alcohol", label: "Alcoholic beverages" }, { value: "bakery", label: "Bakery" },
+            { value: "dairy", label: "Dairy" }, { value: "meat-seafood", label: "Meat / seafood" },
+            { value: "produce", label: "Fresh produce" }, { value: "frozen", label: "Frozen" },
+            { value: "supplements-food", label: "Supplements / functional foods" },
+          ],
+        },
+        {
+          id: "foodCerts",
+          type: "multiselect",
+          label: "Food safety + standards",
+          options: [
+            { value: "fda-registered", label: "FDA registered" }, { value: "haccp", label: "HACCP" },
+            { value: "sqf", label: "SQF" }, { value: "brc", label: "BRC" }, { value: "iso-22000", label: "ISO 22000" },
+            { value: "non-gmo", label: "Non-GMO Project" }, { value: "kosher", label: "Kosher" },
+            { value: "halal", label: "Halal" }, { value: "organic-usda", label: "USDA Organic" },
+          ],
+        },
+        { id: "shelfLifeDays", type: "number", label: "Average shelf life (days)", min: 1, max: 3650 },
+      ],
+    },
+
+    // ── Step 4: Capabilities (universal) ──────────────────────────
+    {
+      id: "capabilities",
+      label: "Manufacturing & capabilities",
+      blurb: "What you can do at scale -- drives buyer matching.",
+      questions: [
+        {
+          id: "capabilities",
+          type: "multiselect",
+          label: "Capabilities you offer",
+          options: [
+            { value: "private-label", label: "Private label / White label" },
+            { value: "custom-formulation", label: "Custom formulation / R&D" },
+            { value: "design", label: "Design services" },
+            { value: "packaging", label: "Custom packaging" },
+            { value: "fulfillment", label: "Fulfillment / 3PL" },
+            { value: "samples", label: "Sample production" },
+            { value: "dropshipping", label: "Dropshipping" },
+          ],
+        },
+        {
+          id: "leadTimeDays",
+          type: "number",
+          label: "Standard lead time (days, sample to ship)",
+          required: true,
+          min: 1,
+          max: 365,
+          helper: "Typical: 14-60 for most categories.",
+        },
+        {
+          id: "monthlyCapacity",
+          type: "text",
+          label: "Monthly production capacity",
+          maxLength: 80,
+          placeholder: "e.g. 50,000 units / month",
+        },
+        {
+          id: "moqUnits",
+          type: "number",
+          label: "Minimum order quantity (units)",
+          required: true,
+          min: 1,
+          max: 10_000_000,
+        },
+      ],
+    },
+
+    // ── Step 5: Distribution + warehouses ─────────────────────────
+    {
+      id: "distribution",
+      label: "Warehouses & distribution",
+      blurb: "Where you ship from + the regions you can serve. Powers lane analytics.",
+      questions: [
+        {
+          id: "primaryWarehouse",
+          type: "address",
+          label: "Primary warehouse / shipping origin",
+          helper: "Add more on /portal after onboarding.",
+        },
+        {
+          id: "warehouseCount",
+          type: "number",
+          label: "How many warehouses do you operate?",
+          min: 1,
+          max: 100,
+        },
+        {
+          id: "distributionRegions",
+          type: "multiselect",
+          label: "Regions you ship to",
+          required: true,
+          options: [
+            { value: "us-domestic", label: "US Domestic" },
+            { value: "north-america", label: "North America (Canada/Mexico)" },
+            { value: "south-america", label: "South America" },
+            { value: "eu", label: "European Union" },
+            { value: "uk", label: "United Kingdom" },
+            { value: "middle-east", label: "Middle East" },
+            { value: "africa", label: "Africa" },
+            { value: "asia", label: "Asia" },
+            { value: "oceania", label: "Australia / NZ / Oceania" },
+            { value: "global", label: "Global -- ship anywhere" },
+          ],
+        },
+        {
+          id: "shippingMethods",
+          type: "multiselect",
+          label: "Shipping methods you support",
+          options: [
+            { value: "ocean-fcl", label: "Ocean (FCL)" },
+            { value: "ocean-lcl", label: "Ocean (LCL)" },
+            { value: "air-cargo", label: "Air cargo" },
+            { value: "ltl", label: "Truck (LTL)" },
+            { value: "parcel", label: "Parcel (UPS/FedEx/USPS)" },
+            { value: "rail", label: "Rail" },
+            { value: "buyer-arrange", label: "Buyer arranges (FOB)" },
+          ],
+        },
+        {
+          id: "incoterms",
+          type: "multiselect",
+          label: "Incoterms you offer",
+          options: [
+            { value: "EXW", label: "EXW (Ex Works)" }, { value: "FCA", label: "FCA" },
+            { value: "FOB", label: "FOB (Free on Board)" }, { value: "CIF", label: "CIF" },
+            { value: "DDP", label: "DDP (Delivered Duty Paid)" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 6: Verification documents (slice 7 wires actual upload) ──
+    {
+      id: "verification",
+      label: "Verification documents",
+      blurb: "Boost your trust score by uploading verification docs. Optional now -- you can add later.",
+      questions: [
+        {
+          id: "businessLicense",
+          type: "file",
+          label: "Business license / registration",
+          helper: "PDF or image. Slice 7 wires the actual upload.",
+        },
+        {
+          id: "insurance",
+          type: "file",
+          label: "General liability insurance",
+          helper: "Adds a verified-insured badge to your public profile.",
+        },
+        {
+          id: "qualityCerts",
+          type: "file",
+          label: "Quality certifications",
+          helper: "ISO, BRC, SQF, etc. -- whichever you carry.",
+        },
+        {
+          id: "factoryAudit",
+          type: "file",
+          label: "Most recent factory audit (if applicable)",
+          helper: "Sedex / SMETA / BSCI / Higg.",
+        },
+      ],
+    },
+
+    // ── Step 7: Public profile + matching ─────────────────────────
+    {
+      id: "profile",
+      label: "Public verified-supplier profile",
+      blurb: "How buyers will see you. Edit anytime in /portal.",
+      questions: [
+        {
+          id: "headline",
+          type: "text",
+          label: "Headline",
           maxLength: 120,
+          placeholder: "e.g. 'USDA Organic spice supplier -- 50+ SKUs, FDA registered'",
+          helper: "First thing buyers see on your card. Be specific.",
+        },
+        {
+          id: "elevatorPitch",
+          type: "textarea",
+          label: "Elevator pitch (3-5 sentences)",
+          maxLength: 600,
+          placeholder: "Who you serve, what makes you different, top categories.",
+        },
+        {
+          id: "matchOptIn",
+          type: "boolean",
+          label: "Let AVYN's AI auto-match me to relevant buyers",
+          helper: "We'll surface your profile to buyers whose needs fit. You decide whether to engage on each match.",
         },
       ],
     },
