@@ -2,6 +2,7 @@ import {
   Activity,
   Building2,
   GitBranch,
+  Globe,
   Layers,
   Lightbulb,
   LayoutDashboard,
@@ -84,6 +85,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Business Directory", href: "/admin/businesses", icon: Building2, badge: "NEW", requires: "leads:read" },
       // Supply graph is system-level data infrastructure.
       { label: "Supply Graph", href: "/admin/edges", icon: GitBranch, badge: "NEW", requires: "system:read" },
+      // Cross-supplier shipping-lane rollup (Layer 6 aggregate view).
+      { label: "Distribution Lanes", href: "/admin/lanes", icon: Globe, badge: "NEW", requires: "leads:read" },
     ],
   },
   {
