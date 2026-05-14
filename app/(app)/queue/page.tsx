@@ -3,6 +3,9 @@ import {
   AlertTriangle,
   ArrowDownCircle,
   ArrowUpCircle,
+  Check,
+  ChevronDown,
+  ChevronRight,
   Inbox,
   Loader2,
   Mail,
@@ -10,7 +13,10 @@ import {
   Phone,
   RefreshCw,
   Search,
+  Send,
+  SkipForward,
   Voicemail,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -150,6 +156,12 @@ export default function QueuePage() {
   const [channelFilter, setChannelFilter] = useState<QueueChannel | "all">("all");
   const [directionFilter, setDirectionFilter] = useState<QueueDirection | "all">("all");
   const [search, setSearch] = useState("");
+  // Cadence rows can expand inline to reveal an action drawer (send /
+  // skip / record outcome) so the operator works the queue without
+  // navigating away. Non-cadence rows still deep-link.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [actingOnId, setActingOnId] = useState<string | null>(null);
+  const [actionToast, setActionToast] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -177,6 +189,54 @@ export default function QueuePage() {
     const i = setInterval(() => void load(), 30_000);
     return () => clearInterval(i);
   }, [load]);
+
+  /**
+   * Cadence-item action — POSTs to /api/cadence-items/[id]/action
+   * which sends the email/SMS (action="send"), records a manual
+   * outcome (action="outcome", e.g. for call channels), or skips
+   * the step (action="skip"). All three mark the item done so it
+   * drops off the inbox + record outcome on the parent enrollment
+   * for branch evaluation on the next cron tick.
+   */
+  async function actOnCadenceItem(
+    itemId: string,
+    payload: { action: "send" } | { action: "outcome"; outcome: string } | { action: "skip" },
+  ) {
+    setActingOnId(itemId);
+    setActionToast(null);
+    try {
+      const r = await fetch(`/api/cadence-items/${itemId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? `Action failed (${r.status})`);
+      // Tone "ok" includes "sent" successes AND skip/outcome (no send)
+      const text =
+        payload.action === "send"
+          ? d.sent
+            ? "Sent — item marked done"
+            : `Send failed: ${d.errorMessage ?? "unknown"} — item marked failed`
+          : payload.action === "skip"
+            ? "Skipped"
+            : `Recorded outcome: ${payload.outcome}`;
+      setActionToast({
+        tone: payload.action === "send" && !d.sent ? "err" : "ok",
+        text,
+      });
+      setExpandedId(null);
+      await load();
+    } catch (e) {
+      setActionToast({
+        tone: "err",
+        text: e instanceof Error ? e.message : "Action failed",
+      });
+    } finally {
+      setActingOnId(null);
+    }
+  }
 
   const filtered = useMemo(() => {
     if (!data) return [] as QueueItem[];
@@ -307,6 +367,26 @@ export default function QueuePage() {
         </div>
       )}
 
+      {actionToast && (
+        <div
+          className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${
+            actionToast.tone === "ok"
+              ? "border-accent-green/30 bg-accent-green/5 text-accent-green"
+              : "border-accent-red/30 bg-accent-red/5 text-accent-red"
+          }`}
+        >
+          {actionToast.tone === "ok" ? (
+            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          )}
+          <div className="flex-1">{actionToast.text}</div>
+          <button onClick={() => setActionToast(null)}>
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
       {/* Source breakdown — small honesty footer so operator knows what's in here */}
       {data && (
         <div className="rounded-md border border-bg-border bg-bg-card/40 px-3 py-2 text-[11px] text-ink-tertiary">
@@ -346,7 +426,16 @@ export default function QueuePage() {
       ) : (
         <div className="space-y-1.5">
           {filtered.map((item) => (
-            <QueueRow key={item.id} item={item} />
+            <QueueRow
+              key={item.id}
+              item={item}
+              expanded={expandedId === item.id}
+              acting={actingOnId === item.id}
+              onToggleExpand={() =>
+                setExpandedId((prev) => (prev === item.id ? null : item.id))
+              }
+              onAction={actOnCadenceItem}
+            />
           ))}
         </div>
       )}
@@ -423,7 +512,22 @@ function FilterPill({
   );
 }
 
-function QueueRow({ item }: { item: QueueItem }) {
+function QueueRow({
+  item,
+  expanded,
+  acting,
+  onToggleExpand,
+  onAction,
+}: {
+  item: QueueItem;
+  expanded: boolean;
+  acting: boolean;
+  onToggleExpand: () => void;
+  onAction: (
+    itemId: string,
+    payload: { action: "send" } | { action: "outcome"; outcome: string } | { action: "skip" },
+  ) => void;
+}) {
   const Icon =
     item.ref.kind === "voicemail" ? Voicemail : CHANNEL_ICON[item.channel];
   const directionIcon =
@@ -437,44 +541,184 @@ function QueueRow({ item }: { item: QueueItem }) {
     item.buyerName && item.buyerCompany && item.buyerName !== item.buyerCompany
       ? item.buyerCompany
       : item.to || item.from;
-  return (
-    <Link
-      href={detailHref(item)}
-      className="group block rounded-lg border border-bg-border bg-bg-card px-3 py-2.5 transition-colors hover:border-accent-blue/40 hover:bg-bg-hover"
-    >
-      <div className="flex items-center gap-3">
-        {/* Channel icon */}
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-bg-app">
-          <Icon className="h-4 w-4 text-ink-secondary" />
-        </div>
+  // Cadence rows expand inline to reveal the action drawer; everything
+  // else still deep-links to the source detail view (where the operator
+  // already has full UI for that record type).
+  const isCadence = item.ref.kind === "cadence";
 
-        {/* Contact + body */}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            {directionIcon}
-            <span className="truncate text-[13px] font-semibold text-ink-primary">{contact}</span>
-            {subContact && subContact !== contact && (
-              <span className="truncate text-[11px] text-ink-tertiary">· {subContact}</span>
-            )}
-          </div>
-          <div className="mt-0.5 truncate text-[11px] text-ink-tertiary">
-            {item.subject ? <span className="font-medium">{item.subject}</span> : null}
-            {item.subject && item.body ? " — " : null}
-            {item.body?.slice(0, 200)}
-          </div>
-        </div>
+  const headerInner = (
+    <div className="flex items-center gap-3">
+      {isCadence ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleExpand();
+          }}
+          className="text-ink-tertiary hover:text-ink-primary"
+          aria-label={expanded ? "Collapse" : "Expand"}
+        >
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </button>
+      ) : (
+        <span className="w-4" />
+      )}
+      {/* Channel icon */}
+      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-bg-app">
+        <Icon className="h-4 w-4 text-ink-secondary" />
+      </div>
 
-        {/* Meta + priority */}
-        <div className="flex shrink-0 items-center gap-2">
-          <span
-            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${PRIORITY_TONE[item.priority]}`}
-            title={`Source: ${item.source}`}
-          >
-            {PRIORITY_LABEL[item.priority]}
-          </span>
-          <span className="font-mono text-[10px] text-ink-tertiary">{relTime(item.dueAt)}</span>
+      {/* Contact + body */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          {directionIcon}
+          <span className="truncate text-[13px] font-semibold text-ink-primary">{contact}</span>
+          {subContact && subContact !== contact && (
+            <span className="truncate text-[11px] text-ink-tertiary">· {subContact}</span>
+          )}
+        </div>
+        <div className="mt-0.5 truncate text-[11px] text-ink-tertiary">
+          {item.subject ? <span className="font-medium">{item.subject}</span> : null}
+          {item.subject && item.body ? " — " : null}
+          {item.body?.slice(0, 200)}
         </div>
       </div>
-    </Link>
+
+      {/* Meta + priority */}
+      <div className="flex shrink-0 items-center gap-2">
+        <span
+          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${PRIORITY_TONE[item.priority]}`}
+          title={`Source: ${item.source}`}
+        >
+          {PRIORITY_LABEL[item.priority]}
+        </span>
+        <span className="font-mono text-[10px] text-ink-tertiary">{relTime(item.dueAt)}</span>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="rounded-lg border border-bg-border bg-bg-card transition-colors hover:border-accent-blue/40">
+      {isCadence ? (
+        <div className="px-3 py-2.5">{headerInner}</div>
+      ) : (
+        <Link href={detailHref(item)} className="group block px-3 py-2.5 hover:bg-bg-hover">
+          {headerInner}
+        </Link>
+      )}
+
+      {/* Inline action drawer — cadence-scheduled items only */}
+      {isCadence && expanded && (
+        <CadenceActionDrawer item={item} acting={acting} onAction={onAction} />
+      )}
+    </div>
+  );
+}
+
+function CadenceActionDrawer({
+  item,
+  acting,
+  onAction,
+}: {
+  item: QueueItem;
+  acting: boolean;
+  onAction: (
+    itemId: string,
+    payload: { action: "send" } | { action: "outcome"; outcome: string } | { action: "skip" },
+  ) => void;
+}) {
+  const channel = item.channel;
+  const canSend = (channel === "email" || channel === "sms") && !!item.to;
+  const callOutcomes = ["connected", "voicemail", "no-answer", "wrong-number", "callback-scheduled"];
+
+  return (
+    <div className="border-t border-bg-border bg-bg-app/40 px-4 py-3">
+      <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div className="md:col-span-2">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+            {channel === "email" ? "Email preview" : channel === "sms" ? "SMS preview" : "Call script"}
+          </div>
+          {item.subject && (
+            <div className="mb-1 text-[12px] font-semibold text-ink-primary">
+              Subject: {item.subject}
+            </div>
+          )}
+          <div className="whitespace-pre-wrap rounded-md border border-bg-border bg-bg-card px-3 py-2 text-[12px] text-ink-secondary">
+            {item.body || (channel === "call"
+              ? "No script provided. Use this prompt: introduce yourself, ask one qualifying question, propose a 15-min follow-up."
+              : "(empty body)")}
+          </div>
+        </div>
+        <div>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+            Destination
+          </div>
+          <div className="rounded-md border border-bg-border bg-bg-card px-3 py-2 text-[12px]">
+            <div className="font-mono text-ink-primary">{item.to ?? "(none)"}</div>
+            {!item.to && (
+              <div className="mt-1 text-[10px] text-accent-amber">
+                Buyer doesn't have a {channel === "email" ? "email" : "phone"} on record. Update the buyer or skip this step.
+              </div>
+            )}
+          </div>
+          <div className="mt-2 text-[10px] text-ink-tertiary">{item.source}</div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {canSend && (
+          <button
+            type="button"
+            disabled={acting}
+            onClick={() => onAction(item.id, { action: "send" })}
+            className="inline-flex items-center gap-1 rounded-md bg-accent-blue px-3 py-1.5 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {acting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+            Send now
+          </button>
+        )}
+
+        {channel === "call" && (
+          <div className="inline-flex items-center gap-1">
+            <span className="text-[10px] uppercase tracking-wider text-ink-tertiary">
+              Mark outcome
+            </span>
+            {callOutcomes.map((o) => (
+              <button
+                key={o}
+                type="button"
+                disabled={acting}
+                onClick={() => onAction(item.id, { action: "outcome", outcome: o })}
+                className="rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[11px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
+              >
+                {o}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {(channel === "email" || channel === "sms") && (
+          <button
+            type="button"
+            disabled={acting}
+            onClick={() => onAction(item.id, { action: "outcome", outcome: "sent-out-of-band" })}
+            className="rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[11px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
+            title="I already sent this from gmail / phone -- just mark done"
+          >
+            Already sent elsewhere
+          </button>
+        )}
+
+        <button
+          type="button"
+          disabled={acting}
+          onClick={() => onAction(item.id, { action: "skip" })}
+          className="ml-auto inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[11px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
+        >
+          <SkipForward className="h-3 w-3" />
+          Skip step
+        </button>
+      </div>
+    </div>
   );
 }
