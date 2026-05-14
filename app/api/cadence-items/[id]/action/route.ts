@@ -5,6 +5,7 @@ import {
   recordCadenceItemOutcome,
 } from "@/lib/cadences";
 import { sendEmail } from "@/lib/email";
+import { getOperator } from "@/lib/operator";
 import { sendSms } from "@/lib/sms";
 
 export const runtime = "nodejs";
@@ -49,7 +50,15 @@ export async function POST(
   if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
   const { id } = await params;
 
-  let body: { action?: string; outcome?: string; notes?: string } = {};
+  let body: {
+    action?: string;
+    outcome?: string;
+    notes?: string;
+    /** Required when item.requiresApproval is true. Set by the action
+     *  drawer's confirm checkbox. Sending without this is rejected
+     *  with 412 (Precondition Failed) so the caller can prompt. */
+    confirmApproval?: boolean;
+  } = {};
   try {
     body = await req.json();
   } catch {
@@ -66,6 +75,34 @@ export async function POST(
   }
 
   const action = body.action;
+
+  // Approval gate -- when the cadence runner flagged this item as
+  // requiresApproval (per workspace policy), the operator must
+  // explicitly confirm before any send/outcome/skip can land. This
+  // protects against accidental clicks blasting un-reviewed touches.
+  if (item.requiresApproval && !body.confirmApproval) {
+    return NextResponse.json(
+      {
+        error: "This item requires approval before it can be sent.",
+        requiresApproval: true,
+        approvalGate: "Set confirmApproval:true in the request body after operator review.",
+      },
+      { status: 412 },
+    );
+  }
+
+  // Stamp the audit fields on first action when approval was needed.
+  // We record this BEFORE the action lands so it survives even if
+  // the email/SMS send adapter throws.
+  let approvalStamp: { approvedBy: string; approvedAt: string } | null = null;
+  if (item.requiresApproval && body.confirmApproval) {
+    const approvedBy =
+      "user" in auth && auth.user?.email
+        ? auth.user.email
+        : getOperator().email || "owner";
+    approvalStamp = { approvedBy, approvedAt: new Date().toISOString() };
+    await cadenceQueueItemsStore.patch(id, approvalStamp);
+  }
 
   // ─── send ────────────────────────────────────────────────────────
   if (action === "send") {

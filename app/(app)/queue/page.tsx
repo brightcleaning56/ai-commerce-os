@@ -200,10 +200,19 @@ export default function QueuePage() {
    * the step (action="skip"). All three mark the item done so it
    * drops off the inbox + record outcome on the parent enrollment
    * for branch evaluation on the next cron tick.
+   *
+   * approvalConfirmed flag is forwarded as confirmApproval:true on
+   * the request body. The endpoint returns 412 when an item requires
+   * approval and confirmation wasn't included; the drawer surfaces
+   * a checkbox in that case.
    */
   async function actOnCadenceItem(
     itemId: string,
-    payload: { action: "send" } | { action: "outcome"; outcome: string } | { action: "skip" },
+    payload:
+      | { action: "send" }
+      | { action: "outcome"; outcome: string }
+      | { action: "skip" },
+    approvalConfirmed?: boolean,
   ) {
     setActingOnId(itemId);
     setActionToast(null);
@@ -212,7 +221,7 @@ export default function QueuePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, confirmApproval: approvalConfirmed }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error ?? `Action failed (${r.status})`);
@@ -446,7 +455,9 @@ export default function QueuePage() {
               onToggleExpand={() =>
                 setExpandedId((prev) => (prev === item.id ? null : item.id))
               }
-              onAction={actOnCadenceItem}
+              onAction={(itemId, payload, approvalConfirmed) =>
+                void actOnCadenceItem(itemId, payload, approvalConfirmed)
+              }
             />
           ))}
         </div>
@@ -524,6 +535,12 @@ function FilterPill({
   );
 }
 
+type ActionFn = (
+  itemId: string,
+  payload: { action: "send" } | { action: "outcome"; outcome: string } | { action: "skip" },
+  approvalConfirmed?: boolean,
+) => void;
+
 function QueueRow({
   item,
   expanded,
@@ -535,10 +552,7 @@ function QueueRow({
   expanded: boolean;
   acting: boolean;
   onToggleExpand: () => void;
-  onAction: (
-    itemId: string,
-    payload: { action: "send" } | { action: "outcome"; outcome: string } | { action: "skip" },
-  ) => void;
+  onAction: ActionFn;
 }) {
   const Icon =
     item.ref.kind === "voicemail" ? Voicemail : CHANNEL_ICON[item.channel];
@@ -643,14 +657,14 @@ function CadenceActionDrawer({
 }: {
   item: QueueItem;
   acting: boolean;
-  onAction: (
-    itemId: string,
-    payload: { action: "send" } | { action: "outcome"; outcome: string } | { action: "skip" },
-  ) => void;
+  onAction: ActionFn;
 }) {
   const channel = item.channel;
   const canSend = (channel === "email" || channel === "sms") && !!item.to;
   const callOutcomes = ["connected", "voicemail", "no-answer", "wrong-number", "callback-scheduled"];
+  const [approved, setApproved] = useState(false);
+  const needsApproval = !!item.requiresApproval;
+  const actionsDisabled = acting || (needsApproval && !approved);
 
   return (
     <div className="border-t border-bg-border bg-bg-app/40 px-4 py-3">
@@ -686,13 +700,35 @@ function CadenceActionDrawer({
         </div>
       </div>
 
+      {needsApproval && (
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-accent-amber/40 bg-accent-amber/5 px-3 py-2">
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-amber" />
+          <div className="flex-1 text-[11px]">
+            <div className="font-semibold text-accent-amber">Needs approval before send</div>
+            <div className="mt-0.5 text-ink-secondary">
+              Workspace policy says this touch needs human signoff. Review the preview above, then check the box to enable actions.
+            </div>
+            <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-[11px] font-medium text-ink-primary">
+              <input
+                type="checkbox"
+                checked={approved}
+                onChange={(e) => setApproved(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-bg-border accent-accent-amber"
+              />
+              I reviewed this — approve to send / record outcome / skip
+            </label>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         {canSend && (
           <button
             type="button"
-            disabled={acting}
-            onClick={() => onAction(item.id, { action: "send" })}
+            disabled={actionsDisabled}
+            onClick={() => onAction(item.id, { action: "send" }, approved)}
             className="inline-flex items-center gap-1 rounded-md bg-accent-blue px-3 py-1.5 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            title={needsApproval && !approved ? "Confirm approval first" : undefined}
           >
             {acting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
             Send now
@@ -708,8 +744,8 @@ function CadenceActionDrawer({
               <button
                 key={o}
                 type="button"
-                disabled={acting}
-                onClick={() => onAction(item.id, { action: "outcome", outcome: o })}
+                disabled={actionsDisabled}
+                onClick={() => onAction(item.id, { action: "outcome", outcome: o }, approved)}
                 className="rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[11px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
               >
                 {o}
@@ -721,8 +757,8 @@ function CadenceActionDrawer({
         {(channel === "email" || channel === "sms") && (
           <button
             type="button"
-            disabled={acting}
-            onClick={() => onAction(item.id, { action: "outcome", outcome: "sent-out-of-band" })}
+            disabled={actionsDisabled}
+            onClick={() => onAction(item.id, { action: "outcome", outcome: "sent-out-of-band" }, approved)}
             className="rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[11px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
             title="I already sent this from gmail / phone -- just mark done"
           >
@@ -732,8 +768,8 @@ function CadenceActionDrawer({
 
         <button
           type="button"
-          disabled={acting}
-          onClick={() => onAction(item.id, { action: "skip" })}
+          disabled={actionsDisabled}
+          onClick={() => onAction(item.id, { action: "skip" }, approved)}
           className="ml-auto inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[11px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
         >
           <SkipForward className="h-3 w-3" />

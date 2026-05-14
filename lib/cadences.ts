@@ -121,8 +121,13 @@ export type CadenceQueueItem = {
   /** Set true by the cadence runner when workspace config requires
    *  human signoff before this item can be acted on. Operator sees a
    *  "Needs approval" badge on /queue + this gates the auto-send
-   *  shortcut (slice 11+). Cleaner than overloading `outcome`. */
+   *  shortcut. Cleaner than overloading `outcome`. */
   requiresApproval?: boolean;
+  /** Audit trail for approval-required items: who clicked the
+   *  confirm checkbox + when. Stamped by /api/cadence-items/[id]/action
+   *  on first send/skip when requiresApproval was true. */
+  approvedBy?: string;
+  approvedAt?: string;
   outcome?: string;
   doneAt?: string;
   createdAt: string;
