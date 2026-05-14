@@ -1004,7 +1004,16 @@ export type EmailSuppressionSource =
 
 export type EmailSuppression = {
   id: string;                     // sup_<random>
-  email: string;                  // lowercased, trimmed
+  email: string;                  // lowercased, trimmed (or "" when phone-only)
+  /** Optional phone number (E.164 normalized digits, e.g. "15551234567")
+   *  for SMS-channel suppressions. When set, this entry blocks SMS to
+   *  that number. When email + phone both set, the entry blocks both. */
+  phone?: string;
+  /** Channel scope. Undefined = blocks BOTH email and SMS to the buyer
+   *  (default: "auto" workspace mode). "email" = blocks email only;
+   *  "sms" = blocks SMS only. Wired by the Postmark + Twilio webhooks
+   *  based on workspace config compliance.unsubscribeMode. */
+  channel?: "email" | "sms";
   source: EmailSuppressionSource;
   reason?: string;                // free-text, ≤ 200 chars
   addedAt: string;                // ISO
@@ -1726,7 +1735,33 @@ export const store = {
     const norm = (email ?? "").trim().toLowerCase();
     if (!norm) return false;
     const all = await store.getEmailSuppressions();
-    return all.some((s) => s.email === norm);
+    // Block when there's an entry matching the email AND the channel
+    // either covers email (undefined = "all") or is explicitly "email".
+    // SMS-only entries (channel="sms") don't block email.
+    return all.some((s) => s.email === norm && (s.channel === undefined || s.channel === "email"));
+  },
+  /**
+   * Check whether a phone number is suppressed for SMS sends. Mirrors
+   * isEmailSuppressed semantics: an entry without a `channel` field
+   * blocks both channels (default "auto" workspace mode); entries
+   * scoped to "sms" block SMS only.
+   *
+   * Phone normalization: strip non-digits and compare on suffix
+   * (last 10 digits for NANP, full string otherwise) so "+15551234567"
+   * matches "(555) 123-4567" matches "5551234567".
+   */
+  async isPhoneSuppressed(phone: string): Promise<boolean> {
+    const digits = (phone ?? "").replace(/\D/g, "");
+    if (!digits) return false;
+    const norm = digits.length >= 10 ? digits.slice(-10) : digits;
+    const all = await store.getEmailSuppressions();
+    return all.some((s) => {
+      if (!s.phone) return false;
+      const sd = s.phone.replace(/\D/g, "");
+      const sNorm = sd.length >= 10 ? sd.slice(-10) : sd;
+      if (sNorm !== norm) return false;
+      return s.channel === undefined || s.channel === "sms";
+    });
   },
   /**
    * Add an email to the suppression list. Idempotent: re-adding the
@@ -1735,14 +1770,28 @@ export const store = {
   async addEmailSuppression(
     input: Omit<EmailSuppression, "id" | "addedAt"> & { addedAt?: string },
   ): Promise<EmailSuppression> {
-    const norm = input.email.trim().toLowerCase();
-    if (!norm) throw new Error("email required");
+    const norm = input.email?.trim().toLowerCase() ?? "";
+    const phoneDigits = (input.phone ?? "").replace(/\D/g, "");
+    if (!norm && !phoneDigits) throw new Error("email or phone required");
     const all = await store.getEmailSuppressions();
-    const existing = all.find((s) => s.email === norm);
+    // Dedupe: same (email, channel) OR same (phone, channel). When the
+    // operator already has an "all-channel" suppression for the
+    // contact, a new channel-specific one is redundant -- return the
+    // broader one. When existing is channel-specific and the new add
+    // is for the OTHER channel, both can coexist.
+    const existing = all.find((s) => {
+      const sameEmail = !!norm && s.email === norm;
+      const sPhone = (s.phone ?? "").replace(/\D/g, "");
+      const samePhone = !!phoneDigits && sPhone.endsWith(phoneDigits.slice(-10));
+      const sameChannel = s.channel === input.channel || s.channel === undefined;
+      return (sameEmail || samePhone) && sameChannel;
+    });
     if (existing) return existing;
     const created: EmailSuppression = {
       id: `sup_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`,
       email: norm,
+      phone: phoneDigits || undefined,
+      channel: input.channel,
       source: input.source,
       reason: input.reason?.slice(0, 200),
       addedAt: input.addedAt ?? new Date().toISOString(),

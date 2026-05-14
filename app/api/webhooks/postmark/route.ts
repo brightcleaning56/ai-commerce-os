@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { store, type EmailSuppressionSource } from "@/lib/store";
+import { getWorkspaceConfig } from "@/lib/workspaceConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -151,24 +152,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing recipient email in payload" }, { status: 400 });
   }
 
+  // Channel scope -- honors workspace compliance.unsubscribeMode.
+  // "auto" mode (default): scope is undefined -> blocks BOTH email and
+  //   SMS to this contact, AND propagates to BusinessRecord.doNotContact
+  //   so all outreach paths see the suppression.
+  // "channel-only" mode: scope is "email" -> blocks email only; SMS
+  //   to the same buyer can keep working. We DO NOT propagate to
+  //   BusinessRecord.doNotContact in this case (that flag is global).
+  // Hard bounces are channel-specific to email by definition (a
+  // bounce doesn't tell us anything about SMS deliverability), so
+  // they're always scoped to "email" regardless of the workspace mode.
+  const wsConfig = await getWorkspaceConfig().catch(() => null);
+  const channelOnly = wsConfig?.unsubscribeMode === "channel-only";
+  const channelScope: "email" | undefined =
+    source === "hard_bounce" ? "email" : channelOnly ? "email" : undefined;
+
   // Add to suppression list (idempotent — addEmailSuppression returns
   // the existing entry if already present)
-  const sup = await store.addEmailSuppression({ email, source, reason });
+  const sup = await store.addEmailSuppression({ email, source, reason, channel: channelScope });
 
-  // Propagate DNC to BusinessRecord — same pattern as the public
-  // unsubscribe endpoint.
-  try {
-    const biz = await store.getBusinessByEmail(email);
-    if (biz && !biz.doNotContact) {
-      await store.updateBusiness(biz.id, {
-        doNotContact: true,
-        optedOutAt: new Date().toISOString(),
-        optedOutReason: reason,
-        status: "do_not_contact",
-      });
+  // Propagate DNC to BusinessRecord -- ONLY in "auto" mode. In
+  // channel-only mode the SMS path stays available so the global
+  // doNotContact flag would over-suppress.
+  if (!channelOnly && source !== "hard_bounce") {
+    try {
+      const biz = await store.getBusinessByEmail(email);
+      if (biz && !biz.doNotContact) {
+        await store.updateBusiness(biz.id, {
+          doNotContact: true,
+          optedOutAt: new Date().toISOString(),
+          optedOutReason: reason,
+          status: "do_not_contact",
+        });
+      }
+    } catch (e) {
+      console.warn("[webhooks/postmark] business propagation failed:", e instanceof Error ? e.message : e);
     }
-  } catch (e) {
-    console.warn("[webhooks/postmark] business propagation failed:", e instanceof Error ? e.message : e);
   }
 
   // Propagate to Lead status

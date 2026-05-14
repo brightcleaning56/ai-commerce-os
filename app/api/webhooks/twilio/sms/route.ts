@@ -3,6 +3,14 @@ import { sendEmail } from "@/lib/email";
 import { getOperator } from "@/lib/operator";
 import { store } from "@/lib/store";
 import { verifyTwilioSignature } from "@/lib/twilioVoice";
+import { getWorkspaceConfig } from "@/lib/workspaceConfig";
+
+// Twilio's standard opt-out keywords. Recognized by carriers + Twilio
+// itself for compliance auto-handling, but we mirror the list locally
+// so we can persist suppression on our side too (and not rely on
+// Twilio's per-account STOP list for our outbound checks).
+// https://www.twilio.com/docs/messaging/compliance/opt-out-keywords
+const STOP_KEYWORDS = ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"];
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,6 +62,35 @@ export async function POST(req: NextRequest) {
 
   if (!from || !body) {
     return new NextResponse("Missing From or Body", { status: 400 });
+  }
+
+  // ── STOP-keyword detection ──────────────────────────────────────
+  // Twilio's standard opt-out keywords trigger a suppression entry
+  // BEFORE the lead-matching path, so we suppress unknown senders too.
+  // Channel scope honors the workspace's compliance.unsubscribeMode:
+  //   "auto"          -> suppress both email AND SMS to this contact
+  //   "channel-only"  -> suppress only SMS (email path stays open if
+  //                      the buyer separately opts back in)
+  const trimmed = body.trim().toUpperCase();
+  if (STOP_KEYWORDS.includes(trimmed)) {
+    const wsConfig = await getWorkspaceConfig().catch(() => null);
+    const channelScope = wsConfig?.unsubscribeMode === "channel-only" ? "sms" : undefined;
+    try {
+      // Suppression entry keyed by phone. email field is empty so the
+      // dedupe + lookup paths key only on phone for this record.
+      await store.addEmailSuppression({
+        email: "",
+        phone: from,
+        channel: channelScope,
+        source: "unsubscribe",
+        reason: `Twilio inbound STOP keyword "${trimmed}" from ${from}`,
+      });
+    } catch (e) {
+      console.warn(`[twilio sms inbound] STOP suppression write failed for ${from}:`, e);
+    }
+    // Twilio carriers handle the auto-confirmation reply themselves.
+    // Returning empty TwiML keeps us out of the way.
+    return emptyTwiml();
   }
 
   // Find matching lead. Twilio gives E.164 (+15551234567) -- match

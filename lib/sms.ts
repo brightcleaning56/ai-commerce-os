@@ -65,6 +65,27 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   if (!to) {
     return { ok: false, provider: "fallback", simulated: true, errorMessage: "Invalid phone number" };
   }
+  // Honor SMS suppression list -- inbound STOP / channel-only mode
+  // unsubscribes are stored on the same suppression collection as
+  // emails (see lib/store.ts). Block the send + report a structured
+  // error so callers (cadence runner, manual send-now) can mark the
+  // outcome correctly without retrying.
+  try {
+    const { store } = await import("./store");
+    if (await store.isPhoneSuppressed(to)) {
+      return {
+        ok: false,
+        provider: "fallback",
+        simulated: true,
+        sentTo: to,
+        errorMessage: "Suppressed -- recipient unsubscribed from SMS",
+      };
+    }
+  } catch {
+    // If the store import fails (very rare -- only if lib/store.ts
+    // isn't loadable), fall through to send. Better to send than
+    // silently swallow.
+  }
   if (!info.configured) {
     return { ok: false, provider: "fallback", simulated: true, sentTo: to };
   }
