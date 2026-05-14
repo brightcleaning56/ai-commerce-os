@@ -4,10 +4,12 @@ import {
   Brain,
   Building2,
   CheckCircle2,
+  Compass,
   Database,
   GitBranch,
   Loader2,
   MapPin,
+  Plus,
   Search,
   Send,
   Sparkles,
@@ -182,6 +184,7 @@ export default function BusinessesPage() {
   const [zipFilter, setZipFilter] = useState("");
 
   const [importOpen, setImportOpen] = useState(false);
+  const [openDiscover, setOpenDiscover] = useState(false);
   const [importCsv, setImportCsv] = useState("");
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResponse | null>(null);
@@ -475,6 +478,13 @@ export default function BusinessesPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setOpenDiscover(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-2 text-sm font-semibold text-brand-200 hover:bg-brand-500/20"
+            title="Find real US businesses from USAspending.gov + Google Places"
+          >
+            <Compass className="h-4 w-4" /> Discover
+          </button>
           <button
             onClick={() => setImportOpen((v) => !v)}
             className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
@@ -1072,6 +1082,394 @@ export default function BusinessesPage() {
             </div>
           )}
         </aside>
+      </div>
+
+      {openDiscover && (
+        <BusinessDiscoverModal
+          onClose={() => setOpenDiscover(false)}
+          onImported={async () => {
+            await load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+type DiscoveryCandidate = {
+  externalId: string | null;
+  source: "usaspending" | "google_places";
+  name: string;
+  country: string;
+  state?: string;
+  city?: string;
+  zip?: string;
+  address1?: string;
+  phone?: string;
+  website?: string;
+  email?: string;
+  naicsCode?: string;
+  industryHint?: string;
+  ratingHint?: number;
+  evidence: string;
+  largestAwardUsd?: number;
+  totalAwardUsd?: number;
+};
+
+type DiscoveryResult = {
+  source: "usaspending" | "google_places";
+  candidates: DiscoveryCandidate[];
+  fetchedAt: string;
+  totalMatches?: number;
+  error?: string;
+};
+
+function BusinessDiscoverModal({
+  onClose,
+  onImported,
+}: {
+  onClose: () => void;
+  onImported: () => Promise<void>;
+}) {
+  const { toast } = useToast();
+  const [source, setSource] = useState<"google_places" | "usaspending">("google_places");
+  // Google Places fields
+  const [textQuery, setTextQuery] = useState("");
+  // USAspending fields
+  const [naicsCode, setNaicsCode] = useState("");
+  const [state, setState] = useState("");
+  // Common
+  const [limit, setLimit] = useState(25);
+  const [searching, setSearching] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<DiscoveryResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  function candidateKey(c: DiscoveryCandidate): string {
+    return c.externalId || `${c.source}:${c.name.toUpperCase()}`;
+  }
+
+  async function search() {
+    setSearching(true);
+    setError(null);
+    setResult(null);
+    setSelected(new Set());
+    try {
+      const r = await fetch("/api/admin/businesses/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source,
+          query: source === "google_places"
+            ? { textQuery, limit }
+            : { naicsCode: naicsCode || undefined, state: state || undefined, limit },
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Discover failed (${r.status})`);
+      setResult(d as DiscoveryResult);
+      if (d.error) setError(d.error);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Discover failed");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function toggle(c: DiscoveryCandidate) {
+    const key = candidateKey(c);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  function toggleAll() {
+    if (!result) return;
+    if (selected.size === result.candidates.length) setSelected(new Set());
+    else setSelected(new Set(result.candidates.map(candidateKey)));
+  }
+
+  async function importSelected() {
+    if (!result || selected.size === 0) return;
+    setImporting(true);
+    let successes = 0;
+    let dupes = 0;
+    let failures = 0;
+    try {
+      for (const c of result.candidates) {
+        if (!selected.has(candidateKey(c))) continue;
+        try {
+          const r = await fetch("/api/admin/businesses", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: c.name,
+              country: c.country || "US",
+              state: c.state,
+              city: c.city,
+              zip: c.zip,
+              address1: c.address1,
+              phone: c.phone,
+              website: c.website,
+              email: c.email,
+              industry: c.industryHint,
+              naicsCode: c.naicsCode,
+              source: c.source,                    // "google_places" | "usaspending" → mapped to BusinessSource
+              externalId: c.externalId ?? undefined,
+              externalIdSource: c.source,
+              notes: `Discovery import (${c.source}): ${c.evidence}`,
+              status: "active",
+            }),
+          });
+          if (!r.ok) {
+            failures += 1;
+            continue;
+          }
+          const d = await r.json().catch(() => ({}));
+          if (d.alreadyExisted) dupes += 1;
+          else successes += 1;
+        } catch {
+          failures += 1;
+        }
+      }
+      const parts = [`Imported ${successes}`];
+      if (dupes > 0) parts.push(`${dupes} already in directory`);
+      if (failures > 0) parts.push(`${failures} failed`);
+      toast(parts.join(", "), failures === 0 ? "success" : "info");
+      await onImported();
+      onClose();
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-bg-app/80 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-3xl rounded-2xl border border-bg-border bg-bg-card p-6 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Compass className="h-4 w-4 text-brand-300" />
+            <div className="text-sm font-semibold">Discover real businesses</div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid h-7 w-7 place-items-center rounded-md text-ink-tertiary hover:bg-bg-hover hover:text-ink-primary"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <p className="mt-1 text-[11px] text-ink-tertiary">
+          USAspending = US fed contractors (no contact info). Google Places = local businesses with
+          phone + website (no emails). Both free; Places needs <span className="font-mono">GOOGLE_PLACES_API_KEY</span>.
+        </p>
+
+        {/* Source picker */}
+        <div className="mt-4 flex items-center gap-1 rounded-lg border border-bg-border bg-bg-app p-1 text-xs">
+          {(
+            [
+              { id: "google_places" as const, label: "Google Places" },
+              { id: "usaspending" as const, label: "USAspending.gov" },
+            ]
+          ).map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setSource(s.id)}
+              className={`flex-1 rounded-md px-3 py-1.5 ${
+                source === s.id ? "bg-brand-500/15 text-brand-200 font-semibold" : "text-ink-secondary hover:bg-bg-hover"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Source-specific filters */}
+        {source === "google_places" ? (
+          <div className="mt-3">
+            <label className="block">
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                Search query
+              </div>
+              <input
+                value={textQuery}
+                onChange={(e) => setTextQuery(e.target.value)}
+                placeholder="roofing contractors in Dallas TX"
+                className="h-10 w-full rounded-md border border-bg-border bg-bg-app px-3 text-sm"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void search();
+                }}
+              />
+              <div className="mt-1 text-[10px] text-ink-tertiary">
+                Use natural language. Combine business type + location: &quot;HVAC suppliers in Houston&quot;,
+                &quot;commercial bakeries in Brooklyn&quot;.
+              </div>
+            </label>
+          </div>
+        ) : (
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <label className="block">
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                NAICS code
+              </div>
+              <input
+                value={naicsCode}
+                onChange={(e) => setNaicsCode(e.target.value)}
+                placeholder="e.g. 236220"
+                className="h-9 w-full rounded-md border border-bg-border bg-bg-app px-2 text-sm font-mono"
+              />
+              <div className="mt-1 text-[10px] text-ink-tertiary">
+                <a href="https://www.naics.com/search/" target="_blank" rel="noreferrer" className="text-brand-200 hover:underline">
+                  Find a NAICS code
+                </a>
+              </div>
+            </label>
+            <label className="block">
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                State (optional)
+              </div>
+              <input
+                value={state}
+                onChange={(e) => setState(e.target.value.toUpperCase())}
+                maxLength={2}
+                placeholder="TX"
+                className="h-9 w-full rounded-md border border-bg-border bg-bg-app px-2 text-sm uppercase"
+              />
+            </label>
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-[1fr_auto] items-end gap-2">
+          <label className="block">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">Limit</div>
+            <input
+              type="number"
+              value={limit}
+              onChange={(e) => setLimit(Math.min(100, Math.max(1, Number(e.target.value) || 25)))}
+              min={1}
+              max={100}
+              className="h-9 w-full rounded-md border border-bg-border bg-bg-app px-2 text-sm"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={search}
+            disabled={searching || (source === "google_places" && !textQuery.trim())}
+            className="inline-flex items-center gap-1 rounded-lg bg-gradient-brand px-4 py-2 text-[12px] font-semibold shadow-glow disabled:opacity-50"
+          >
+            {searching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Compass className="h-3.5 w-3.5" />}
+            {searching ? "Searching…" : "Search"}
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-3 rounded-md border border-rose-300/30 bg-rose-500/10 px-3 py-2 text-[12px] text-rose-200">
+            {error}
+          </div>
+        )}
+
+        {result && (
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between text-[11px] text-ink-tertiary">
+              <div>
+                {result.candidates.length} candidate{result.candidates.length === 1 ? "" : "s"}
+                {result.totalMatches != null && result.totalMatches !== result.candidates.length && (
+                  <span> of {result.totalMatches.toLocaleString()} total matches</span>
+                )}
+              </div>
+              {result.candidates.length > 0 && (
+                <button type="button" onClick={toggleAll} className="text-brand-200 hover:underline">
+                  {selected.size === result.candidates.length ? "Deselect all" : "Select all"}
+                </button>
+              )}
+            </div>
+
+            <div className="max-h-[40vh] overflow-y-auto rounded-md border border-bg-border">
+              {result.candidates.length === 0 ? (
+                <div className="px-3 py-6 text-center text-[12px] text-ink-tertiary">
+                  No results. Try a different search.
+                </div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-bg-card">
+                    <tr className="border-b border-bg-border text-left text-[10px] uppercase tracking-wider text-ink-tertiary">
+                      <th className="w-8 px-2 py-2"></th>
+                      <th className="px-2 py-2 font-medium">Business</th>
+                      <th className="px-2 py-2 font-medium">Contact</th>
+                      <th className="px-2 py-2 font-medium">Evidence</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.candidates.map((c) => {
+                      const key = candidateKey(c);
+                      const checked = selected.has(key);
+                      return (
+                        <tr
+                          key={key}
+                          onClick={() => toggle(c)}
+                          className={`cursor-pointer border-t border-bg-border ${
+                            checked ? "bg-brand-500/10" : "hover:bg-bg-hover/30"
+                          }`}
+                        >
+                          <td className="px-2 py-2">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggle(c)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="font-semibold text-ink-primary">{c.name}</div>
+                            <div className="text-[10px] text-ink-tertiary">
+                              {[c.city, c.state, c.country].filter(Boolean).join(", ")}
+                              {c.naicsCode && <span className="ml-1 font-mono">NAICS {c.naicsCode}</span>}
+                            </div>
+                          </td>
+                          <td className="px-2 py-2 text-[10px] text-ink-secondary">
+                            {c.phone && <div className="font-mono">{c.phone}</div>}
+                            {c.website && (
+                              <div className="truncate max-w-[160px]" title={c.website}>{c.website}</div>
+                            )}
+                            {!c.phone && !c.website && <span className="text-ink-tertiary italic">—</span>}
+                          </td>
+                          <td className="px-2 py-2 text-[10px] text-ink-tertiary">
+                            <div className="truncate max-w-[200px]" title={c.evidence}>{c.evidence}</div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {result.candidates.length > 0 && (
+              <div className="mt-3 flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={importSelected}
+                  disabled={importing || selected.size === 0}
+                  className="inline-flex items-center gap-1 rounded-lg border border-accent-green/40 bg-accent-green/15 px-3 py-2 text-[12px] font-semibold text-accent-green hover:bg-accent-green/25 disabled:opacity-50"
+                >
+                  {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                  Import {selected.size} selected
+                </button>
+              </div>
+            )}
+
+            <p className="mt-2 text-[10px] text-ink-tertiary">
+              Imported records have NO email. You&apos;ll need to enrich emails separately (visit the
+              website, paid enrichment tool, etc.) before sending outreach.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -122,13 +122,39 @@ export async function POST(req: NextRequest) {
     ? (body.status as BusinessStatus)
     : "active";
 
+  // Source — accept from body (constrained to the BusinessSource enum)
+  // so Discovery imports can mark themselves correctly. Default
+  // "manual" preserves the previous behavior for clients that
+  // don't pass source.
+  const VALID_SOURCES: BusinessSource[] = [
+    "manual", "csv_import", "lead_promote", "agent_discover",
+    "data_axle", "google_places", "census",
+  ];
+  const source = typeof body.source === "string" && VALID_SOURCES.includes(body.source as BusinessSource)
+    ? (body.source as BusinessSource)
+    : "manual";
+
+  // External-source dedupe (Discovery imports). If externalId is
+  // provided AND a record with that id already exists, return the
+  // existing one with alreadyExisted: true.
+  const externalId = typeof body.externalId === "string" ? body.externalId.trim().slice(0, 120) : undefined;
+  const externalIdSource = typeof body.externalIdSource === "string" && VALID_SOURCES.includes(body.externalIdSource as BusinessSource)
+    ? (body.externalIdSource as BusinessSource)
+    : undefined;
+  if (externalId) {
+    const existing = await store.getBusinessByExternalId(externalId);
+    if (existing) {
+      return NextResponse.json({ ok: true, business: existing, alreadyExisted: true });
+    }
+  }
+
   const now = new Date().toISOString();
   const rec: BusinessRecord = {
     id: `biz_${crypto.randomBytes(6).toString("hex")}`,
     name,
     country: typeof body.country === "string" ? body.country : "US",
     status,
-    source: "manual",
+    source,
     createdAt: now,
     updatedAt: now,
     // Pass-through optional fields
@@ -147,8 +173,10 @@ export async function POST(req: NextRequest) {
     contactTitle: typeof body.contactTitle === "string" ? body.contactTitle : undefined,
     notes: typeof body.notes === "string" ? body.notes : undefined,
     tags: Array.isArray(body.tags) ? (body.tags as string[]).filter((t) => typeof t === "string") : undefined,
+    externalId,
+    externalIdSource,
   };
 
   await store.addBusiness(rec);
-  return NextResponse.json({ ok: true, business: rec });
+  return NextResponse.json({ ok: true, business: rec, alreadyExisted: false });
 }

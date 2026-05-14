@@ -820,6 +820,14 @@ export type BusinessRecord = {
   doNotContact?: boolean;           // explicit operator flag
   optedOutAt?: string;              // ISO when buyer opted out
   optedOutReason?: string;          // "unsubscribe-link" / "complaint" / etc.
+  // ── External-source dedupe ────────────────────────────────────────────
+  // Stable id from the source the record was discovered from. Lets
+  // /api/admin/businesses POST skip duplicates when the operator
+  // re-runs the same Discovery query. Sources:
+  //   "google_places:<place_id>"
+  //   "usaspending:<recipient_uei>"
+  externalId?: string;
+  externalIdSource?: BusinessSource;
   // ── AI Profile (slice 3 of Business Network Intelligence) ─────────────
   // Set by the Business Profile Agent (lib/agents/businessProfile.ts) when
   // it fetches the business's homepage and asks Claude to extract what
@@ -1434,6 +1442,16 @@ export const store = {
     if (!n || !z) return null;
     const all = await store.getBusinesses();
     return all.find((b) => b.name.trim().toLowerCase() === n && (b.zip ?? "").trim() === z) ?? null;
+  },
+  /**
+   * Discovery dedupe — match by externalId (Google Places place_id,
+   * USAspending UEI, etc.). Lets re-running the same search skip
+   * re-importing the same record.
+   */
+  async getBusinessByExternalId(externalId: string): Promise<BusinessRecord | null> {
+    if (!externalId) return null;
+    const all = await store.getBusinesses();
+    return all.find((b) => b.externalId === externalId) ?? null;
   },
   async addBusiness(b: BusinessRecord): Promise<void> {
     const existing = await store.getBusinesses();
