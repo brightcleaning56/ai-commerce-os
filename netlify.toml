@@ -78,6 +78,14 @@
 [functions."cron-outreach-jobs"]
   schedule = "*/5 * * * *"
 
+# Daily at 04:30 UTC — re-run L3 (Operational Verification) for active
+# suppliers whose linked transactions changed since the last L3 run.
+# Keeps trust scores fresh without operator clicks. Per-tick batch capped
+# by SUPPLIER_L3_REFRESH_BATCH (default 50). Skipped when CRON_ENABLED=false
+# or kill switch is active.
+[functions."cron-supplier-l3-refresh"]
+  schedule = "30 4 * * *"
+
 # ─── Headers ───────────────────────────────────────────────────────────────
 # Defense-in-depth: deny framing of the operator dashboard, declare strict
 # content security on the marketing landing.

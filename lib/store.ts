@@ -532,7 +532,8 @@ export type CronRunKind =
   | "outreach-jobs"
   | "followups"
   | "auto-promote-sweep"
-  | "daily-digest";
+  | "daily-digest"
+  | "supplier-l3-refresh";
 
 export type CronRun = {
   id: string;
