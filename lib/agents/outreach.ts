@@ -1,6 +1,7 @@
 import { checkSpendBudget, estimateCost, getAnthropicClient, MODEL_SMART, recordSpend } from "@/lib/anthropic";
 import { getOperator, getOperatorFirstName, getOperatorSignature } from "@/lib/operator";
 import { store, type AgentRun, type OutreachDraft } from "@/lib/store";
+import { getWorkspaceConfig, toneInstructionFor } from "@/lib/workspaceConfig";
 
 const OUTREACH_TOOL = {
   name: "draft_outreach",
@@ -42,7 +43,7 @@ type OutreachToolPayload = {
   sms: { body: string };
 };
 
-function buildPrompt(input: {
+async function buildPrompt(input: {
   buyerCompany: string;
   buyerName: string;
   buyerTitle: string;
@@ -58,8 +59,23 @@ function buildPrompt(input: {
   const buyerContext = input.buyerRationale ? `\n- Why they fit: ${input.buyerRationale}` : "";
   const productContext = input.productRationale ? `\n- Why it's trending: ${input.productRationale}` : "";
   const op = getOperator();
+  // Workspace config -- tone + aggressiveness chosen during admin
+  // onboarding (slice 2). Falls back to "professional" + "balanced"
+  // for un-onboarded workspaces.
+  const wsConfig = await getWorkspaceConfig();
+  const toneLine = toneInstructionFor(wsConfig);
+  const aggressivenessLine =
+    wsConfig.aiAggressiveness === "conservative"
+      ? "Be conservative on the ask -- offer to send info first, suggest a call only if there's clear fit."
+      : wsConfig.aiAggressiveness === "aggressive"
+        ? "Be assertive on the ask -- propose a specific time slot, lead with value (margin / volume / exclusivity)."
+        : "Use a balanced ask -- offer the choice between a 15-min call and a written summary.";
 
   return `You are the Outreach Agent in an AI commerce operating system. Your job: draft a personalized outreach package for a wholesale buyer about a trending product.
+
+## Tone (set by workspace owner)
+${toneLine}
+${aggressivenessLine}
 
 ## Buyer
 - Company: ${input.buyerCompany}
@@ -210,7 +226,7 @@ export async function runOutreach(input: {
         max_tokens: 1500,
         tools: [OUTREACH_TOOL],
         tool_choice: { type: "tool", name: OUTREACH_TOOL.name },
-        messages: [{ role: "user", content: buildPrompt(input) }],
+        messages: [{ role: "user", content: await buildPrompt(input) }],
       });
 
       inputTokens = res.usage.input_tokens;

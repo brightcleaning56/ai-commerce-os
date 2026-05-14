@@ -32,6 +32,7 @@
 import crypto from "node:crypto";
 import { getBackend } from "./store";
 import type { QueueChannel, QueueStatus } from "./queue";
+import { getWorkspaceConfig, requiresApproval } from "./workspaceConfig";
 
 const CADENCES_FILE = "cadences.json";
 const ENROLLMENTS_FILE = "cadence-enrollments.json";
@@ -409,6 +410,25 @@ export async function runCadenceTick(): Promise<CadenceTickResult> {
     errors: [],
   };
 
+  // Workspace config drives daily send-cap enforcement + approval-mode
+  // tagging on scheduled items. Read once per tick (60s cache inside
+  // getWorkspaceConfig keeps repeat calls cheap).
+  const wsConfig = await getWorkspaceConfig();
+  const cap = wsConfig.dailySendCap || 0;
+  let scheduledTodayByChannel: Record<QueueChannel, number> = { call: 0, email: 0, sms: 0 };
+  if (cap > 0) {
+    // Count items already scheduled today across all enrollments so we
+    // don't blow past the cap by adding items in the same tick batch.
+    const all = await cadenceQueueItemsStore.list();
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const since = startOfDay.getTime();
+    for (const item of all) {
+      if (new Date(item.createdAt).getTime() < since) continue;
+      scheduledTodayByChannel[item.channel] = (scheduledTodayByChannel[item.channel] ?? 0) + 1;
+    }
+  }
+
   const enrollments = await enrollmentsStore.list({ status: "active" });
   const now = Date.now();
   const due = enrollments.filter((e) => new Date(e.nextStepDueAt).getTime() <= now);
@@ -454,9 +474,30 @@ export async function runCadenceTick(): Promise<CadenceTickResult> {
       }
 
       const step = cadence.steps[stepIndexToSchedule];
+
+      // Daily send-cap enforcement (workspace config). When the cap
+      // for this channel is hit, defer the schedule by 1 hour so the
+      // next tick re-attempts. We don't drop the step entirely.
+      if (cap > 0 && scheduledTodayByChannel[step.channel] >= cap) {
+        await enrollmentsStore.patch(enr.id, {
+          nextStepDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        });
+        continue;
+      }
+
       const merge = { name: enr.buyerName, company: enr.buyerCompany };
       const subject = applyMergeTags(step.subject, merge);
       const body = applyMergeTags(step.bodyTemplate, merge);
+
+      // Approval-mode policy. The first step (index 0) counts as the
+      // "first touch"; later steps are follow-ups. When approval is
+      // required, the queue item still lands as "pending" but we tag
+      // it with a notes line so the operator UI can flag it. Slice
+      // 10.5+ adds an explicit `requiresApproval` flag on QueueItem.
+      const needsApproval = requiresApproval({
+        config: wsConfig,
+        isFirstTouch: stepIndexToSchedule === 0,
+      });
 
       const queueItem = await cadenceQueueItemsStore.create({
         enrollmentId: enr.id,
@@ -472,7 +513,9 @@ export async function runCadenceTick(): Promise<CadenceTickResult> {
         body,
         dueAt: new Date().toISOString(),
         status: "pending",
+        outcome: needsApproval ? "requires-approval" : undefined,
       });
+      scheduledTodayByChannel[step.channel] += 1;
 
       // Advance enrollment to next step, schedule its dueAt based on the
       // NEXT step's delay. If the just-scheduled step was the last, mark
