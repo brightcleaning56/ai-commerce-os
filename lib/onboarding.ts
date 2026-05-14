@@ -433,18 +433,182 @@ const adminFlow: Flow = {
 const teamFlow: Flow = {
   persona: "team",
   steps: [
+    // ── Step 1: Identity ──────────────────────────────────────────
     {
-      id: "placeholder",
-      label: "Join the workspace",
-      blurb:
-        "Slice 1 placeholder — slice 3 fills in: department, assigned workflows, AI agent access, approval limits, communication scope.",
+      id: "identity",
+      label: "Welcome aboard",
+      blurb: "We have your role from the invite. Tell us how you want to show up in the workspace.",
+      questions: [
+        { id: "fullName", type: "text", label: "Your full name", required: true, maxLength: 120, placeholder: "Alex Operator" },
+        { id: "displayName", type: "text", label: "Preferred name (optional)", maxLength: 80, placeholder: "How teammates should address you" },
+        { id: "phone", type: "text", label: "Direct phone (optional)", maxLength: 40, placeholder: "+1 555 0100", helper: "Used so AI can route inbound calls intended for you." },
+        { id: "timezone", type: "text", label: "Timezone (IANA)", maxLength: 60, placeholder: "America/Los_Angeles", helper: "Default UTC. Drives quiet-hours + send-time defaults." },
+      ],
+    },
+
+    // ── Step 2: Department + role context ─────────────────────────
+    {
+      id: "context",
+      label: "How you fit in",
+      blurb: "Helps us pre-load the right dashboards and shortcuts on your home screen.",
       questions: [
         {
-          id: "name",
-          type: "text",
-          label: "Your full name",
+          id: "department",
+          type: "select",
+          label: "Department",
           required: true,
-          maxLength: 120,
+          options: [
+            { value: "sales", label: "Sales" },
+            { value: "operations", label: "Operations" },
+            { value: "marketing", label: "Marketing" },
+            { value: "finance", label: "Finance" },
+            { value: "support", label: "Customer Support" },
+            { value: "logistics", label: "Logistics / Fulfillment" },
+            { value: "engineering", label: "Engineering / Data" },
+            { value: "executive", label: "Executive / Leadership" },
+            { value: "other", label: "Other" },
+          ],
+        },
+        {
+          id: "experience",
+          type: "select",
+          label: "Experience with this kind of system",
+          options: [
+            { value: "first-time", label: "First-time", description: "I've never run an AI ops platform. Show me the ropes." },
+            { value: "comfortable", label: "Comfortable", description: "I've used CRMs and outreach tools before." },
+            { value: "expert", label: "Expert", description: "I've built or admin'd this kind of system. Skip the tour." },
+          ],
+        },
+        {
+          id: "primaryWorkflows",
+          type: "multiselect",
+          label: "Workflows you'll own",
+          required: true,
+          helper: "Pre-pins these dashboards. You can pin/unpin later.",
+          options: [
+            { value: "leads", label: "Inbound leads" },
+            { value: "queue", label: "Outreach queue" },
+            { value: "tasks", label: "Phone tasks" },
+            { value: "calls", label: "Call log + voicemails" },
+            { value: "deals", label: "Deals + quotes" },
+            { value: "transactions", label: "Transactions + escrow" },
+            { value: "suppliers", label: "Supplier registry" },
+            { value: "approvals", label: "Approvals queue" },
+            { value: "reports", label: "Reports + insights" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 3: AI agent access ───────────────────────────────────
+    {
+      id: "aiAgents",
+      label: "AI agent access",
+      blurb: "Pick which AI agents you want available in your workspace. Owner can restrict any of these per-role later.",
+      questions: [
+        {
+          id: "agents",
+          type: "multiselect",
+          label: "Agents available to me",
+          options: [
+            { value: "trend-hunter", label: "Trend Hunter", description: "Discovers winning products from real signals." },
+            { value: "buyer-discovery", label: "Buyer Discovery", description: "Finds matching retailers + decision-makers." },
+            { value: "supplier-finder", label: "Supplier Finder", description: "Surfaces verified manufacturers / wholesalers." },
+            { value: "outreach", label: "Outreach Drafting", description: "Drafts personalized email / SMS." },
+            { value: "negotiation", label: "Negotiation", description: "Counter-proposes on inbound replies." },
+            { value: "lead-followup", label: "Lead Follow-up", description: "Auto-second-touch on cold leads." },
+            { value: "risk", label: "Risk Center", description: "Flags suspicious transactions." },
+          ],
+        },
+        {
+          id: "aiPermission",
+          type: "select",
+          label: "How should AI tools work for me?",
+          required: true,
+          options: [
+            { value: "draft-only", label: "Draft only", description: "AI suggests; I always click send." },
+            { value: "auto-low-risk", label: "Auto-send low-risk", description: "AI sends follow-ups + nudges; I approve first touches + high-stakes." },
+            { value: "fully-autonomous", label: "Fully autonomous", description: "AI sends everything within my scope. I review the log." },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 4: Approval limits ───────────────────────────────────
+    {
+      id: "limits",
+      label: "Approval + spend limits",
+      blurb: "Defaults you'll be able to act on without owner sign-off. Owner can change anytime.",
+      questions: [
+        {
+          id: "quoteApprovalCap",
+          type: "number",
+          label: "Quotes I can send without approval (USD)",
+          helper: "Quotes above this dollar amount go to /approvals. Default suggested: 5000.",
+          min: 0,
+          max: 1_000_000,
+        },
+        {
+          id: "discountCap",
+          type: "number",
+          label: "Discount I can offer without approval (%)",
+          helper: "Default 10%. Above goes to /approvals.",
+          min: 0,
+          max: 100,
+        },
+        {
+          id: "refundCap",
+          type: "number",
+          label: "Refunds I can issue without approval (USD)",
+          helper: "Default 250.",
+          min: 0,
+          max: 1_000_000,
+        },
+        {
+          id: "outreachVolumeCap",
+          type: "number",
+          label: "Outbound touches per day",
+          helper: "Hard cap on the queue. 0 = inherit workspace default.",
+          min: 0,
+          max: 5000,
+        },
+      ],
+    },
+
+    // ── Step 5: Communication channels ────────────────────────────
+    {
+      id: "comms",
+      label: "How AVYN reaches you",
+      blurb: "When something needs you (incoming call, escalation, approval), how should we ping?",
+      questions: [
+        {
+          id: "channels",
+          type: "multiselect",
+          label: "Notify me via",
+          required: true,
+          options: [
+            { value: "in-app", label: "In-app", description: "Real-time toast + sidebar badge." },
+            { value: "email", label: "Email" },
+            { value: "sms", label: "SMS" },
+            { value: "slack", label: "Slack DM", description: "Requires workspace Slack integration." },
+          ],
+        },
+        {
+          id: "quietHours",
+          type: "select",
+          label: "Quiet hours",
+          options: [
+            { value: "none", label: "No quiet hours", description: "Notify me anytime." },
+            { value: "evenings", label: "Evenings (8pm-8am local)" },
+            { value: "weekends", label: "Weekends" },
+            { value: "both", label: "Evenings + weekends" },
+          ],
+        },
+        {
+          id: "incomingCallRouting",
+          type: "boolean",
+          label: "Ring me on incoming calls",
+          helper: "Adds you to the multi-agent call ring. If off, calls won't ring your browser even when online.",
         },
       ],
     },
