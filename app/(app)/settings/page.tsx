@@ -53,8 +53,10 @@ export default function SettingsPage() {
   // Per-user sessions display THEIR own email + role instead of leaking
   // the owner's identity. /api/auth/me is the source of truth for
   // "who am I"; /api/operator is owner-only data.
-  const { me } = useCapabilities();
+  const { me, refresh: refreshMe } = useCapabilities();
   const isOwner = !!me?.isOwner;
+  const [phone, setPhone] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
   useEffect(() => {
     if (!me) return;
     if (me.isOwner) {
@@ -70,12 +72,15 @@ export default function SettingsPage() {
         })
         .catch(() => {});
     } else {
-      // Per-user session — display their actual identity, never the
-      // owner's. Profile section will render read-only below.
-      setName(me.email);
+      // Per-user session. Email + role come from the (signed) token
+      // and are immutable here. displayName + phone come from the
+      // per-user profile (server-side, lib/userProfiles.ts) and ARE
+      // editable. Initials default to first letter of name or email.
       setEmail(me.email);
       setTitle(me.role);
-      setInitials((me.email[0] ?? "?").toUpperCase());
+      setName(me.name ?? "");
+      setInitials(me.initials ?? (me.email[0] ?? "?").toUpperCase());
+      setPhone(me.phone ?? "");
     }
 
     try {
@@ -178,36 +183,71 @@ export default function SettingsPage() {
               <div className="grid h-12 w-12 place-items-center rounded-full bg-gradient-brand text-sm font-bold">
                 {initials}
               </div>
-              {isOwner ? (
+              {isOwner && (
                 <button className="rounded-md border border-bg-border bg-bg-hover/40 px-3 py-1.5 text-xs hover:bg-bg-hover">
                   Upload photo
                 </button>
-              ) : (
-                <span className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-app px-2 py-1 text-[10px] text-ink-tertiary">
-                  <Lock className="h-3 w-3" />
-                  Owner-managed
-                </span>
               )}
             </div>
-            {/* Profile fields are owner-only. For per-user sessions we
-                show their session identity read-only — editing the
-                profile would require a per-user account record on the
-                server (separate slice). Until then the Save button
-                still persists locale / AI defaults / theme / notif
-                preferences via localStorage. */}
+            {/* Owner: Full name + Email are derived from OPERATOR_*
+                env vars; Title comes from there too. localStorage can
+                override name/email for casual customization.
+                Non-owner: Email + Title come from the signed token
+                (immutable). Display name + phone are editable via
+                /api/users/me. */}
             <Field
-              label="Full name"
+              label={isOwner ? "Full name" : "Display name"}
               value={name}
               onChange={setName}
-              disabled={!isOwner}
+              placeholder={isOwner ? undefined : "How you want to appear in the app"}
             />
             <Field label="Email" value={email} onChange={() => {}} disabled />
             <Field label="Title" value={title} onChange={() => {}} disabled />
             {!isOwner && (
-              <p className="text-[11px] text-ink-tertiary">
-                Profile fields are managed by the workspace owner. Your locale + theme +
-                notification preferences below still save to your browser.
-              </p>
+              <>
+                <Field
+                  label="Phone (optional)"
+                  value={phone}
+                  onChange={setPhone}
+                  placeholder="+1 555 555 1234"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setSavingProfile(true);
+                    try {
+                      const r = await fetch("/api/users/me", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          displayName: name,
+                          phone,
+                        }),
+                      });
+                      if (!r.ok) {
+                        const d = await r.json().catch(() => ({}));
+                        throw new Error(d.error ?? `Profile save failed (${r.status})`);
+                      }
+                      // Refresh /api/auth/me so the TopBar / sidebar
+                      // pick up the new displayName immediately.
+                      await refreshMe();
+                    } catch (e) {
+                      console.warn("Profile save:", e instanceof Error ? e.message : e);
+                    } finally {
+                      setSavingProfile(false);
+                    }
+                  }}
+                  disabled={savingProfile}
+                  className="inline-flex w-full items-center justify-center gap-1 rounded-lg bg-gradient-brand px-3 py-2 text-[12px] font-semibold shadow-glow disabled:opacity-50"
+                >
+                  {savingProfile ? "Saving…" : "Save profile"}
+                </button>
+                <p className="text-[11px] text-ink-tertiary">
+                  Email + title come from your signed-in role and can&apos;t be edited here.
+                  Locale, AI defaults, theme, and notification preferences below save to
+                  your browser.
+                </p>
+              </>
             )}
           </div>
         </Section>
@@ -411,11 +451,13 @@ function Field({
   value,
   onChange,
   disabled,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
+  placeholder?: string;
 }) {
   return (
     <label className="block">
@@ -426,7 +468,8 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="h-10 w-full rounded-lg border border-bg-border bg-bg-card px-3 text-sm focus:border-brand-500 focus:outline-none disabled:opacity-60"
+        placeholder={placeholder}
+        className="h-10 w-full rounded-lg border border-bg-border bg-bg-card px-3 text-sm placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none disabled:opacity-60"
       />
     </label>
   );

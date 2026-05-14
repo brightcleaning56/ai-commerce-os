@@ -136,14 +136,14 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
         })
         .catch(() => {});
     } else {
-      // Per-user session — show THEIR identity, never the owner's. Use
-      // the email + role from /api/auth/me. Initials = first letter of
-      // local-part + role tag stays in `title`.
-      const localPart = (me.email.split("@")[0] || me.email).slice(0, 12);
+      // Per-user session — show THEIR identity, never the owner's.
+      // Prefer displayName from the per-user profile (lib/userProfiles.ts)
+      // when set; fall back to email otherwise. Initials come from the
+      // /api/auth/me payload (server-derived from displayName or email).
       setOperator({
-        name: me.email,
+        name: me.name || me.email,
         title: me.role,
-        initials: (localPart[0] ?? "?").toUpperCase(),
+        initials: me.initials || ((me.email[0] ?? "?").toUpperCase()),
       });
     }
     return () => {

@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth";
 import { ALL_CAPABILITIES, ROLES, type Capability, type Role } from "@/lib/capabilities";
 import { resolveCapabilities } from "@/lib/rolePolicy";
 import { getOperator } from "@/lib/operator";
+import { defaultInitialsFor, userProfiles } from "@/lib/userProfiles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,10 +71,19 @@ export async function GET(req: NextRequest) {
   const role = rawRole as Role;
   const caps = await resolveCapabilities(role);
 
+  // Merge in the per-user profile (lib/userProfiles.ts) so consumers
+  // get displayName + initials in one shot. Profile may not exist yet
+  // for users who haven't visited /settings.
+  const profile = await userProfiles.get(auth.user.sub);
+  const displayName = profile?.displayName;
+  const initials = profile?.initials || defaultInitialsFor({ displayName, email: auth.user.email });
+
   return NextResponse.json({
     role,
     email: auth.user.email,
-    name: null,
+    name: displayName ?? null,
+    initials,
+    phone: profile?.phone ?? null,
     capabilities: Array.from(caps) as Capability[],
     isOwner: false,
     isDev: false,

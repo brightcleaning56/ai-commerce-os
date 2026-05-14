@@ -24,7 +24,14 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 export type MeResponse = {
   role: string;
   email: string;
+  /** Display name from the per-user profile (lib/userProfiles.ts).
+   *  null when the user hasn't set one yet. Falls back to email in UI. */
   name: string | null;
+  /** Avatar initials — derived from displayName or email if user
+   *  didn't set one explicitly. Always present. */
+  initials?: string;
+  /** Optional contact phone from the per-user profile. */
+  phone?: string | null;
   capabilities: string[];
   isOwner: boolean;
   isDev: boolean;

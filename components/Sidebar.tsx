@@ -241,14 +241,14 @@ export default function Sidebar({
           ) : me ? (
             <div className="flex items-center gap-2.5 rounded-xl border border-bg-border bg-bg-card p-2.5">
               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-bg-hover text-[11px] font-bold text-ink-primary">
-                {(me.email[0] ?? "?").toUpperCase()}
+                {me.initials || (me.email[0] ?? "?").toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-xs font-semibold text-ink-primary">
-                  {me.email}
+                  {me.name || me.email}
                 </div>
-                <div className="truncate text-[10px] text-ink-tertiary">
-                  Signed in as {me.role}
+                <div className="truncate text-[10px] text-ink-tertiary" title={me.email}>
+                  {me.name ? me.email : `Signed in as ${me.role}`}
                 </div>
               </div>
               <span
