@@ -8,6 +8,7 @@ import {
   type TransactionState,
 } from "@/lib/store";
 import { getEscrowFeeBps, getPlatformFeeBps, splitFees } from "@/lib/payments";
+import { supplierRegistry } from "@/lib/supplierRegistry";
 
 /**
  * Transaction lifecycle engine — the state-transition rules + side effects
@@ -86,12 +87,42 @@ export async function createTransactionFromQuote(quote: Quote, options: {
   const now = new Date().toISOString();
   const id = `txn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
+  // Auto-resolve to supplier registry: when a Stripe Connect account
+  // id is supplied AND we already know that account belongs to a
+  // record in the supplier registry, link this transaction
+  // automatically. Closes the loop end-to-end so future verification
+  // (L3 Operational), distribution intel (Layer 6), and per-supplier
+  // revenue rollups all populate without operator click.
+  //
+  // Best-effort — failures here just leave the transaction unlinked,
+  // same as any pre-registry transaction. Operator can still wire up
+  // the link manually via /admin/suppliers later.
+  let autoSupplier: { registryId: string; legalName: string } | null = null;
+  if (options.supplierStripeAccountId) {
+    try {
+      const match = await supplierRegistry.getByStripeConnectAccountId(
+        options.supplierStripeAccountId,
+      );
+      if (match) {
+        autoSupplier = { registryId: match.id, legalName: match.legalName };
+      }
+    } catch {
+      // Swallow — auto-link is opportunistic, not required.
+    }
+  }
+
   const initialEvent: TransactionEvent = {
     ts: now,
     state: "draft",
     actor: "operator",
-    detail: `Transaction created from accepted quote ${quote.id}`,
-    meta: { quoteId: quote.id, productTotalCents },
+    detail: autoSupplier
+      ? `Transaction created from accepted quote ${quote.id}; auto-linked to supplier ${autoSupplier.legalName}`
+      : `Transaction created from accepted quote ${quote.id}`,
+    meta: {
+      quoteId: quote.id,
+      productTotalCents,
+      ...(autoSupplier ? { autoLinkedSupplierId: autoSupplier.registryId } : {}),
+    },
   };
 
   const txn: Transaction = {
@@ -130,8 +161,14 @@ export async function createTransactionFromQuote(quote: Quote, options: {
 
     contractToken: genShareToken(),
 
-    supplierName: options.supplierName,
+    // If we matched a registry record by Stripe account, prefer that
+    // legal name over whatever the operator passed (they may have
+    // typed a free-text supplier name; the registry is canonical).
+    supplierName: options.supplierName || autoSupplier?.legalName,
     supplierStripeAccountId: options.supplierStripeAccountId,
+    supplierRegistryId: autoSupplier?.registryId,
+    supplierLinkedAt: autoSupplier ? now : undefined,
+    supplierLinkedBy: autoSupplier ? "auto" : undefined,
 
     aiConfidenceScore: undefined, // computed asynchronously by a future pass
 
