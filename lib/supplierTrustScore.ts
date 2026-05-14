@@ -41,14 +41,18 @@ export function computeTrustScore(s: Pick<SupplierRecord, "verificationRuns">): 
   const latestByLevel = pickLatestPerLevel(s.verificationRuns);
   const l1Run = latestByLevel.L1;
   const l2Run = latestByLevel.L2;
+  const l3Run = latestByLevel.L3;
 
   const l1 = l1Run ? levelToPoints(l1Run, 40) : 0;
   const l2 = l2Run ? levelToPoints(l2Run, 40) : 0;
-  const l3plus = 0; // L3-L5 not implemented yet — reserved for future scoring
+  // L3 fills the full 20-point l3plus bucket. L4+L5 will share once
+  // they're implemented (likely scaled to fit the same 20-point cap or
+  // the bucket gets renamed/expanded to "advanced verification").
+  const l3plus = l3Run ? levelToPoints(l3Run, 20) : 0;
 
   // Stale penalty — uses the LATEST run across all levels. Verification
   // certificates expire; a 6-month-old check shouldn't carry full weight.
-  const latestRunAt = mostRecent([l1Run?.ranAt, l2Run?.ranAt]);
+  const latestRunAt = mostRecent([l1Run?.ranAt, l2Run?.ranAt, l3Run?.ranAt]);
   const stalePenalty = latestRunAt ? computeStalePenalty(latestRunAt) : 0;
 
   const raw = l1 + l2 + l3plus + stalePenalty;
@@ -63,7 +67,16 @@ export function computeTrustScore(s: Pick<SupplierRecord, "verificationRuns">): 
     hasL1: !!l1Run,
     hasL2: !!l2Run,
     latestRunAt,
-    summary: explainScore({ total, hasL1: !!l1Run, hasL2: !!l2Run, l1Passed: l1Run?.passed ?? false, l2Passed: l2Run?.passed ?? false, stalePenalty }),
+    summary: explainScore({
+      total,
+      hasL1: !!l1Run,
+      hasL2: !!l2Run,
+      hasL3: !!l3Run,
+      l1Passed: l1Run?.passed ?? false,
+      l2Passed: l2Run?.passed ?? false,
+      l3Passed: l3Run?.passed ?? false,
+      stalePenalty,
+    }),
     computedAt: new Date().toISOString(),
   };
 }
@@ -121,11 +134,13 @@ function explainScore(input: {
   total: number;
   hasL1: boolean;
   hasL2: boolean;
+  hasL3: boolean;
   l1Passed: boolean;
   l2Passed: boolean;
+  l3Passed: boolean;
   stalePenalty: number;
 }): string {
-  if (!input.hasL1 && !input.hasL2) {
+  if (!input.hasL1 && !input.hasL2 && !input.hasL3) {
     return "No verification yet — run L1 to start scoring.";
   }
   const bits: string[] = [];
@@ -133,6 +148,8 @@ function explainScore(input: {
   else if (input.hasL1) bits.push("L1 identity needs fixes");
   if (input.hasL2 && input.l2Passed) bits.push("L2 business verified");
   else if (input.hasL2) bits.push("L2 docs need work");
+  if (input.hasL3 && input.l3Passed) bits.push("L3 operational track record");
+  else if (input.hasL3) bits.push("L3 operational gaps");
   if (input.stalePenalty < 0) bits.push(`stale (-${-input.stalePenalty})`);
   if (input.total >= 80) bits.unshift("Strong");
   else if (input.total >= 60) bits.unshift("Solid");

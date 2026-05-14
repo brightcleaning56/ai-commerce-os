@@ -255,7 +255,7 @@ export default function AdminSuppliersPage() {
     void load();
   }, [load]);
 
-  async function runVerification(s: SupplierRecord, level: "L1" | "L2" = "L1") {
+  async function runVerification(s: SupplierRecord, level: "L1" | "L2" | "L3" = "L1") {
     setVerifyingId(s.id);
     try {
       const r = await fetch(`/api/admin/suppliers/${s.id}/verify?level=${level}`, { method: "POST" });
@@ -612,7 +612,7 @@ function SupplierDrawer({
 }: {
   supplier: SupplierRecord;
   onClose: () => void;
-  onVerify: (level: "L1" | "L2") => void;
+  onVerify: (level: "L1" | "L2" | "L3") => void;
   verifying: boolean;
   onIssuePortalToken: () => void;
   issuingPortalToken: boolean;
@@ -768,11 +768,21 @@ function SupplierDrawer({
                   type="button"
                   onClick={() => onVerify("L2")}
                   disabled={verifying}
-                  className="inline-flex items-center gap-1 rounded-md bg-gradient-brand px-2.5 py-1 text-[11px] font-semibold shadow-glow disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded-md border border-brand-500/40 bg-brand-500/10 px-2.5 py-1 text-[11px] font-semibold text-brand-200 hover:bg-brand-500/20 disabled:opacity-50"
                   title="Score uploaded documents (license, tax/EIN, insurance, industry certs)"
                 >
                   {verifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
                   Run L2
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onVerify("L3")}
+                  disabled={verifying}
+                  className="inline-flex items-center gap-1 rounded-md bg-gradient-brand px-2.5 py-1 text-[11px] font-semibold shadow-glow disabled:opacity-50"
+                  title="Validate self-reported MOQ / capacity / lead time against linked transactions"
+                >
+                  {verifying ? <Loader2 className="h-3 w-3 animate-spin" /> : <Target className="h-3 w-3" />}
+                  Run L3
                 </button>
               </div>
             </div>

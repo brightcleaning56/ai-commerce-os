@@ -26,6 +26,7 @@
  */
 import type { SupplierRecord, VerificationCheck, VerificationRun } from "./supplierRegistry";
 import { DOC_KIND_LABEL, supplierDocs, type SupplierDocKind } from "./supplierDocs";
+import { store } from "./store";
 
 // ─── Public API ────────────────────────────────────────────────────────
 
@@ -140,6 +141,175 @@ export async function runL2Verification(s: SupplierRecord): Promise<Verification
     score,
     passed,
   };
+}
+
+/**
+ * Run L3 (Operational Verification) — validates self-reported
+ * capabilities against actual transaction history.
+ *
+ * Requires linked transactions (Transaction.supplierRegistryId set
+ * via /api/transactions/[id]/link-supplier). With zero linked
+ * transactions every check skips and the run fails (can't operate
+ * without operational data).
+ *
+ * Five checks:
+ *   1. txn-volume        completed transactions ≥ 3 (signal supplier
+ *                        is real and shipping)
+ *   2. moq-consistency   self-reported moq within 2x of typical
+ *                        delivered quantity
+ *   3. capacity-real     monthly transaction quantity reaches at least
+ *                        25% of self-reported capacity (capacity
+ *                        is plausibly utilizable)
+ *   4. lead-time-real    self-reported leadTimeDays within 30 days of
+ *                        median actual delivery time (createdAt →
+ *                        deliveredAt or escrowReleasedAt)
+ *   5. recency           latest transaction within last 180 days
+ *                        (still active vs dormant)
+ *
+ * Pass threshold: 70 (same scoring as L1/L2). Suppliers with no
+ * self-reported moq/leadTime/capacity skip those checks instead
+ * of failing them — we can't grade what they didn't claim.
+ */
+export async function runL3Verification(s: SupplierRecord): Promise<VerificationRun> {
+  const txns = await store.getTransactionsBySupplierRegistryId(s.id);
+  const completed = txns.filter((t) => t.state === "released" || t.state === "delivered" || !!t.escrowReleasedAt);
+
+  const checks: VerificationCheck[] = [];
+
+  // 1. Volume — at least 3 completed transactions
+  const volumeBase = mkBase("txn-volume", "At least 3 completed transactions");
+  if (completed.length >= 10) {
+    checks.push(good(volumeBase, `${completed.length} completed transactions`));
+  } else if (completed.length >= 3) {
+    checks.push(good(volumeBase, `${completed.length} completed transactions`));
+  } else if (completed.length >= 1) {
+    checks.push(warn(volumeBase, `${completed.length} completed (need ≥3 for full credit)`));
+  } else {
+    checks.push(bad(volumeBase, `Zero completed transactions linked to this supplier`));
+  }
+
+  // 2. MOQ consistency — self-reported moq within 2x of typical delivered qty
+  const moqBase = mkBase("moq-consistency", "Self-reported MOQ matches actual order sizes");
+  if (s.moq == null) {
+    checks.push(skip(moqBase, "No self-reported MOQ on record"));
+  } else if (completed.length === 0) {
+    checks.push(skip(moqBase, "No completed transactions to compare against"));
+  } else {
+    const quantities = completed.map((t) => t.quantity).filter((q) => q > 0);
+    if (quantities.length === 0) {
+      checks.push(skip(moqBase, "No quantity data on completed transactions"));
+    } else {
+      const median = medianOf(quantities);
+      const ratio = median / s.moq;
+      if (ratio >= 0.5 && ratio <= 5) {
+        checks.push(good(moqBase, `Median qty ${median} ≈ MOQ ${s.moq} (ratio ${ratio.toFixed(1)}x)`));
+      } else if (ratio < 0.5) {
+        checks.push(warn(moqBase, `Median qty ${median} is below MOQ ${s.moq} — they often accept under-MOQ orders`));
+      } else {
+        checks.push(warn(moqBase, `Median qty ${median} is ${ratio.toFixed(1)}x their stated MOQ ${s.moq} — MOQ may be artificially low`));
+      }
+    }
+  }
+
+  // 3. Capacity utilization — peak monthly qty reaches ≥25% of self-reported cap
+  const capBase = mkBase("capacity-real", "Monthly volume reaches a meaningful share of stated capacity");
+  if (s.capacityUnitsPerMo == null) {
+    checks.push(skip(capBase, "No self-reported capacity on record"));
+  } else if (completed.length === 0) {
+    checks.push(skip(capBase, "No completed transactions to measure"));
+  } else {
+    const peakMonthly = peakMonthlyQuantity(completed);
+    const utilization = peakMonthly / s.capacityUnitsPerMo;
+    if (utilization >= 0.25) {
+      checks.push(good(capBase, `Peak month ${peakMonthly.toLocaleString()} units = ${(utilization * 100).toFixed(0)}% of stated capacity`));
+    } else if (utilization >= 0.05) {
+      checks.push(warn(capBase, `Peak month ${peakMonthly.toLocaleString()} = ${(utilization * 100).toFixed(0)}% of capacity — most capacity is unverified`));
+    } else {
+      checks.push(warn(capBase, `Peak month ${peakMonthly.toLocaleString()} units is far below stated capacity ${s.capacityUnitsPerMo.toLocaleString()}/mo`));
+    }
+  }
+
+  // 4. Lead time — actual median delivery time within 30 days of stated
+  const ltBase = mkBase("lead-time-real", "Actual delivery time within 30 days of stated lead time");
+  if (s.leadTimeDays == null) {
+    checks.push(skip(ltBase, "No self-reported lead time on record"));
+  } else {
+    const deliveryDays = completed
+      .map((t) => {
+        const start = new Date(t.createdAt).getTime();
+        const end = t.deliveredAt
+          ? new Date(t.deliveredAt).getTime()
+          : t.escrowReleasedAt
+            ? new Date(t.escrowReleasedAt).getTime()
+            : null;
+        if (!end) return null;
+        return Math.round((end - start) / (24 * 60 * 60 * 1000));
+      })
+      .filter((d): d is number => d !== null && d >= 0);
+    if (deliveryDays.length === 0) {
+      checks.push(skip(ltBase, "No deliveredAt timestamps on completed transactions"));
+    } else {
+      const medianDays = medianOf(deliveryDays);
+      const diff = Math.abs(medianDays - s.leadTimeDays);
+      if (diff <= 7) {
+        checks.push(good(ltBase, `Median ${medianDays}d ≈ stated ${s.leadTimeDays}d (Δ ${diff}d)`));
+      } else if (diff <= 30) {
+        checks.push(warn(ltBase, `Median ${medianDays}d vs stated ${s.leadTimeDays}d — Δ ${diff}d, monitor for slip`));
+      } else {
+        checks.push(bad(ltBase, `Median ${medianDays}d vs stated ${s.leadTimeDays}d — Δ ${diff}d off, stated lead time is unrealistic`));
+      }
+    }
+  }
+
+  // 5. Recency — latest transaction within last 180 days
+  const recBase = mkBase("recency", "Active in the last 180 days");
+  if (txns.length === 0) {
+    checks.push(bad(recBase, "No transactions on record"));
+  } else {
+    const latestIso = txns.reduce<string>((acc, t) => (t.createdAt > acc ? t.createdAt : acc), txns[0].createdAt);
+    const ageDays = Math.floor((Date.now() - new Date(latestIso).getTime()) / (24 * 60 * 60 * 1000));
+    if (ageDays <= 60) {
+      checks.push(good(recBase, `Latest transaction ${ageDays}d ago`));
+    } else if (ageDays <= 180) {
+      checks.push(good(recBase, `Latest transaction ${ageDays}d ago`));
+    } else if (ageDays <= 365) {
+      checks.push(warn(recBase, `Latest transaction ${ageDays}d ago — going dormant`));
+    } else {
+      checks.push(bad(recBase, `Latest transaction ${ageDays}d ago — supplier appears dormant`));
+    }
+  }
+
+  const { score, passed } = scoreL1(checks);
+  return {
+    level: "L3",
+    ranAt: new Date().toISOString(),
+    checks,
+    score,
+    passed,
+  };
+}
+
+function medianOf(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+    : sorted[mid];
+}
+
+function peakMonthlyQuantity(txns: { createdAt: string; quantity: number }[]): number {
+  // Bucket by year-month; return the peak total quantity in any one month.
+  const buckets = new Map<string, number>();
+  for (const t of txns) {
+    const key = t.createdAt.slice(0, 7); // "YYYY-MM"
+    buckets.set(key, (buckets.get(key) ?? 0) + (t.quantity ?? 0));
+  }
+  let peak = 0;
+  for (const v of buckets.values()) {
+    if (v > peak) peak = v;
+  }
+  return peak;
 }
 
 // ─── Individual checks ─────────────────────────────────────────────────

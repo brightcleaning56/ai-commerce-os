@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth";
 import { supplierRegistry } from "@/lib/supplierRegistry";
-import { runL1Verification, runL2Verification } from "@/lib/supplierVerification";
+import {
+  runL1Verification,
+  runL2Verification,
+  runL3Verification,
+} from "@/lib/supplierVerification";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,13 +44,15 @@ export async function POST(
   const url = new URL(req.url);
   const level = (url.searchParams.get("level") || "L1").toUpperCase();
   let run;
-  if (level === "L2") {
+  if (level === "L3") {
+    run = await runL3Verification(supplier);
+  } else if (level === "L2") {
     run = await runL2Verification(supplier);
   } else if (level === "L1") {
     run = await runL1Verification(supplier);
   } else {
     return NextResponse.json(
-      { error: `level must be L1 or L2 (got ${level})` },
+      { error: `level must be L1, L2, or L3 (got ${level})` },
       { status: 400 },
     );
   }
