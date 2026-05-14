@@ -66,6 +66,17 @@ export async function GET(req: NextRequest) {
   const limitRaw = sp.get("limit");
   const limit = limitRaw ? Number.parseInt(limitRaw, 10) : 500;
   filter.limit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 2000) : 500;
+  // includeCompletedWithinHours: when set, derive-from-cadence-items
+  // also includes done/skipped/failed items whose updatedAt is within
+  // the last N hours. Drives the "Include completed (24h)" toggle on
+  // /queue. Capped at 168h (7d) to keep response sizes sane.
+  const includeRaw = sp.get("includeCompletedWithinHours");
+  if (includeRaw) {
+    const hours = Number.parseFloat(includeRaw);
+    if (Number.isFinite(hours) && hours > 0) {
+      filter.includeCompletedWithinMs = Math.min(hours, 168) * 60 * 60 * 1000;
+    }
+  }
 
   try {
     const items = await computeQueue(filter);

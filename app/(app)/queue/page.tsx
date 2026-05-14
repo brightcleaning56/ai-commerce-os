@@ -70,7 +70,10 @@ type QueueItem = {
   source: string;
   outcome?: string;
   notes?: string;
+  doneAt?: string;
   requiresApproval?: boolean;
+  approvedBy?: string;
+  approvedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -158,6 +161,7 @@ export default function QueuePage() {
   const [channelFilter, setChannelFilter] = useState<QueueChannel | "all">("all");
   const [directionFilter, setDirectionFilter] = useState<QueueDirection | "all">("all");
   const [needsApprovalOnly, setNeedsApprovalOnly] = useState(false);
+  const [includeCompleted, setIncludeCompleted] = useState(false);
   const [search, setSearch] = useState("");
   // Cadence rows can expand inline to reveal an action drawer (send /
   // skip / record outcome) so the operator works the queue without
@@ -170,7 +174,12 @@ export default function QueuePage() {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch("/api/queue", { cache: "no-store", credentials: "include" });
+      // 24-hour completion window when the toggle is on. Server caps
+      // at 168h regardless.
+      const params = new URLSearchParams();
+      if (includeCompleted) params.set("includeCompletedWithinHours", "24");
+      const url = `/api/queue${params.toString() ? `?${params}` : ""}`;
+      const r = await fetch(url, { cache: "no-store", credentials: "include" });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         throw new Error(d.error ?? `Load failed (${r.status})`);
@@ -182,7 +191,7 @@ export default function QueuePage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [includeCompleted]);
 
   useEffect(() => {
     void load();
@@ -369,6 +378,12 @@ export default function QueuePage() {
           Icon={ShieldCheck}
           active={needsApprovalOnly}
           onClick={() => setNeedsApprovalOnly((v) => !v)}
+        />
+        <FilterPill
+          label="Completed (24h)"
+          Icon={Check}
+          active={includeCompleted}
+          onClick={() => setIncludeCompleted((v) => !v)}
         />
         <div className="relative ml-auto">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-tertiary" />
@@ -612,7 +627,34 @@ function QueueRow({
 
       {/* Meta + priority */}
       <div className="flex shrink-0 items-center gap-2">
-        {item.requiresApproval && (
+        {/* Status badge for completed items: green for done, gray for skipped, red for failed.
+            Only relevant when include-completed toggle is on -- otherwise these don't render. */}
+        {item.status !== "pending" && item.status !== "in_progress" && (
+          <span
+            className={`inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+              item.status === "done"
+                ? "border-accent-green/40 bg-accent-green/10 text-accent-green"
+                : item.status === "failed"
+                  ? "border-accent-red/40 bg-accent-red/10 text-accent-red"
+                  : "border-bg-border bg-bg-card text-ink-tertiary"
+            }`}
+            title={item.outcome ? `Outcome: ${item.outcome}` : undefined}
+          >
+            {item.status === "done" ? <Check className="h-2.5 w-2.5" /> : null}
+            {item.outcome || item.status}
+          </span>
+        )}
+        {/* Approval audit -- shown when stamp present (completed approval-required items).
+            Live "Needs approval" pill stays amber for pending items still requiring signoff. */}
+        {item.approvedBy && item.status !== "pending" ? (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-full border border-accent-blue/40 bg-accent-blue/10 px-2 py-0.5 text-[10px] font-medium text-accent-blue"
+            title={`Approved by ${item.approvedBy}${item.approvedAt ? ` at ${new Date(item.approvedAt).toLocaleString()}` : ""}`}
+          >
+            <ShieldCheck className="h-2.5 w-2.5" />
+            {item.approvedBy.split("@")[0]}
+          </span>
+        ) : item.requiresApproval && item.status === "pending" ? (
           <span
             className="inline-flex items-center gap-0.5 rounded-full border border-accent-amber/40 bg-accent-amber/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-amber"
             title="Workspace approval policy says this needs human signoff before it can be sent"
@@ -620,14 +662,18 @@ function QueueRow({
             <ShieldCheck className="h-2.5 w-2.5" />
             Approval
           </span>
+        ) : null}
+        {item.status === "pending" && (
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${PRIORITY_TONE[item.priority]}`}
+            title={`Source: ${item.source}`}
+          >
+            {PRIORITY_LABEL[item.priority]}
+          </span>
         )}
-        <span
-          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${PRIORITY_TONE[item.priority]}`}
-          title={`Source: ${item.source}`}
-        >
-          {PRIORITY_LABEL[item.priority]}
+        <span className="font-mono text-[10px] text-ink-tertiary">
+          {item.status === "pending" ? relTime(item.dueAt) : `done ${item.doneAt ? relTime(item.doneAt) : relTime(item.updatedAt)}`}
         </span>
-        <span className="font-mono text-[10px] text-ink-tertiary">{relTime(item.dueAt)}</span>
       </div>
     </div>
   );
@@ -664,7 +710,52 @@ function CadenceActionDrawer({
   const callOutcomes = ["connected", "voicemail", "no-answer", "wrong-number", "callback-scheduled"];
   const [approved, setApproved] = useState(false);
   const needsApproval = !!item.requiresApproval;
-  const actionsDisabled = acting || (needsApproval && !approved);
+  const isDone = item.status !== "pending" && item.status !== "in_progress";
+  const actionsDisabled = acting || isDone || (needsApproval && !approved);
+
+  // Read-only audit view for already-completed items (visible when the
+  // include-completed toggle is on). Operator can still see preview +
+  // approval audit + outcome but no action buttons render.
+  if (isDone) {
+    return (
+      <div className="border-t border-bg-border bg-bg-app/40 px-4 py-3">
+        <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+          {channel === "email" ? "Email preview" : channel === "sms" ? "SMS preview" : "Call script"}
+        </div>
+        {item.subject && (
+          <div className="mb-1 text-[12px] font-semibold text-ink-primary">
+            Subject: {item.subject}
+          </div>
+        )}
+        <div className="whitespace-pre-wrap rounded-md border border-bg-border bg-bg-card px-3 py-2 text-[12px] text-ink-secondary">
+          {item.body || "(empty body)"}
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="text-[11px]">
+            <span className="text-ink-tertiary">Outcome:</span>{" "}
+            <span className="font-mono text-ink-primary">{item.outcome ?? item.status}</span>
+          </div>
+          {item.doneAt && (
+            <div className="text-[11px]">
+              <span className="text-ink-tertiary">Completed:</span>{" "}
+              <span className="text-ink-secondary">{new Date(item.doneAt).toLocaleString()}</span>
+            </div>
+          )}
+          {item.approvedBy && (
+            <div className="text-[11px] sm:col-span-2">
+              <span className="text-ink-tertiary">Approved by:</span>{" "}
+              <span className="font-mono text-accent-blue">{item.approvedBy}</span>
+              {item.approvedAt && (
+                <span className="ml-1 text-ink-tertiary">
+                  · {new Date(item.approvedAt).toLocaleString()}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="border-t border-bg-border bg-bg-app/40 px-4 py-3">

@@ -110,6 +110,12 @@ export type QueueItem = {
    *  the operator must sign off before this item can be acted on.
    *  Surfaces as a "Needs approval" badge on /queue + filter pill. */
   requiresApproval?: boolean;
+  /** Audit: when this item required approval, the operator email
+   *  who confirmed before the action landed. Set by the action API
+   *  (/api/cadence-items/[id]/action) before the send fires so the
+   *  trail survives even if the send adapter throws. */
+  approvedBy?: string;
+  approvedAt?: string;
 
   createdAt: string;    // ISO
   updatedAt: string;    // ISO
@@ -124,6 +130,14 @@ export type QueueFilter = {
   /** ISO; only items dueAt <= this. */
   untilIso?: string;
   limit?: number;
+  /** When set, derive-from-cadence-items also includes done / skipped /
+   *  failed items whose updatedAt is within the last N ms. Used by the
+   *  /queue page's "Include completed (last 24h)" toggle so the
+   *  operator can audit who approved + when, what the outcome was,
+   *  without leaving the unified surface. Other sources (tasks,
+   *  voicemails, etc.) are not affected since their "done" semantics
+   *  live in their own stores already. */
+  includeCompletedWithinMs?: number;
 };
 
 export type QueueSummary = {
@@ -354,12 +368,23 @@ async function deriveFromNewLeads(): Promise<QueueItem[]> {
  * the inbox after they've been acted on. They stay in the store for
  * audit but drop off the queue surface.
  */
-async function deriveFromCadenceItems(): Promise<QueueItem[]> {
+async function deriveFromCadenceItems(args: { includeCompletedWithinMs?: number } = {}): Promise<QueueItem[]> {
   const all = await cadenceQueueItemsStore.list();
   const out: QueueItem[] = [];
+  const includeWindow = args.includeCompletedWithinMs ?? 0;
+  const includeCutoff = includeWindow > 0 ? Date.now() - includeWindow : 0;
+
   for (const c of all) {
-    if (c.status !== "pending") continue;
-    const status: QueueStatus = "pending";
+    if (c.status !== "pending") {
+      // Optionally include done/skipped/failed if they're within the
+      // requested completion window. Used so the operator can see the
+      // approval audit + outcome of recently-acted-on items.
+      if (includeWindow <= 0) continue;
+      const updatedMs = new Date(c.updatedAt).getTime();
+      if (updatedMs < includeCutoff) continue;
+    }
+
+    const status: QueueStatus = c.status;
     out.push({
       id: c.id,
       channel: c.channel,
@@ -381,6 +406,10 @@ async function deriveFromCadenceItems(): Promise<QueueItem[]> {
       ref: { kind: "cadence", id: c.id },
       source: `Cadence · ${c.cadenceName} · step ${c.stepIndex + 1}`,
       requiresApproval: c.requiresApproval,
+      approvedBy: c.approvedBy,
+      approvedAt: c.approvedAt,
+      outcome: c.outcome,
+      doneAt: c.doneAt,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
     });
@@ -401,7 +430,9 @@ export async function computeQueue(filter: QueueFilter = {}): Promise<QueueItem[
     deriveFromLeadInboundSms(),
     deriveFromLeadFollowups(),
     deriveFromNewLeads(),
-    deriveFromCadenceItems(),
+    deriveFromCadenceItems({
+      includeCompletedWithinMs: filter.includeCompletedWithinMs,
+    }),
   ]);
   let items: QueueItem[] = [
     ...tasks,
