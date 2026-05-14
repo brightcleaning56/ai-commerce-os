@@ -97,6 +97,10 @@ export const NAV_SECTIONS: NavSection[] = [
       // which derives items at request time from tasks, voicemails,
       // lead.inboundSms[], lead-followup candidates, and brand-new leads.
       { label: "Queue", href: "/queue", icon: Inbox, badge: "NEW", requires: "leads:read" },
+      // Cadences -- sequenced multi-touch outreach (slice 3 engine,
+      // slice 5 admin UI). Define recipes here, enroll buyers from
+      // their detail page, watch scheduled steps land on /queue.
+      { label: "Cadences", href: "/cadences", icon: Workflow, badge: "NEW", requires: "outreach:read" },
       { label: "Inbound Leads", href: "/leads", icon: Inbox, badge: "LIVE", requires: "leads:read" },
       { label: "Outreach Automation", href: "/outreach", icon: Send, requires: "outreach:read" },
       { label: "Job Queue", href: "/admin/outreach-jobs", icon: Layers, badge: "NEW", requires: "outreach:read" },
