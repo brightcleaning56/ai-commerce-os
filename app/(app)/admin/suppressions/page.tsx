@@ -14,10 +14,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 
 type Source = "unsubscribe" | "complaint" | "operator" | "import" | "hard_bounce";
+type ChannelScope = "both" | "email" | "sms";
 
 type Suppression = {
   id: string;
   email: string;
+  phone?: string;
+  channel?: "email" | "sms";   // undefined = blocks both
   source: Source;
   reason?: string;
   addedAt: string;
@@ -30,8 +33,27 @@ type ListPayload = {
   suppressions: Suppression[];
   total: number;
   filteredTotal: number;
-  counts: { bySource: Record<string, number> };
+  counts: {
+    bySource: Record<string, number>;
+    byChannel: { both: number; email: number; sms: number };
+  };
 };
+
+const CHANNEL_LABEL: Record<ChannelScope, string> = {
+  both: "Blocks both",
+  email: "Email only",
+  sms: "SMS only",
+};
+
+const CHANNEL_TONE: Record<ChannelScope, string> = {
+  both: "bg-accent-red/15 text-accent-red",
+  email: "bg-accent-blue/15 text-accent-blue",
+  sms: "bg-accent-amber/15 text-accent-amber",
+};
+
+function channelOf(s: Suppression): ChannelScope {
+  return s.channel ?? "both";
+}
 
 const SOURCE_TONE: Record<Source, string> = {
   unsubscribe: "bg-bg-hover text-ink-secondary",
@@ -65,9 +87,12 @@ export default function SuppressionsPage() {
 
   const [q, setQ] = useState("");
   const [sourceFilter, setSourceFilter] = useState<Source | "">("");
+  const [channelFilter, setChannelFilter] = useState<ChannelScope | "">("");
 
   const [addOpen, setAddOpen] = useState(false);
   const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newChannel, setNewChannel] = useState<"" | "email" | "sms">("");
   const [newReason, setNewReason] = useState("");
   const [adding, setAdding] = useState(false);
 
@@ -81,6 +106,7 @@ export default function SuppressionsPage() {
       const params = new URLSearchParams();
       if (q) params.set("q", q);
       if (sourceFilter) params.set("source", sourceFilter);
+      if (channelFilter) params.set("channel", channelFilter);
       const r = await fetch(`/api/admin/suppressions?${params}`, { cache: "no-store" });
       if (r.status === 401) {
         setLoadError("Not signed in — visit /signin and try again.");
@@ -97,23 +123,32 @@ export default function SuppressionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [q, sourceFilter]);
+  }, [q, sourceFilter, channelFilter]);
 
   useEffect(() => { load(); }, [load]);
 
   async function addOne() {
-    if (!newEmail.trim() || adding) return;
+    if ((!newEmail.trim() && !newPhone.trim()) || adding) return;
     setAdding(true);
     try {
       const r = await fetch("/api/admin/suppressions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: newEmail.trim(), reason: newReason.trim() || undefined }),
+        body: JSON.stringify({
+          email: newEmail.trim() || undefined,
+          phone: newPhone.trim() || undefined,
+          channel: newChannel || undefined,
+          reason: newReason.trim() || undefined,
+        }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? `Add failed (${r.status})`);
-      toast(`Added ${newEmail} to suppression list`, "success");
+      const target = newEmail.trim() || newPhone.trim();
+      const scope = newChannel ? ` (${newChannel} only)` : " (both channels)";
+      toast(`Added ${target}${scope}`, "success");
       setNewEmail("");
+      setNewPhone("");
+      setNewChannel("");
       setNewReason("");
       setAddOpen(false);
       await load();
@@ -240,9 +275,26 @@ export default function SuppressionsPage() {
               value={newEmail}
               onChange={(e) => setNewEmail(e.target.value)}
               type="email"
-              placeholder="email@example.com"
+              placeholder="email@example.com (optional)"
               className="h-10 rounded-lg border border-bg-border bg-bg-card px-3 text-sm focus:border-brand-500 focus:outline-none"
             />
+            <input
+              value={newPhone}
+              onChange={(e) => setNewPhone(e.target.value)}
+              type="tel"
+              placeholder="+1 555 555 1234 (optional)"
+              className="h-10 rounded-lg border border-bg-border bg-bg-card px-3 text-sm focus:border-brand-500 focus:outline-none"
+            />
+            <select
+              value={newChannel}
+              onChange={(e) => setNewChannel(e.target.value as "" | "email" | "sms")}
+              className="h-10 rounded-lg border border-bg-border bg-bg-card px-3 text-sm focus:border-brand-500 focus:outline-none"
+              title="Channel scope. Both = blocks email AND SMS to this contact."
+            >
+              <option value="">Block both channels</option>
+              <option value="email">Email only</option>
+              <option value="sms">SMS only</option>
+            </select>
             <input
               value={newReason}
               onChange={(e) => setNewReason(e.target.value)}
@@ -252,13 +304,16 @@ export default function SuppressionsPage() {
             />
             <button
               onClick={addOne}
-              disabled={adding || !newEmail.trim()}
+              disabled={adding || (!newEmail.trim() && !newPhone.trim())}
               className="flex items-center gap-2 rounded-lg bg-gradient-brand px-4 py-2 text-sm font-semibold shadow-glow disabled:opacity-60"
             >
               {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Add
             </button>
           </div>
+          <p className="mt-2 text-[11px] text-ink-tertiary">
+            Provide an email, a phone, or both. Channel scope determines what's blocked: "Both" mirrors auto-mode (default); "Email only" / "SMS only" honor channel-only mode.
+          </p>
         </div>
       )}
 
@@ -281,6 +336,17 @@ export default function SuppressionsPage() {
           {(Object.keys(SOURCE_LABEL) as Source[]).map((s) => (
             <option key={s} value={s}>{SOURCE_LABEL[s]} ({data?.counts.bySource[s] ?? 0})</option>
           ))}
+        </select>
+        <select
+          value={channelFilter}
+          onChange={(e) => setChannelFilter(e.target.value as ChannelScope | "")}
+          className="h-9 rounded-lg border border-bg-border bg-bg-card px-3 text-sm"
+          title="Filter by which channel(s) this suppression blocks"
+        >
+          <option value="">All channels</option>
+          <option value="both">Blocks both ({data?.counts.byChannel.both ?? 0})</option>
+          <option value="email">Email only ({data?.counts.byChannel.email ?? 0})</option>
+          <option value="sms">SMS only ({data?.counts.byChannel.sms ?? 0})</option>
         </select>
       </div>
 
@@ -306,7 +372,8 @@ export default function SuppressionsPage() {
             <table className="min-w-full text-sm">
               <thead className="text-[11px] uppercase tracking-wider text-ink-tertiary">
                 <tr className="border-b border-bg-border">
-                  <th className="px-5 py-2.5 text-left font-medium">Email</th>
+                  <th className="px-5 py-2.5 text-left font-medium">Contact</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Channel</th>
                   <th className="px-3 py-2.5 text-left font-medium">Source</th>
                   <th className="px-3 py-2.5 text-left font-medium">Reason</th>
                   <th className="px-3 py-2.5 text-left font-medium">Added</th>
@@ -314,44 +381,66 @@ export default function SuppressionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {(data?.suppressions ?? []).map((s) => (
-                  <tr key={s.id} className="border-t border-bg-border hover:bg-bg-hover/30">
-                    <td className="px-5 py-3">
-                      <div className="font-mono text-[12px]">{s.email}</div>
-                      {(s.contextLeadId || s.contextBusinessId || s.contextDraftId) && (
-                        <div className="mt-0.5 text-[10px] text-ink-tertiary">
-                          {s.contextLeadId && `lead ${s.contextLeadId}`}
-                          {s.contextBusinessId && `${s.contextLeadId ? " · " : ""}biz ${s.contextBusinessId}`}
-                          {s.contextDraftId && `${s.contextLeadId || s.contextBusinessId ? " · " : ""}draft ${s.contextDraftId}`}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${SOURCE_TONE[s.source]}`}>
-                        {SOURCE_LABEL[s.source]}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-[11px] text-ink-secondary max-w-md truncate" title={s.reason}>
-                      {s.reason ?? "—"}
-                    </td>
-                    <td className="px-3 py-3 text-[11px] text-ink-tertiary">{relTime(s.addedAt)}</td>
-                    <td className="px-5 py-3 text-right">
-                      <button
-                        onClick={() => removeOne(s)}
-                        disabled={removingId === s.id}
-                        className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-hover/40 px-2 py-1 text-[10px] text-ink-secondary hover:border-accent-amber/40 hover:text-accent-amber disabled:opacity-60"
-                        title="Re-enable outreach — only with explicit re-opt-in consent (CAN-SPAM)"
-                      >
-                        {removingId === s.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-3 w-3" />
+                {(data?.suppressions ?? []).map((s) => {
+                  const scope = channelOf(s);
+                  return (
+                    <tr key={s.id} className="border-t border-bg-border hover:bg-bg-hover/30">
+                      <td className="px-5 py-3">
+                        {s.email && <div className="font-mono text-[12px]">{s.email}</div>}
+                        {s.phone && (
+                          <div className="font-mono text-[11px] text-ink-secondary">
+                            {s.phone}
+                          </div>
                         )}
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                        {(s.contextLeadId || s.contextBusinessId || s.contextDraftId) && (
+                          <div className="mt-0.5 text-[10px] text-ink-tertiary">
+                            {s.contextLeadId && `lead ${s.contextLeadId}`}
+                            {s.contextBusinessId && `${s.contextLeadId ? " · " : ""}biz ${s.contextBusinessId}`}
+                            {s.contextDraftId && `${s.contextLeadId || s.contextBusinessId ? " · " : ""}draft ${s.contextDraftId}`}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-3">
+                        <span
+                          className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${CHANNEL_TONE[scope]}`}
+                          title={
+                            scope === "both"
+                              ? "Blocks both email and SMS to this contact"
+                              : scope === "email"
+                                ? "Blocks email only -- SMS still allowed"
+                                : "Blocks SMS only -- email still allowed"
+                          }
+                        >
+                          {CHANNEL_LABEL[scope]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${SOURCE_TONE[s.source]}`}>
+                          {SOURCE_LABEL[s.source]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-[11px] text-ink-secondary max-w-md truncate" title={s.reason}>
+                        {s.reason ?? "—"}
+                      </td>
+                      <td className="px-3 py-3 text-[11px] text-ink-tertiary">{relTime(s.addedAt)}</td>
+                      <td className="px-5 py-3 text-right">
+                        <button
+                          onClick={() => removeOne(s)}
+                          disabled={removingId === s.id}
+                          className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-hover/40 px-2 py-1 text-[10px] text-ink-secondary hover:border-accent-amber/40 hover:text-accent-amber disabled:opacity-60"
+                          title="Re-enable outreach — only with explicit re-opt-in consent (CAN-SPAM)"
+                        >
+                          {removingId === s.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3 w-3" />
+                          )}
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             {data && data.filteredTotal > data.suppressions.length && (
