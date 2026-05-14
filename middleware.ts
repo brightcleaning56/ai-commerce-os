@@ -59,10 +59,12 @@ const PUBLIC_PREFIXES = [
   "/invite/",                // /invite/[token] — token IS the auth
   "/reply/",                 // /reply/[token] — buyer-facing public reply page
   "/u/",                     // /u/[token] — CAN-SPAM unsubscribe landing page
+  "/onboarding/",            // self-serve onboarding flows (chooser + per-persona pages)
   "/api/share/",
   "/api/quotes/",
   "/api/invites/",           // /api/invites/[token] + /accept — token-gated
   "/api/drafts/reply/",      // /api/drafts/reply/[token] — token-gated
+  "/api/onboarding/",        // onboarding session start/save/complete (cookie-gated)
   "/api/webhooks/",
   "/api/cron/",
   "/api/v1/",                // /api/v1/* — Bearer API-key auth via lib/apiAuth
