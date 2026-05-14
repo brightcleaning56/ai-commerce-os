@@ -163,6 +163,11 @@ export default function QueuePage() {
   const [needsApprovalOnly, setNeedsApprovalOnly] = useState(false);
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [search, setSearch] = useState("");
+  // Bulk-selection set (cadence pending items only). Cleared on
+  // refresh, action, or filter change to avoid stale ids.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkApprovalConfirm, setBulkApprovalConfirm] = useState(false);
   // Cadence rows can expand inline to reveal an action drawer (send /
   // skip / record outcome) so the operator works the queue without
   // navigating away. Non-cadence rows still deep-link.
@@ -201,6 +206,73 @@ export default function QueuePage() {
     const i = setInterval(() => void load(), 30_000);
     return () => clearInterval(i);
   }, [load]);
+
+  // Clear selection when filters change so the operator doesn't
+  // accidentally act on items they can't see anymore.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [channelFilter, directionFilter, needsApprovalOnly, includeCompleted]);
+
+  function toggleSelected(itemId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  /**
+   * Bulk action — POSTs to /api/cadence-items/bulk-action with the
+   * selected ids. Handles the 412 "needs approval" gate by showing
+   * an inline confirm bar; second click sends with confirmApproval=true.
+   */
+  async function bulkAct(action: "send" | "skip") {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setActionToast(null);
+    try {
+      const r = await fetch("/api/cadence-items/bulk-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          ids,
+          action,
+          confirmApproval: bulkApprovalConfirm,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 412) {
+        // Approval gate -- show the confirm UI without clearing selection
+        setActionToast({
+          tone: "err",
+          text: `${d.gatedIds?.length ?? 0} of ${ids.length} need approval. Confirm below to proceed.`,
+        });
+        setBulkApprovalConfirm(false);
+        return;
+      }
+      if (!r.ok) throw new Error(d.error ?? `Bulk action failed (${r.status})`);
+      setActionToast({
+        tone: d.summary.failed === 0 ? "ok" : "err",
+        text:
+          action === "send"
+            ? `${d.summary.succeeded} sent, ${d.summary.failed} failed of ${d.summary.total}`
+            : `${d.summary.succeeded} skipped, ${d.summary.failed} failed of ${d.summary.total}`,
+      });
+      setSelected(new Set());
+      setBulkApprovalConfirm(false);
+      await load();
+    } catch (e) {
+      setActionToast({
+        tone: "err",
+        text: e instanceof Error ? e.message : "Bulk action failed",
+      });
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   /**
    * Cadence-item action — POSTs to /api/cadence-items/[id]/action
@@ -403,6 +475,58 @@ export default function QueuePage() {
         </div>
       )}
 
+      {/* Bulk action bar -- floats at top when N items selected */}
+      {selected.size > 0 && (
+        <div className="sticky top-0 z-30 -mx-1 mb-2 flex flex-wrap items-center gap-3 rounded-xl border border-accent-blue/40 bg-bg-panel/95 px-4 py-3 shadow-lg backdrop-blur">
+          <div className="text-[12px] font-semibold text-accent-blue">
+            {selected.size} item{selected.size === 1 ? "" : "s"} selected
+          </div>
+          {/* Approval confirmation strip (shown only after a 412 came back) */}
+          {actionToast?.tone === "err" && actionToast.text.includes("approval") && (
+            <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-accent-amber">
+              <input
+                type="checkbox"
+                checked={bulkApprovalConfirm}
+                onChange={(e) => setBulkApprovalConfirm(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-bg-border accent-accent-amber"
+              />
+              I reviewed all selected — approve to send
+            </label>
+          )}
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => void bulkAct("send")}
+              className="inline-flex items-center gap-1 rounded-md bg-accent-blue px-3 py-1.5 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {bulkBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+              Send all
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => void bulkAct("skip")}
+              className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
+            >
+              <SkipForward className="h-3 w-3" />
+              Skip all
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSelected(new Set());
+                setBulkApprovalConfirm(false);
+              }}
+              className="rounded-md border border-bg-border bg-bg-app p-1.5 text-ink-tertiary hover:text-ink-primary"
+              aria-label="Clear selection"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {actionToast && (
         <div
           className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${
@@ -467,6 +591,8 @@ export default function QueuePage() {
               item={item}
               expanded={expandedId === item.id}
               acting={actingOnId === item.id}
+              selected={selected.has(item.id)}
+              onToggleSelect={() => toggleSelected(item.id)}
               onToggleExpand={() =>
                 setExpandedId((prev) => (prev === item.id ? null : item.id))
               }
@@ -560,12 +686,16 @@ function QueueRow({
   item,
   expanded,
   acting,
+  selected,
+  onToggleSelect,
   onToggleExpand,
   onAction,
 }: {
   item: QueueItem;
   expanded: boolean;
   acting: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
   onToggleExpand: () => void;
   onAction: ActionFn;
 }) {
@@ -586,9 +716,25 @@ function QueueRow({
   // else still deep-links to the source detail view (where the operator
   // already has full UI for that record type).
   const isCadence = item.ref.kind === "cadence";
+  const isSelectable = isCadence && item.status === "pending";
 
   const headerInner = (
     <div className="flex items-center gap-3">
+      {isSelectable ? (
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={(e) => {
+            e.stopPropagation();
+            onToggleSelect();
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="h-3.5 w-3.5 rounded border-bg-border accent-accent-blue"
+          aria-label="Select for bulk action"
+        />
+      ) : (
+        <span className="w-3.5" />
+      )}
       {isCadence ? (
         <button
           type="button"
