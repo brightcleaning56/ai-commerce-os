@@ -618,18 +618,248 @@ const teamFlow: Flow = {
 const buyerFlow: Flow = {
   persona: "buyer",
   steps: [
+    // ── Step 1: Company identity ──────────────────────────────────
     {
-      id: "placeholder",
-      label: "Tell us what you source",
-      blurb:
-        "Slice 1 placeholder — slice 4 fills in: products needed, industries, monthly volume, regions, payment terms, shipping requirements.",
+      id: "company",
+      label: "Tell us about your company",
+      blurb: "We use this to match you with verified suppliers and to contact you about your matches.",
+      questions: [
+        { id: "companyName", type: "text", label: "Company name", required: true, maxLength: 120 },
+        { id: "fullName", type: "text", label: "Your name", required: true, maxLength: 120, placeholder: "Sourcing lead / Buyer" },
+        { id: "title", type: "text", label: "Your title", maxLength: 80, placeholder: "Head of Procurement" },
+        { id: "email", type: "text", label: "Work email", required: true, maxLength: 200, placeholder: "you@company.com" },
+        { id: "phone", type: "text", label: "Direct phone", maxLength: 40 },
+        { id: "website", type: "text", label: "Company website", maxLength: 200, placeholder: "https://yourcompany.com" },
+        {
+          id: "buyerType",
+          type: "select",
+          label: "What kind of buyer are you?",
+          required: true,
+          options: [
+            { value: "retailer", label: "Retailer / DTC brand", description: "You sell to consumers." },
+            { value: "wholesaler", label: "Wholesaler / Distributor", description: "You move goods to other businesses." },
+            { value: "marketplace", label: "Marketplace / Platform", description: "You list third-party products." },
+            { value: "private-label", label: "Private label / White label", description: "You source products to brand as your own." },
+            { value: "enterprise", label: "Enterprise procurement", description: "Internal procurement at a large company." },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 2: Industries + product needs ────────────────────────
+    {
+      id: "needs",
+      label: "What you source",
+      blurb: "Drives which suppliers, trends, and products surface on your dashboard.",
       questions: [
         {
-          id: "company",
-          type: "text",
-          label: "Company name",
+          id: "industries",
+          type: "multiselect",
+          label: "Industries you source from",
           required: true,
-          maxLength: 120,
+          helper: "Pick all that apply. We'll use this to filter the supplier finder + trends feed.",
+          options: [
+            { value: "apparel", label: "Apparel & Accessories" },
+            { value: "beauty", label: "Beauty & Personal Care" },
+            { value: "electronics", label: "Electronics & Tech" },
+            { value: "home-goods", label: "Home Goods & Furniture" },
+            { value: "food-bev", label: "Food & Beverage" },
+            { value: "agriculture", label: "Agriculture & Raw Materials" },
+            { value: "automotive", label: "Automotive Parts" },
+            { value: "industrial", label: "Industrial / B2B Equipment" },
+            { value: "pet", label: "Pet Products" },
+            { value: "sports", label: "Sports & Outdoors" },
+            { value: "toys", label: "Toys & Hobbies" },
+            { value: "health", label: "Health & Wellness" },
+          ],
+        },
+        {
+          id: "topProducts",
+          type: "tags",
+          label: "Specific products / SKUs you're sourcing",
+          helper: "Comma-separated. Example: 'silicone food bags, bamboo cutlery, reusable straws'.",
+          placeholder: "Type and add",
+        },
+        { id: "topProductsNotes", type: "textarea", label: "Anything else we should know about what you source?", maxLength: 1000, placeholder: "Sustainable materials only, FDA approved, etc." },
+      ],
+    },
+
+    // ── Step 3: Volume + budget ───────────────────────────────────
+    {
+      id: "volume",
+      label: "Purchasing scale",
+      blurb: "Lets us pre-filter to suppliers whose MOQ and capacity actually match.",
+      questions: [
+        {
+          id: "monthlyVolume",
+          type: "select",
+          label: "Monthly purchasing volume",
+          required: true,
+          options: [
+            { value: "<5k", label: "Under $5k/mo", description: "Just starting / sample orders." },
+            { value: "5k-25k", label: "$5k-$25k/mo" },
+            { value: "25k-100k", label: "$25k-$100k/mo" },
+            { value: "100k-500k", label: "$100k-$500k/mo" },
+            { value: "500k-2m", label: "$500k-$2M/mo" },
+            { value: "2m+", label: "$2M+/mo", description: "Enterprise scale." },
+          ],
+        },
+        {
+          id: "moqTolerance",
+          type: "select",
+          label: "MOQ tolerance",
+          required: true,
+          helper: "How small must MOQs be to fit your operation?",
+          options: [
+            { value: "any", label: "Any MOQ", description: "I can take large MOQs." },
+            { value: "under-1000", label: "Under 1,000 units" },
+            { value: "under-100", label: "Under 100 units" },
+            { value: "samples", label: "Samples / trial orders only", description: "Need flexibility to test." },
+          ],
+        },
+        {
+          id: "orderFrequency",
+          type: "select",
+          label: "How often do you reorder?",
+          options: [
+            { value: "weekly", label: "Weekly" },
+            { value: "monthly", label: "Monthly" },
+            { value: "quarterly", label: "Quarterly" },
+            { value: "seasonal", label: "Seasonal (2-4x/yr)" },
+            { value: "one-off", label: "Project-based / one-offs" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 4: Region + shipping ─────────────────────────────────
+    {
+      id: "regions",
+      label: "Sourcing geography",
+      blurb: "Where you'll accept goods from + ship to. Powers the lane analytics on your dashboard.",
+      questions: [
+        {
+          id: "sourceRegions",
+          type: "multiselect",
+          label: "Regions you source from",
+          required: true,
+          options: [
+            { value: "us", label: "United States" },
+            { value: "canada", label: "Canada" },
+            { value: "mexico", label: "Mexico" },
+            { value: "eu", label: "European Union" },
+            { value: "uk", label: "United Kingdom" },
+            { value: "asia-china", label: "China" },
+            { value: "asia-india", label: "India" },
+            { value: "asia-vietnam", label: "Vietnam" },
+            { value: "asia-other", label: "Other Asia" },
+            { value: "south-america", label: "South America" },
+            { value: "africa", label: "Africa" },
+            { value: "anywhere", label: "Anywhere -- best price wins" },
+          ],
+        },
+        {
+          id: "deliveryAddress",
+          type: "address",
+          label: "Primary receiving address",
+          helper: "We use this for tax, freight estimates, and lane planning. Add more later via /buyers.",
+        },
+        {
+          id: "preferredShipping",
+          type: "multiselect",
+          label: "Preferred shipping methods",
+          options: [
+            { value: "ocean-fcl", label: "Ocean (FCL)", description: "Full container, slowest, cheapest at scale." },
+            { value: "ocean-lcl", label: "Ocean (LCL)", description: "Less than container, slower." },
+            { value: "air-cargo", label: "Air cargo", description: "Faster, mid-priced." },
+            { value: "ltl", label: "Truck (LTL)", description: "Domestic less-than-truckload." },
+            { value: "parcel", label: "Parcel (UPS/FedEx/USPS)", description: "Small parcels, fastest for low volume." },
+            { value: "rail", label: "Rail" },
+            { value: "any", label: "Any -- price + speed determines" },
+          ],
+        },
+        {
+          id: "deliverySpeed",
+          type: "select",
+          label: "Default delivery urgency",
+          options: [
+            { value: "fastest", label: "Fastest possible (next-day where possible)" },
+            { value: "standard", label: "Standard (5-10 business days)" },
+            { value: "economy", label: "Economy (cheapest, 4+ weeks ok)" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 5: Payment + terms ───────────────────────────────────
+    {
+      id: "payment",
+      label: "Payment preferences",
+      blurb: "We escrow by default; pick how you want to fund + settle.",
+      questions: [
+        {
+          id: "paymentMethods",
+          type: "multiselect",
+          label: "How do you pay suppliers?",
+          required: true,
+          options: [
+            { value: "wire", label: "Wire transfer" },
+            { value: "ach", label: "ACH" },
+            { value: "card", label: "Credit card" },
+            { value: "letter-of-credit", label: "Letter of credit", description: "International formal." },
+            { value: "crypto", label: "Crypto / stablecoin" },
+            { value: "escrow-only", label: "Escrow only", description: "Default. Funds held until delivery." },
+          ],
+        },
+        {
+          id: "paymentTerms",
+          type: "select",
+          label: "Standard payment terms",
+          required: true,
+          options: [
+            { value: "prepay", label: "Prepay 100%", description: "Common for new suppliers." },
+            { value: "50-50", label: "50% deposit, 50% on delivery" },
+            { value: "net-15", label: "Net 15", description: "Pay 15 days after delivery." },
+            { value: "net-30", label: "Net 30", description: "Standard B2B terms." },
+            { value: "net-60", label: "Net 60", description: "Enterprise terms." },
+            { value: "negotiate", label: "Negotiate per supplier" },
+          ],
+        },
+        {
+          id: "currency",
+          type: "select",
+          label: "Default currency",
+          options: [
+            { value: "USD", label: "USD" }, { value: "EUR", label: "EUR" }, { value: "GBP", label: "GBP" },
+            { value: "CAD", label: "CAD" }, { value: "AUD", label: "AUD" }, { value: "CNY", label: "CNY" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 6: Goals ─────────────────────────────────────────────
+    {
+      id: "goals",
+      label: "What's your goal on AVYN?",
+      questions: [
+        {
+          id: "primaryGoal",
+          type: "select",
+          label: "Pick the #1",
+          required: true,
+          options: [
+            { value: "find-suppliers", label: "Find new verified suppliers" },
+            { value: "lower-costs", label: "Lower per-unit costs" },
+            { value: "diversify", label: "Diversify supply chain" },
+            { value: "trend-discovery", label: "Discover trending products earlier" },
+            { value: "consolidate", label: "Consolidate supplier comms" },
+          ],
+        },
+        {
+          id: "supplierDiscoveryFreq",
+          type: "boolean",
+          label: "Send me weekly trend + supplier digests",
+          helper: "Curated by AI based on your industries.",
         },
       ],
     },
