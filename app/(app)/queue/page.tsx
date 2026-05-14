@@ -42,7 +42,8 @@ type QueueRefKind =
   | "lead-followup"
   | "lead-sms"
   | "voicemail"
-  | "draft";
+  | "draft"
+  | "cadence";
 
 type QueueItem = {
   id: string;
@@ -76,6 +77,7 @@ type QueueResponse = {
     leadSms: number;
     leadFollowups: number;
     newLeads: number;
+    cadences?: number;
   };
 };
 
@@ -132,6 +134,12 @@ function detailHref(item: QueueItem): string {
     }
     case "draft":
       return `/outreach?draft=${encodeURIComponent(item.ref.id)}`;
+    case "cadence":
+      // Slice 3 ships cadences without an admin UI (item.id is the
+      // CadenceQueueItem id). Deep-link to the buyer detail so the
+      // operator can act manually; slice 4 builds the inline action
+      // drawer + auto-send opt-in.
+      return item.buyerId ? `/buyers/${encodeURIComponent(item.buyerId)}` : "/queue";
   }
 }
 
@@ -308,6 +316,12 @@ export default function QueuePage() {
           {data.sources.leadFollowups} auto-followup
           {data.sources.leadFollowups === 1 ? "" : "s"} · {data.sources.newLeads} new lead
           {data.sources.newLeads === 1 ? "" : "s"}
+          {data.sources.cadences != null && (
+            <>
+              {" · "}
+              {data.sources.cadences} cadence-scheduled
+            </>
+          )}
           {" · last fetched "}
           {relTime(data.generatedAt)}
         </div>

@@ -86,6 +86,14 @@
 [functions."cron-supplier-l3-refresh"]
   schedule = "30 4 * * *"
 
+# Every 15 minutes — walk active cadence enrollments and schedule the
+# next step's queue item when its dueAt is in the past. Does NOT auto-
+# send the email/call/SMS — operator sees the scheduled item on /queue
+# and acts on it. Auto-send opt-in lands in slice 4. Skipped on kill
+# switch or CRON_ENABLED=false.
+[functions."cron-cadences"]
+  schedule = "*/15 * * * *"
+
 # ─── Headers ───────────────────────────────────────────────────────────────
 # Defense-in-depth: deny framing of the operator dashboard, declare strict
 # content security on the marketing landing.

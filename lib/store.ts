@@ -542,7 +542,8 @@ export type CronRunKind =
   | "followups"
   | "auto-promote-sweep"
   | "daily-digest"
-  | "supplier-l3-refresh";
+  | "supplier-l3-refresh"
+  | "cadences";
 
 export type CronRun = {
   id: string;

@@ -30,6 +30,7 @@
  *
  * Node-only.
  */
+import { cadenceQueueItemsStore } from "@/lib/cadences";
 import { findLeadFollowupCandidates } from "@/lib/leadFollowup";
 import { store } from "@/lib/store";
 import { tasksStore } from "@/lib/tasks";
@@ -56,7 +57,8 @@ export type QueueRefKind =
   | "lead-followup" // lead-followup cron candidate (auto-second-touch)
   | "lead-sms"      // inbound SMS appended to a Lead
   | "voicemail"     // unread voicemail
-  | "draft";        // outreach draft awaiting send (slice 2/3)
+  | "draft"         // outreach draft awaiting send (slice 2/3)
+  | "cadence";      // cadence-scheduled outbound (slice 3)
 
 export type QueueItem = {
   /** Stable id for deduplication across requests. Format depends on the
@@ -338,18 +340,63 @@ async function deriveFromNewLeads(): Promise<QueueItem[]> {
 }
 
 /**
+ * Cadence-scheduled queue items live in their own persistent store
+ * (created by runCadenceTick in lib/cadences.ts). Unlike the other
+ * sources which derive from existing records at request time, these
+ * items ARE the source of truth — operator marking one done writes
+ * back to the cadenceQueueItems store and the parent enrollment.
+ *
+ * Filter to status="pending" so done/skipped items don't pile up on
+ * the inbox after they've been acted on. They stay in the store for
+ * audit but drop off the queue surface.
+ */
+async function deriveFromCadenceItems(): Promise<QueueItem[]> {
+  const all = await cadenceQueueItemsStore.list();
+  const out: QueueItem[] = [];
+  for (const c of all) {
+    if (c.status !== "pending") continue;
+    const status: QueueStatus = "pending";
+    out.push({
+      id: c.id,
+      channel: c.channel,
+      direction: "outbound",
+      status,
+      buyerId: c.buyerId,
+      buyerName: c.buyerName,
+      buyerCompany: c.buyerCompany,
+      to: c.to,
+      subject: c.subject,
+      body: c.body,
+      dueAt: c.dueAt,
+      priority: priorityFor({
+        direction: "outbound",
+        channel: c.channel,
+        dueIso: c.dueAt,
+        status,
+      }),
+      ref: { kind: "cadence", id: c.id },
+      source: `Cadence · ${c.cadenceName} · step ${c.stepIndex + 1}`,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    });
+  }
+  return out;
+}
+
+/**
  * Compose the unified queue across all derived sources, then apply
  * filter + sort. Sort is: priority (urgent → today → later), then
  * dueAt ascending so the most-overdue thing in each priority bucket
  * floats to the top.
  */
 export async function computeQueue(filter: QueueFilter = {}): Promise<QueueItem[]> {
-  const [tasks, voicemails, leadSms, leadFollowups, newLeads] = await Promise.all([
+  const [tasks, voicemails, leadSms, leadFollowups, newLeads, cadenceItems] = await Promise.all([
     deriveFromTasks(),
     deriveFromVoicemails(),
     deriveFromLeadInboundSms(),
     deriveFromLeadFollowups(),
     deriveFromNewLeads(),
+    deriveFromCadenceItems(),
   ]);
   let items: QueueItem[] = [
     ...tasks,
@@ -357,6 +404,7 @@ export async function computeQueue(filter: QueueFilter = {}): Promise<QueueItem[
     ...leadSms,
     ...leadFollowups,
     ...newLeads,
+    ...cadenceItems,
   ];
 
   // Apply filters

@@ -81,6 +81,7 @@ export async function GET(req: NextRequest) {
         leadSms: items.filter((i) => i.ref.kind === "lead-sms").length,
         leadFollowups: items.filter((i) => i.ref.kind === "lead-followup").length,
         newLeads: items.filter((i) => i.ref.kind === "lead").length,
+        cadences: items.filter((i) => i.ref.kind === "cadence").length,
       },
     });
   } catch (err) {
