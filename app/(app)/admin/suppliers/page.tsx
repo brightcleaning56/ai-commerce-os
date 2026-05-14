@@ -745,6 +745,9 @@ function SupplierDrawer({
           {/* Linked transactions */}
           <SupplierTransactionsPanel supplierId={supplier.id} />
 
+          {/* Distribution lanes (Layer 6) */}
+          <SupplierLanesPanel supplierId={supplier.id} />
+
           {/* Documents (L2 evidence) */}
           <SupplierDocsPanel supplierId={supplier.id} />
 
@@ -1699,6 +1702,146 @@ function RollupTile({ label, value, tone }: { label: string; value: string; tone
     <div className={`rounded-md border px-2.5 py-1.5 ${toneClass}`}>
       <div className="text-[9px] uppercase tracking-wider opacity-80">{label}</div>
       <div className="mt-0.5 text-sm font-bold">{value}</div>
+    </div>
+  );
+}
+
+type DistributionLane = {
+  key: string;
+  origin: { country: string; state?: string; city?: string };
+  destination: { country: string; state?: string };
+  transactionCount: number;
+  totalUnits: number;
+  totalRevenueCents: number;
+  lastShipmentAt: string | null;
+  firstShipmentAt: string | null;
+};
+
+type LanesRollup = {
+  supplierId: string;
+  origin: { country: string; state?: string; city?: string };
+  lanes: DistributionLane[];
+  missingDestinationCount: number;
+  totalLinkedTransactions: number;
+};
+
+function SupplierLanesPanel({ supplierId }: { supplierId: string }) {
+  const [data, setData] = useState<LanesRollup | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/admin/suppliers/${supplierId}/lanes`, { cache: "no-store" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Load failed (${r.status})`);
+      setData(d as LanesRollup);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load lanes");
+    } finally {
+      setLoading(false);
+    }
+  }, [supplierId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const fmtUsd = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+          Distribution lanes {data ? `(${data.lanes.length})` : ""}
+        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={loading}
+          className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-app px-1.5 py-0.5 text-[10px] text-ink-tertiary hover:text-ink-primary disabled:opacity-50"
+        >
+          {loading ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <RefreshCw className="h-2.5 w-2.5" />}
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-rose-300/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
+          {error}
+        </div>
+      )}
+
+      {loading && !data ? (
+        <div className="flex items-center gap-2 rounded-md border border-bg-border bg-bg-card px-3 py-2 text-[11px] text-ink-tertiary">
+          <Loader2 className="h-3 w-3 animate-spin" /> Computing lanes…
+        </div>
+      ) : data && data.lanes.length > 0 ? (
+        <div className="space-y-2">
+          {/* Origin reminder */}
+          <div className="text-[10px] text-ink-tertiary">
+            Origin:{" "}
+            <span className="font-mono text-ink-secondary">
+              {[data.origin.city, data.origin.state, data.origin.country].filter(Boolean).join(", ")}
+            </span>
+          </div>
+
+          {data.lanes.map((lane) => {
+            const dest = [lane.destination.state, lane.destination.country].filter(Boolean).join("-");
+            return (
+              <div
+                key={lane.key}
+                className="rounded-md border border-bg-border bg-bg-card p-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 text-[11px] font-mono text-ink-primary">
+                      <span>
+                        {[lane.origin.state, lane.origin.country].filter(Boolean).join("-") || "??"}
+                      </span>
+                      <span className="text-brand-300">→</span>
+                      <span>{dest || "??"}</span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-ink-tertiary">
+                      <span>{lane.transactionCount} txn{lane.transactionCount === 1 ? "" : "s"}</span>
+                      <span>{lane.totalUnits.toLocaleString()} units</span>
+                      <span>{fmtUsd(lane.totalRevenueCents)}</span>
+                      {lane.lastShipmentAt && <span>last {relTime(lane.lastShipmentAt)}</span>}
+                    </div>
+                  </div>
+                  {/* Inline volume bar relative to top lane */}
+                  <div className="text-right">
+                    <div className="text-[10px] text-ink-tertiary">share</div>
+                    <div className="font-mono text-[12px] font-semibold text-ink-primary">
+                      {data.totalLinkedTransactions > 0
+                        ? `${Math.round((lane.transactionCount / data.totalLinkedTransactions) * 100)}%`
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {data.missingDestinationCount > 0 && (
+            <div className="rounded-md border border-accent-amber/30 bg-accent-amber/5 px-3 py-2 text-[11px] text-ink-secondary">
+              <strong className="text-accent-amber">{data.missingDestinationCount}</strong>{" "}
+              of {data.totalLinkedTransactions} linked transactions don&apos;t have a buyer
+              destination yet. Set one via{" "}
+              <span className="font-mono">POST /api/transactions/[id]/destination</span> to
+              include them in the lane rollup.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-md border border-bg-border bg-bg-card px-3 py-2 text-[11px] text-ink-tertiary">
+          No distribution lanes yet.{" "}
+          {data && data.totalLinkedTransactions === 0
+            ? "Link transactions to this supplier first."
+            : `${data?.missingDestinationCount ?? 0} linked transaction(s) lack buyer destination — set one to populate this view.`}
+        </div>
+      )}
     </div>
   );
 }

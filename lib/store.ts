@@ -302,6 +302,20 @@ export type Transaction = {
   supplierLinkedAt?: string;
   supplierLinkedBy?: string;
 
+  // ── Buyer destination ─────────────────────────────────────────────
+  // Where the goods ship TO. Source for Layer 6 Distribution
+  // Intelligence (lib/supplierLanes.ts) — combined with the linked
+  // supplier's origin city/state/country, this gives us the lane.
+  // All optional; existing transactions stay null until backfilled
+  // via POST /api/transactions/[id]/destination. New transactions
+  // ideally collect these from the buyer at proposal/checkout.
+  buyerCountry?: string;             // ISO-3166 alpha-2
+  buyerState?: string;
+  buyerCity?: string;
+  buyerZip?: string;
+  buyerDestinationSetAt?: string;
+  buyerDestinationSetBy?: string;
+
   // Dispute / refund
   disputedAt?: string;
   disputeReason?: string;
