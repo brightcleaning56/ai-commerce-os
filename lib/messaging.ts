@@ -5,6 +5,9 @@
  *      Same three-mode safety as email: simulated / redirected / live.
  *      Redirect target: SMS_TEST_RECIPIENT (E.164 number).
  *      Live mode: SMS_LIVE=true.
+ *      Env-var note: also accepts the legacy TWILIO_FROM as an alias for
+ *      TWILIO_FROM_NUMBER -- kept in sync with lib/sms.ts so a deploy that
+ *      sets only one env var works through both adapter paths.
  *
  * LinkedIn: there is NO public programmatic DM API. We simulate the send,
  *      copy the body to clipboard via the UI, and the user pastes it into
@@ -36,7 +39,9 @@ function isE164(n: string): boolean {
 export async function sendSms(input: ChannelSendInput): Promise<ChannelSendResult> {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
-  const from = process.env.TWILIO_FROM_NUMBER;
+  // Accept either env var name -- canonical TWILIO_FROM_NUMBER, legacy
+  // TWILIO_FROM kept as alias so deploys that only set one keep working.
+  const from = process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_FROM;
   const live = process.env.SMS_LIVE === "true";
   const testRecipient = process.env.SMS_TEST_RECIPIENT;
 
@@ -136,7 +141,7 @@ export function getMessagingProviderInfo(): {
   const smsConfigured =
     !!process.env.TWILIO_ACCOUNT_SID &&
     !!process.env.TWILIO_AUTH_TOKEN &&
-    !!process.env.TWILIO_FROM_NUMBER;
+    !!(process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_FROM);
   return {
     sms: {
       provider: smsConfigured ? "twilio" : "simulated",

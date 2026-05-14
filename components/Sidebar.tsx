@@ -81,6 +81,11 @@ export default function Sidebar({
   const { can, me } = useCapabilities();
 
   const [pendingApprovals, setPendingApprovals] = useState<number | null>(null);
+  // Live unread-inbound count from /api/queue/summary -- powers the
+  // red badge next to "Queue" in the Outreach section. Surfaces missed
+  // calls / inbound SMS / new leads without operator hopping between
+  // /tasks and /calls and /leads to find them.
+  const [queueUnread, setQueueUnread] = useState<number | null>(null);
   const [owner, setOwner] = useState<{ name: string; email: string; company: string; title: string; initials: string } | null>(null);
 
   useEffect(() => {
@@ -93,9 +98,14 @@ export default function Sidebar({
     let cancelled = false;
     async function load() {
       try {
-        const [d, f] = await Promise.all([
+        const [d, f, q] = await Promise.all([
           fetch("/api/drafts").then((r) => r.json()),
           fetch("/api/risk-flags").then((r) => r.json()),
+          // Queue summary is best-effort -- swallow failures so the
+          // sidebar still renders if the queue endpoint is degraded.
+          fetch("/api/queue/summary", { credentials: "include" })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
         ]);
         if (cancelled) return;
         const drafts = (d.drafts ?? []).filter((x: any) => x.status === "draft").length;
@@ -108,6 +118,9 @@ export default function Sidebar({
           (x: any) => (x.severity === "Critical" || x.severity === "High") && !actions[x.id]
         ).length;
         setPendingApprovals(drafts + flags);
+        if (q?.summary) {
+          setQueueUnread(typeof q.summary.unreadInbound === "number" ? q.summary.unreadInbound : 0);
+        }
       } catch {}
     }
     load();
@@ -123,6 +136,14 @@ export default function Sidebar({
       if (pendingApprovals == null) return defaultBadge;
       if (pendingApprovals === 0) return "0";
       return String(pendingApprovals);
+    }
+    if (href === "/queue") {
+      // Numeric unread inbound wins over the generic "NEW" badge once
+      // the count is known. 0 falls back to "NEW" so a quiet queue
+      // still hints that the surface exists.
+      if (queueUnread == null) return defaultBadge;
+      if (queueUnread === 0) return defaultBadge;
+      return String(queueUnread);
     }
     return defaultBadge;
   }

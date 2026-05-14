@@ -1,9 +1,15 @@
 /**
  * Minimal Twilio SMS adapter. Activates when:
- *   TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM (E.164 number) are set.
+ *   TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + (TWILIO_FROM_NUMBER OR TWILIO_FROM)
+ *   are set, where the From number is E.164 like "+14155551234".
  * Otherwise sendSms() returns { ok: false, simulated: true } and the caller
  * treats the SMS path as "skipped — not configured" — same shape as
  * lib/email.ts when no provider key is present. No throws on missing config.
+ *
+ * Env-var note: TWILIO_FROM_NUMBER is the canonical name (matches Twilio's
+ * own docs and lib/messaging.ts). TWILIO_FROM is accepted as a legacy alias
+ * so an existing deploy with only TWILIO_FROM set keeps working. Set just
+ * one; if both are set, TWILIO_FROM_NUMBER wins.
  */
 
 export type SendSmsInput = {
@@ -27,11 +33,16 @@ export type SmsProviderInfo = {
 };
 
 export function getSmsProviderInfo(): SmsProviderInfo {
-  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM) {
+  // Accept either env var name -- TWILIO_FROM_NUMBER is canonical (matches
+  // Twilio docs + lib/messaging.ts), TWILIO_FROM is the legacy alias kept
+  // working so existing deploys aren't broken by this consolidation.
+  const fromNumber =
+    process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_FROM || null;
+  if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && fromNumber) {
     return {
       provider: "twilio",
       configured: true,
-      fromNumber: process.env.TWILIO_FROM,
+      fromNumber,
     };
   }
   return { provider: "fallback", configured: false, fromNumber: null };
@@ -60,6 +71,7 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
 
   const sid = process.env.TWILIO_ACCOUNT_SID!;
   const token = process.env.TWILIO_AUTH_TOKEN!;
+  // info.fromNumber is non-null when info.configured === true (checked above).
   const from = info.fromNumber!;
   const url = `https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`;
 
