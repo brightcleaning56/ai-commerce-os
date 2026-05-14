@@ -6,6 +6,7 @@ import { useCommandPalette } from "./CommandPalette";
 import ThemeToggle from "./ThemeToggle";
 import VoiceStatusBadge from "./voice/VoiceStatusBadge";
 import AgentRoster from "./voice/AgentRoster";
+import { useCapabilities } from "./CapabilityContext";
 
 type OperatorProfile = { name: string; title: string; initials: string };
 
@@ -96,57 +97,59 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
     }
   }, []);
 
-  // Identity is API-authoritative. Server-side `getOperator()` (lib/operator.ts)
-  // is the single source of truth — driven by OPERATOR_* env vars or built-in
-  // defaults. localStorage is treated as a *write target* only: after the API
-  // resolves we sync localStorage to match, so the Settings page never shows
-  // a stale name like "John Smith" left over from the original demo seed.
+  // Identity comes from the actual session. We use useCapabilities()
+  // (which loads /api/auth/me) to check who's signed in:
+  //   - Owner (ADMIN_TOKEN session)  → fetch /api/operator for the rich
+  //     name/title/initials card driven by OPERATOR_* env vars
+  //   - Per-user invite token         → display THEIR email + role from
+  //     the session payload. Don't show owner's identity to a non-owner.
+  //
+  // Previously we always called /api/operator, which leaked the owner's
+  // name + title + initials to every signed-in user regardless of who
+  // they were. Visible bug: an Operator-role teammate would see
+  // "Eric Moore / Founder" in the TopBar instead of their own name.
+  const { me } = useCapabilities();
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/operator", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((op) => {
-        if (cancelled || !op?.name) return;
-        const next = {
-          name: op.name as string,
-          title: (op.title as string) || "Owner",
-          initials:
-            (op.initials as string) ||
-            (op.name as string).split(/\s+/).slice(0, 2).map((w: string) => w[0]?.toUpperCase() ?? "").join("") ||
-            "?",
-        };
-        setOperator(next);
+    if (!me) return; // wait for me to load
 
-        // Sync localStorage so Settings page shows the same identity. Only
-        // write keys we own; preserve other settings the user may have set.
-        try {
-          const raw = localStorage.getItem("aicos:settings:v1");
-          const prev = raw ? JSON.parse(raw) : {};
-          const merged = { ...prev, name: op.name, email: op.email ?? prev.email };
-          localStorage.setItem("aicos:settings:v1", JSON.stringify(merged));
-        } catch {}
-      })
-      .catch(() => {
-        // Last-resort fallback to localStorage if the API genuinely fails (offline, etc.)
-        try {
-          const raw = localStorage.getItem("aicos:settings:v1");
-          if (raw) {
-            const s = JSON.parse(raw);
-            if (s.name && typeof s.name === "string" && s.name !== "John Smith") {
-              setOperator({
-                name: s.name,
-                title: "Owner",
-                initials:
-                  s.name.split(/\s+/).slice(0, 2).map((w: string) => w[0]?.toUpperCase() ?? "").join("") || "?",
-              });
-            }
-          }
-        } catch {}
+    if (me.isOwner) {
+      fetch("/api/operator", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((op) => {
+          if (cancelled || !op?.name) return;
+          const next = {
+            name: op.name as string,
+            title: (op.title as string) || "Owner",
+            initials:
+              (op.initials as string) ||
+              (op.name as string).split(/\s+/).slice(0, 2).map((w: string) => w[0]?.toUpperCase() ?? "").join("") ||
+              "?",
+          };
+          setOperator(next);
+          try {
+            const raw = localStorage.getItem("aicos:settings:v1");
+            const prev = raw ? JSON.parse(raw) : {};
+            const merged = { ...prev, name: op.name, email: op.email ?? prev.email };
+            localStorage.setItem("aicos:settings:v1", JSON.stringify(merged));
+          } catch {}
+        })
+        .catch(() => {});
+    } else {
+      // Per-user session — show THEIR identity, never the owner's. Use
+      // the email + role from /api/auth/me. Initials = first letter of
+      // local-part + role tag stays in `title`.
+      const localPart = (me.email.split("@")[0] || me.email).slice(0, 12);
+      setOperator({
+        name: me.email,
+        title: me.role,
+        initials: (localPart[0] ?? "?").toUpperCase(),
       });
+    }
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [me]);
 
   // Fetch latest runs + drafts when a panel opens
   useEffect(() => {

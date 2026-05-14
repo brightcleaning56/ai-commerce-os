@@ -1,8 +1,9 @@
 "use client";
-import { ArrowRight, Bell, Check, Globe, Palette, Shield, ShieldCheck, Sparkles, User } from "lucide-react";
+import { ArrowRight, Bell, Check, Globe, Lock, Palette, Shield, ShieldCheck, Sparkles, User } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import ThemeToggle from "@/components/ThemeToggle";
+import { useCapabilities } from "@/components/CapabilityContext";
 
 const STORAGE_KEY = "aicos:settings:v1";
 
@@ -47,26 +48,46 @@ export default function SettingsPage() {
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // Hydrate from operator API + localStorage
+  // Identity hydration is identity-aware now. Owner sessions get the
+  // rich profile from /api/operator (driven by OPERATOR_* env vars).
+  // Per-user sessions display THEIR own email + role instead of leaking
+  // the owner's identity. /api/auth/me is the source of truth for
+  // "who am I"; /api/operator is owner-only data.
+  const { me } = useCapabilities();
+  const isOwner = !!me?.isOwner;
   useEffect(() => {
-    fetch("/api/operator")
-      .then((r) => r.json())
-      .then((op) => {
-        if (op?.name) {
-          setName((prev) => prev || op.name);
-          setEmail((prev) => prev || op.email);
-          setTitle(op.title || "Owner");
-          setInitials(op.initials || op.name.slice(0, 2).toUpperCase());
-        }
-      })
-      .catch(() => {});
+    if (!me) return;
+    if (me.isOwner) {
+      fetch("/api/operator")
+        .then((r) => r.json())
+        .then((op) => {
+          if (op?.name) {
+            setName((prev) => prev || op.name);
+            setEmail((prev) => prev || op.email);
+            setTitle(op.title || "Owner");
+            setInitials(op.initials || op.name.slice(0, 2).toUpperCase());
+          }
+        })
+        .catch(() => {});
+    } else {
+      // Per-user session — display their actual identity, never the
+      // owner's. Profile section will render read-only below.
+      setName(me.email);
+      setEmail(me.email);
+      setTitle(me.role);
+      setInitials((me.email[0] ?? "?").toUpperCase());
+    }
 
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const s = JSON.parse(raw) as SettingsState;
-        if (s.name) setName(s.name);
-        if (s.email) setEmail(s.email);
+        // For Owner sessions: localStorage can override name/email
+        // (operator may have customized). For non-Owner sessions: NEVER
+        // let localStorage override identity — that field could carry
+        // the owner's name from a previous session and leak it.
+        if (me?.isOwner && s.name) setName(s.name);
+        if (me?.isOwner && s.email) setEmail(s.email);
         setTz(s.tz ?? DEFAULTS.tz);
         setLocale(s.locale ?? DEFAULTS.locale);
         setDefaultModel(s.defaultModel ?? DEFAULTS.defaultModel);
@@ -75,7 +96,7 @@ export default function SettingsPage() {
       }
     } catch {}
     setHydrated(true);
-  }, []);
+  }, [me]);
 
   // Mark dirty on change
   useEffect(() => {
@@ -86,10 +107,31 @@ export default function SettingsPage() {
   }, [name, tz, locale, defaultModel, defaultMode, notif, hydrated]);
 
   function handleSave() {
-    const data: SettingsState = { name, email, tz, locale, defaultModel, defaultMode, notif };
-    setInitials(name.split(/\s+/).filter(Boolean).slice(0, 2).map((w: string) => w[0]?.toUpperCase() ?? "").join("") || "?");
+    // Owner sessions persist name/email so the operator can customize.
+    // Non-owner sessions persist preferences only — never write identity
+    // to localStorage (would leak across user sessions on the same browser).
+    const data: Partial<SettingsState> = isOwner
+      ? { name, email, tz, locale, defaultModel, defaultMode, notif }
+      : { tz, locale, defaultModel, defaultMode, notif };
+    if (isOwner) {
+      setInitials(
+        name.split(/\s+/).filter(Boolean).slice(0, 2).map((w: string) => w[0]?.toUpperCase() ?? "").join("") || "?",
+      );
+    }
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      // Merge with existing keys so we don't blow away preferences the
+      // user has set in another flow.
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const prev = raw ? (JSON.parse(raw) as Partial<SettingsState>) : {};
+      const merged = { ...prev, ...data };
+      // For non-owner: actively scrub any leftover name/email from a
+      // prior owner session so the next "owner-loads-from-localStorage"
+      // path doesn't pull stale data.
+      if (!isOwner) {
+        delete (merged as Partial<SettingsState>).name;
+        delete (merged as Partial<SettingsState>).email;
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       setDirty(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -136,13 +178,37 @@ export default function SettingsPage() {
               <div className="grid h-12 w-12 place-items-center rounded-full bg-gradient-brand text-sm font-bold">
                 {initials}
               </div>
-              <button className="rounded-md border border-bg-border bg-bg-hover/40 px-3 py-1.5 text-xs hover:bg-bg-hover">
-                Upload photo
-              </button>
+              {isOwner ? (
+                <button className="rounded-md border border-bg-border bg-bg-hover/40 px-3 py-1.5 text-xs hover:bg-bg-hover">
+                  Upload photo
+                </button>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-app px-2 py-1 text-[10px] text-ink-tertiary">
+                  <Lock className="h-3 w-3" />
+                  Owner-managed
+                </span>
+              )}
             </div>
-            <Field label="Full name" value={name} onChange={setName} />
+            {/* Profile fields are owner-only. For per-user sessions we
+                show their session identity read-only — editing the
+                profile would require a per-user account record on the
+                server (separate slice). Until then the Save button
+                still persists locale / AI defaults / theme / notif
+                preferences via localStorage. */}
+            <Field
+              label="Full name"
+              value={name}
+              onChange={setName}
+              disabled={!isOwner}
+            />
             <Field label="Email" value={email} onChange={() => {}} disabled />
             <Field label="Title" value={title} onChange={() => {}} disabled />
+            {!isOwner && (
+              <p className="text-[11px] text-ink-tertiary">
+                Profile fields are managed by the workspace owner. Your locale + theme +
+                notification preferences below still save to your browser.
+              </p>
+            )}
           </div>
         </Section>
 
