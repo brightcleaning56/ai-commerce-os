@@ -184,6 +184,16 @@ const adminFlow: Flow = {
       ],
     },
 
+    // ── Step 1.5: Email verification ──────────────────────────────
+    {
+      id: "verify-email",
+      label: "Verify your email",
+      blurb: "We send a 6-digit code so you can take ownership of this email going forward.",
+      questions: [
+        { id: "code", type: "email-verify", label: "Email verification", required: true },
+      ],
+    },
+
     // ── Step 2: Company / org ─────────────────────────────────────
     {
       id: "company",
@@ -646,6 +656,16 @@ const buyerFlow: Flow = {
       ],
     },
 
+    // ── Step 1.5: Email verification ──────────────────────────────
+    {
+      id: "verify-email",
+      label: "Verify your email",
+      blurb: "We send a 6-digit code so we can route supplier matches to you securely.",
+      questions: [
+        { id: "code", type: "email-verify", label: "Email verification", required: true },
+      ],
+    },
+
     // ── Step 2: Industries + product needs ────────────────────────
     {
       id: "needs",
@@ -895,6 +915,16 @@ const supplierFlow: Flow = {
             { value: "Trader", label: "Trader / Broker", description: "You connect manufacturers + buyers." },
           ],
         },
+      ],
+    },
+
+    // ── Step 1.5: Email verification ──────────────────────────────
+    {
+      id: "verify-email",
+      label: "Verify your email",
+      blurb: "We send a 6-digit code so buyers can reach you securely.",
+      questions: [
+        { id: "code", type: "email-verify", label: "Email verification", required: true },
       ],
     },
 
@@ -1344,6 +1374,16 @@ const distributorFlow: Flow = {
             { value: "full-service", label: "Full-service distributor", description: "Storage + transport + customs." },
           ],
         },
+      ],
+    },
+
+    // ── Step 1.5: Email verification ──────────────────────────────
+    {
+      id: "verify-email",
+      label: "Verify your email",
+      blurb: "We send a 6-digit code so we can route lane requests to you securely.",
+      questions: [
+        { id: "code", type: "email-verify", label: "Email verification", required: true },
       ],
     },
 

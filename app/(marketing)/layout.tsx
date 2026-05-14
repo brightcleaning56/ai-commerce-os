@@ -1,6 +1,7 @@
 "use client";
 import { usePathname } from "next/navigation";
 import MarketingHeader from "@/components/MarketingHeader";
+import ResumeBanner from "@/components/onboarding/ResumeBanner";
 
 export default function MarketingLayout({
   children,
@@ -19,6 +20,10 @@ export default function MarketingLayout({
     <div className="dark flex min-h-screen flex-col bg-bg-base text-ink-primary">
       {showHeader && <MarketingHeader />}
       <main className="flex-1">{children}</main>
+      {/* Floating resume banner -- only renders if there's an active
+          onboarding session cookie. Skipped on the chooser since the
+          chooser shows its own resume hint. */}
+      {pathname !== "/onboarding/start" && <ResumeBanner />}
     </div>
   );
 }

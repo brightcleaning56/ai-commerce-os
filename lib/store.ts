@@ -778,13 +778,14 @@ export type BusinessStatus =
   | "do_not_contact";  // operator-marked or auto-suppressed
 
 export type BusinessSource =
-  | "manual"           // operator added one-by-one
-  | "csv_import"       // bulk imported via CSV
-  | "lead_promote"     // promoted from /leads
-  | "agent_discover"   // surfaced by buyer-discovery agent
-  | "data_axle"        // future: Data Axle bulk
-  | "google_places"    // future: Google Places adapter
-  | "census";          // future: Census Business Patterns
+  | "manual"             // operator added one-by-one
+  | "csv_import"         // bulk imported via CSV
+  | "lead_promote"       // promoted from /leads
+  | "agent_discover"     // surfaced by buyer-discovery agent
+  | "onboarding_buyer"   // self-onboarded via /onboarding/buyer
+  | "data_axle"          // future: Data Axle bulk
+  | "google_places"      // future: Google Places adapter
+  | "census";            // future: Census Business Patterns
 
 export type BusinessRecord = {
   id: string;                       // biz_<random>
