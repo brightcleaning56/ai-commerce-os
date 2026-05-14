@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import {
   AlertCircle,
   Building2,
@@ -17,6 +18,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Target,
   Trash2,
   Upload,
   X,
@@ -333,6 +335,14 @@ export default function AdminSuppliersPage() {
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </button>
+          <Link
+            href="/admin/suppliers/match"
+            className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-bg-hover hover:text-ink-primary"
+            title="Match suppliers to a buyer's needs by trust + category + location + kind"
+          >
+            <Target className="h-3.5 w-3.5" />
+            Match
+          </Link>
           <button
             type="button"
             onClick={() => setOpenDiscover(true)}
@@ -1080,6 +1090,7 @@ function DiscoverModal({
     if (!result || selected.size === 0) return;
     setImporting(true);
     let successes = 0;
+    let dupes = 0;
     let failures = 0;
     try {
       for (const c of result.candidates) {
@@ -1104,16 +1115,26 @@ function DiscoverModal({
               city: c.city,
               zip: c.zip,
               source: "agent-discovery",
+              externalId: c.externalId ?? undefined,
+              externalIdSource: c.externalId ? c.source : undefined,
               internalNotes: `Imported from ${c.source}. ${c.evidence}${c.externalId ? ` (UEI ${c.externalId})` : ""}. Edit email + website before issuing portal access.`,
             }),
           });
-          if (r.ok) successes += 1;
-          else failures += 1;
+          if (!r.ok) {
+            failures += 1;
+            continue;
+          }
+          const d = await r.json().catch(() => ({}));
+          if (d.alreadyExisted) dupes += 1;
+          else successes += 1;
         } catch {
           failures += 1;
         }
       }
-      toast(`Imported ${successes}${failures > 0 ? `, ${failures} failed` : ""}`, failures === 0 ? "success" : "info");
+      const parts = [`Imported ${successes}`];
+      if (dupes > 0) parts.push(`${dupes} already in registry`);
+      if (failures > 0) parts.push(`${failures} failed`);
+      toast(parts.join(", "), failures === 0 ? "success" : "info");
       await onImported();
       onClose();
     } finally {

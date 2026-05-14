@@ -93,6 +93,14 @@ export type SupplierRecord = {
   // ── Lifecycle ─────────────────────────────────────────────────────
   status: "pending" | "active" | "rejected" | "suspended";
   source: "manual" | "self-signup" | "csv-import" | "agent-discovery";
+  /**
+   * Stable identifier from the external source the supplier was
+   * discovered from (USAspending UEI, OpenCorporates company id, etc.).
+   * Used by Discovery import to skip already-imported records — without
+   * this every re-import would create a duplicate row.
+   */
+  externalId?: string;
+  externalIdSource?: "usaspending" | "opencorporates" | "gleif" | "other";
   createdAt: string;
   updatedAt: string;
   // ── Operator notes ────────────────────────────────────────────────
@@ -151,6 +159,16 @@ export const supplierRegistry = {
   async get(id: string): Promise<SupplierRecord | null> {
     const all = await supplierRegistry.list();
     return all.find((s) => s.id === id) ?? null;
+  },
+
+  /**
+   * Find a supplier already imported from a given external source.
+   * Used by /api/admin/suppliers/discover-import to dedupe.
+   */
+  async getByExternalId(externalId: string): Promise<SupplierRecord | null> {
+    if (!externalId) return null;
+    const all = await supplierRegistry.list();
+    return all.find((s) => s.externalId === externalId) ?? null;
   },
 
   async create(input: Omit<SupplierRecord, "id" | "createdAt" | "updatedAt" | "tier" | "verificationRuns"> & {

@@ -124,6 +124,23 @@ export async function POST(req: NextRequest) {
       ? (body.source as SupplierRecord["source"])
       : "manual";
 
+  // External-source dedupe (currently used by Discovery imports). If an
+  // externalId is provided AND a record with that external id already
+  // exists, return the existing one with `alreadyExisted: true` so the
+  // caller can show "imported 3, skipped 5 dupes".
+  const externalId = str("externalId", 80);
+  const externalIdSourceRaw = str("externalIdSource", 40);
+  const VALID_EXT_SOURCES = ["usaspending", "opencorporates", "gleif", "other"] as const;
+  const externalIdSource = externalIdSourceRaw && (VALID_EXT_SOURCES as readonly string[]).includes(externalIdSourceRaw)
+    ? (externalIdSourceRaw as typeof VALID_EXT_SOURCES[number])
+    : undefined;
+  if (externalId) {
+    const existing = await supplierRegistry.getByExternalId(externalId);
+    if (existing) {
+      return NextResponse.json({ ok: true, supplier: existing, alreadyExisted: true });
+    }
+  }
+
   const supplier = await supplierRegistry.create({
     legalName,
     email,
@@ -145,8 +162,10 @@ export async function POST(req: NextRequest) {
     capacityUnitsPerMo: num("capacityUnitsPerMo", 0),
     status: "pending",
     source,
+    externalId,
+    externalIdSource,
     internalNotes: str("internalNotes", 2000),
   });
 
-  return NextResponse.json({ ok: true, supplier });
+  return NextResponse.json({ ok: true, supplier, alreadyExisted: false });
 }
