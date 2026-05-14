@@ -204,10 +204,42 @@ function TasksInner() {
   }
 
   useEffect(() => {
+    // Initial hydrate: merge localStorage tasks (legacy per-browser
+    // source) with server-side /api/tasks (shared across teammates).
+    // Dedupe by id so a task that's in both sources renders once.
+    // localStorage wins on conflict — operator-typed notes on this
+    // device are the more recent intent and shouldn't be clobbered by
+    // a stale server copy. Background server poll keeps the merged
+    // view fresh as teammates add/edit tasks elsewhere.
+    let localList: LocalTask[] = [];
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setTasks(JSON.parse(raw));
+      if (raw) localList = JSON.parse(raw);
     } catch {}
+    setTasks(localList);
+
+    async function mergeServer() {
+      try {
+        const r = await fetch("/api/tasks", { credentials: "include", cache: "no-store" });
+        if (!r.ok) return;
+        const d = await r.json();
+        const serverList = (d.tasks ?? []) as LocalTask[];
+        // Build merged: start with local (priority), then add server
+        // entries whose ids aren't already represented locally.
+        const seen = new Set(localList.map((t) => t.id));
+        const merged = [...localList];
+        for (const s of serverList) {
+          if (!seen.has(s.id)) merged.push(s);
+        }
+        // Sort newest-first by createdAt so teammates' new tasks
+        // appear at the top.
+        merged.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+        setTasks(merged);
+      } catch {}
+    }
+    void mergeServer();
+    const poll = setInterval(() => void mergeServer(), 30_000);
+
     fetch("/api/discovered-buyers")
       .then((r) => (r.ok ? r.json() : { buyers: [] }))
       .then((d) => {
@@ -218,8 +250,13 @@ function TasksInner() {
         setBuyerById(map);
       })
       .catch(() => {});
+    return () => clearInterval(poll);
   }, []);
 
+  // Local-only write — used as the local half of every mutation.
+  // Server writes happen at the call site so the granularity matches
+  // the mutation (PATCH vs DELETE vs POST). Splitting them this way
+  // keeps the dual-write contract explicit.
   function persist(next: LocalTask[]) {
     setTasks(next);
     try {
@@ -229,6 +266,20 @@ function TasksInner() {
 
   function patchTask(id: string, patch: Partial<LocalTask>) {
     persist(tasks.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+    // Server PATCH — best-effort. We skip the `attempts` field here
+    // because saveAttempt() uses the dedicated POST /attempts append
+    // endpoint, which won't clobber a teammate's concurrent attempt.
+    // Sending the full attempts array via PATCH would double-write
+    // the new attempt AND risk wiping concurrent additions.
+    const { attempts: _attempts, ...serverPatch } = patch;
+    if (Object.keys(serverPatch).length > 0) {
+      fetch(`/api/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(serverPatch),
+      }).catch(() => {});
+    }
   }
 
   function toggleDone(id: string) {
@@ -240,11 +291,24 @@ function TasksInner() {
   function removeTask(id: string) {
     persist(tasks.filter((x) => x.id !== id));
     if (openTaskId === id) setOpenTaskId(null);
+    fetch(`/api/tasks/${id}`, {
+      method: "DELETE",
+      credentials: "include",
+    }).catch(() => {});
     toast("Task removed");
   }
 
   function clearDone() {
+    const doneTasks = tasks.filter((x) => x.done);
     persist(tasks.filter((x) => !x.done));
+    // Fire DELETEs in parallel; we don't wait for them — the local
+    // write already made the UI consistent.
+    for (const t of doneTasks) {
+      fetch(`/api/tasks/${t.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      }).catch(() => {});
+    }
     toast("Cleared completed tasks");
   }
 
@@ -891,9 +955,21 @@ function TaskDetail({
       callSid: currentCallSidRef.current ?? undefined,
     };
     currentCallSidRef.current = null;
+    // Local write — append to this task's attempts so the UI updates
+    // immediately. onPatch also fires a server PATCH, but PATCH
+    // replaces the attempts array wholesale and would clobber any
+    // teammate's just-logged attempt we haven't polled yet. Override
+    // the server-side write with the dedicated /attempts append
+    // endpoint to keep concurrent additions safe.
     onPatch({
       attempts: [...(task.attempts ?? []), attempt],
     });
+    fetch(`/api/tasks/${task.id}/attempts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(attempt),
+    }).catch(() => {});
     toast(
       `Logged ${OUTCOME_META[attempt.outcome].label.toLowerCase()} · ${durationSec}s${attempt.callSid ? " · recording will appear shortly" : ""}`,
       attempt.outcome === "connected" ? "success" : "info",

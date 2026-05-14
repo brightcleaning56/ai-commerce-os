@@ -78,24 +78,38 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
    */
   function addTask(type: "phone" | "sequence"): string {
     const id = `t_${Date.now().toString(36)}`;
+    const taskRecord: LocalTask = {
+      id,
+      buyerId: b.id,
+      buyerCompany: b.company,
+      buyerName: b.decisionMaker,
+      // Snapshot contact info so /tasks can render tel:/mailto: actions
+      // without re-fetching the buyer (works even if the buyer record
+      // is later edited or removed).
+      buyerPhone: b.phone,
+      buyerEmail: b.email,
+      type,
+      createdAt: new Date().toISOString(),
+    };
+    // Dual-write during the localStorage → /api/tasks migration:
+    //   - localStorage stays primary for instant UI feedback + offline use
+    //   - /api/tasks POST makes the task visible to teammates on other
+    //     browsers/devices. Server failure doesn't block the local write,
+    //     so this operator still sees the task either way.
+    // Once /tasks fully migrates to server-read, the localStorage write
+    // can drop. Same id on both sides so dedupe works in the meantime.
     try {
       const raw = localStorage.getItem("aicos:tasks:v1");
       const tasks: LocalTask[] = raw ? JSON.parse(raw) : [];
-      tasks.unshift({
-        id,
-        buyerId: b.id,
-        buyerCompany: b.company,
-        buyerName: b.decisionMaker,
-        // Snapshot contact info so /tasks can render tel:/mailto: actions
-        // without re-fetching the buyer (works even if the buyer record
-        // is later edited or removed).
-        buyerPhone: b.phone,
-        buyerEmail: b.email,
-        type,
-        createdAt: new Date().toISOString(),
-      });
+      tasks.unshift(taskRecord);
       localStorage.setItem("aicos:tasks:v1", JSON.stringify(tasks.slice(0, 50)));
     } catch {}
+    fetch("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(taskRecord),
+    }).catch(() => {});
     setTaskAdded(type);
     setTimeout(() => setTaskAdded(null), 2500);
     return id;
