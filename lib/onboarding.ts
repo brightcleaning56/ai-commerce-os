@@ -171,18 +171,259 @@ export type Flow = {
 const adminFlow: Flow = {
   persona: "admin",
   steps: [
+    // ── Step 1: Identity + company basics ─────────────────────────
     {
-      id: "placeholder",
-      label: "Set up your workspace",
-      blurb:
-        "Slice 1 placeholder — slice 2 fills in: org structure, billing intent, AI defaults, outreach approval, compliance toggle, integrations.",
+      id: "identity",
+      label: "Who are you",
+      blurb: "We use this to address you in dashboards, emails, and your AI agent's signature.",
+      questions: [
+        { id: "fullName", type: "text", label: "Your full name", required: true, maxLength: 120, placeholder: "Jane Operator" },
+        { id: "email", type: "text", label: "Work email", required: true, maxLength: 200, placeholder: "you@company.com", helper: "We'll send a verification link in step 7." },
+        { id: "title", type: "text", label: "Your title", maxLength: 80, placeholder: "Founder / CEO / Head of Ops" },
+        { id: "phone", type: "text", label: "Phone (optional)", maxLength: 40, placeholder: "+1 555 0100" },
+      ],
+    },
+
+    // ── Step 2: Company / org ─────────────────────────────────────
+    {
+      id: "company",
+      label: "Tell us about your company",
+      blurb: "Drives reporting, lane analytics, and the public profile your buyers see.",
+      questions: [
+        { id: "companyName", type: "text", label: "Company name", required: true, maxLength: 120 },
+        { id: "website", type: "text", label: "Website", maxLength: 200, placeholder: "https://yourcompany.com" },
+        {
+          id: "businessType",
+          type: "select",
+          label: "What's your primary business model?",
+          required: true,
+          options: [
+            { value: "brand", label: "Brand / DTC", description: "You sell your own product to consumers or wholesale buyers." },
+            { value: "wholesaler", label: "Wholesale / B2B", description: "You move goods between manufacturers and retailers." },
+            { value: "retailer", label: "Retailer / Buyer", description: "You source goods to sell. (Consider the Buyer track.)" },
+            { value: "agency", label: "Agency / Consultancy", description: "You run AVYN on behalf of multiple client brands." },
+            { value: "marketplace", label: "Marketplace / Aggregator", description: "You connect supply + demand at scale." },
+            { value: "other", label: "Something else", description: "Don't see it? Pick this and tell us in the notes." },
+          ],
+        },
+        {
+          id: "headcount",
+          type: "select",
+          label: "How big is your team?",
+          required: true,
+          options: [
+            { value: "1", label: "Just me" },
+            { value: "2-10", label: "2-10 people" },
+            { value: "11-50", label: "11-50" },
+            { value: "51-200", label: "51-200" },
+            { value: "201+", label: "201+" },
+          ],
+        },
+        { id: "headquarters", type: "address", label: "Headquarters", helper: "We use this for tax, escrow defaults, and shipping-lane analytics." },
+      ],
+    },
+
+    // ── Step 3: Org structure / departments ───────────────────────
+    {
+      id: "structure",
+      label: "Organization structure",
+      blurb: "Pick the departments you'll be inviting teammates into. You can add more later.",
       questions: [
         {
-          id: "company",
-          type: "text",
-          label: "Company name",
+          id: "departments",
+          type: "multiselect",
+          label: "Departments using AVYN",
           required: true,
-          maxLength: 120,
+          helper: "These become group labels when you invite teammates in step 8.",
+          options: [
+            { value: "sales", label: "Sales" },
+            { value: "operations", label: "Operations" },
+            { value: "marketing", label: "Marketing" },
+            { value: "finance", label: "Finance" },
+            { value: "support", label: "Customer Support" },
+            { value: "logistics", label: "Logistics / Fulfillment" },
+            { value: "engineering", label: "Engineering / Data" },
+          ],
+        },
+        {
+          id: "primaryGoal",
+          type: "select",
+          label: "What's the #1 thing you want AVYN to do this quarter?",
+          required: true,
+          options: [
+            { value: "find-buyers", label: "Find new buyers", description: "Outbound discovery + outreach automation." },
+            { value: "manage-suppliers", label: "Manage supplier network", description: "Verify, score, and route work to vetted suppliers." },
+            { value: "automate-outreach", label: "Automate outbound", description: "Cadences, drip sequences, AI-drafted touches." },
+            { value: "close-deals", label: "Close more deals", description: "Quote builder, escrow, AI negotiation." },
+            { value: "scale-ops", label: "Scale operations", description: "Lane intelligence, dashboards, audit trails." },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 4: AI defaults ───────────────────────────────────────
+    {
+      id: "aiDefaults",
+      label: "AI agent defaults",
+      blurb: "Sets the starting tone for outreach, agents, and AI-drafted comms. You can override per agent later.",
+      questions: [
+        {
+          id: "aiTone",
+          type: "select",
+          label: "How should AI-drafted messages sound?",
+          required: true,
+          options: [
+            { value: "warm-friendly", label: "Warm + friendly", description: "Conversational, first-name basis, light emoji ok." },
+            { value: "professional", label: "Professional", description: "Polished but not stiff. Business casual." },
+            { value: "formal", label: "Formal", description: "Old-school enterprise. No first-name unless reciprocated." },
+            { value: "direct", label: "Direct + concise", description: "Two sentences max. No hedging." },
+          ],
+        },
+        {
+          id: "aiAggressiveness",
+          type: "select",
+          label: "How aggressive should outreach be?",
+          required: true,
+          options: [
+            { value: "conservative", label: "Conservative", description: "Send only when match score is high. Fewer but higher-quality touches." },
+            { value: "balanced", label: "Balanced", description: "Default. Match score above mid-range." },
+            { value: "aggressive", label: "Aggressive", description: "Cast a wide net. More volume, more rejections." },
+          ],
+        },
+        {
+          id: "languages",
+          type: "multiselect",
+          label: "Languages your team works in",
+          options: [
+            { value: "en", label: "English" }, { value: "es", label: "Spanish" }, { value: "fr", label: "French" },
+            { value: "de", label: "German" }, { value: "pt", label: "Portuguese" }, { value: "zh", label: "Mandarin" },
+            { value: "ja", label: "Japanese" }, { value: "ko", label: "Korean" },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 5: Outreach approval policy ──────────────────────────
+    {
+      id: "outreachApproval",
+      label: "Outreach approval policy",
+      blurb: "Controls what AI-drafted touches need a human signoff before they ship.",
+      questions: [
+        {
+          id: "approvalMode",
+          type: "select",
+          label: "Approval mode",
+          required: true,
+          options: [
+            { value: "all", label: "Approve every touch", description: "Every email/SMS sits in /approvals until you click send. Safest." },
+            { value: "first-touch", label: "Approve first touch only", description: "First message per buyer needs signoff; follow-ups auto-send. Default." },
+            { value: "high-stakes", label: "Approve high-stakes only", description: "Auto-send touches where buyer revenue tier < $50k. Big buyers always need human." },
+            { value: "none", label: "No approval needed", description: "Auto-send everything. Fastest but most risk." },
+          ],
+        },
+        {
+          id: "dailySendCap",
+          type: "number",
+          label: "Daily send cap (per channel)",
+          helper: "0 = no cap. Most operators start at 50-100 to avoid blowing up deliverability.",
+          min: 0,
+          max: 5000,
+        },
+        {
+          id: "approvalNotify",
+          type: "boolean",
+          label: "Email me when items hit the approval queue",
+          helper: "We'll batch into a daily digest unless you want each one.",
+        },
+      ],
+    },
+
+    // ── Step 6: Compliance ────────────────────────────────────────
+    {
+      id: "compliance",
+      label: "Compliance setup",
+      blurb: "We handle CAN-SPAM, RFC 8058 (Gmail/iCloud one-click unsubscribe), and bounce auto-suppression by default. Confirm or override.",
+      questions: [
+        {
+          id: "physicalAddress",
+          type: "boolean",
+          label: "Use my company HQ for the CAN-SPAM physical address footer",
+          helper: "Required by law on every commercial email. We'll auto-append it from step 2 if yes.",
+        },
+        {
+          id: "unsubscribeMode",
+          type: "select",
+          label: "Unsubscribe handling",
+          required: true,
+          options: [
+            { value: "auto", label: "Auto-suppress on every channel", description: "Default. One unsubscribe = no future email/SMS, ever." },
+            { value: "channel-only", label: "Auto-suppress only the channel they unsubscribed from", description: "If they unsubscribe email, you can still SMS." },
+          ],
+        },
+        {
+          id: "gdprMode",
+          type: "boolean",
+          label: "Apply EU GDPR rules to all buyers (not just EU)",
+          helper: "Stricter consent + deletion behaviors. Trade speed for compliance certainty.",
+        },
+        {
+          id: "auditRetentionDays",
+          type: "number",
+          label: "Audit log retention (days)",
+          helper: "Default 365. Some industries (finance, healthcare) need 7+ years.",
+          min: 30,
+          max: 3650,
+        },
+      ],
+    },
+
+    // ── Step 7: Integrations preference ───────────────────────────
+    {
+      id: "integrations",
+      label: "Integrations you want now",
+      blurb: "Pick the ones you'll wire up first. We'll show inline connect buttons on your dashboard.",
+      questions: [
+        {
+          id: "integrations",
+          type: "multiselect",
+          label: "Connect on day one",
+          options: [
+            { value: "stripe", label: "Stripe", description: "Escrow, supplier payouts, invoicing." },
+            { value: "postmark", label: "Postmark", description: "Outbound email + bounce/complaint webhooks." },
+            { value: "twilio", label: "Twilio", description: "Voice + SMS." },
+            { value: "anthropic", label: "Anthropic", description: "AI drafting + agents (Claude API)." },
+            { value: "shopify", label: "Shopify", description: "Pull product catalog + orders." },
+            { value: "quickbooks", label: "QuickBooks", description: "Sync transactions to accounting." },
+            { value: "slack", label: "Slack", description: "Push notifications to a channel." },
+          ],
+        },
+      ],
+    },
+
+    // ── Step 8: Billing intent ────────────────────────────────────
+    {
+      id: "billing",
+      label: "Billing intent",
+      blurb: "We won't charge anything during setup. Pick a plan to anchor the trial flow.",
+      questions: [
+        {
+          id: "plan",
+          type: "select",
+          label: "Plan you're trialing",
+          required: true,
+          options: [
+            { value: "starter", label: "Starter", description: "1 seat. AI agents, queue, cadences. $99/mo after 14-day trial." },
+            { value: "growth", label: "Growth", description: "Up to 10 seats. Marketplace, escrow, lane analytics. $399/mo." },
+            { value: "scale", label: "Scale", description: "Unlimited seats, dedicated AI capacity, SLA. From $1,500/mo." },
+            { value: "decide-later", label: "Decide later", description: "Set me up; I'll pick after I poke around." },
+          ],
+        },
+        {
+          id: "billingEmail",
+          type: "text",
+          label: "Billing contact email (if different from yours)",
+          maxLength: 200,
+          placeholder: "billing@company.com",
         },
       ],
     },
