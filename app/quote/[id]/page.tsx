@@ -45,6 +45,16 @@ export default function QuotePublicPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<"accept" | "reject" | null>(null);
+  // Buyer destination form — appears once the buyer clicks "Accept".
+  // Submitting it ALSO transitions the quote to "accepted" so we
+  // capture status + destination in one PATCH. We don't pre-prompt
+  // for destination because we don't want to slow down the rejection
+  // path; only Accept needs a ship-to.
+  const [showShipForm, setShowShipForm] = useState(false);
+  const [shipCountry, setShipCountry] = useState("US");
+  const [shipState, setShipState] = useState("");
+  const [shipCity, setShipCity] = useState("");
+  const [shipZip, setShipZip] = useState("");
 
   useEffect(() => {
     fetch(`/api/quotes/${id}?t=${encodeURIComponent(token)}`)
@@ -60,16 +70,26 @@ export default function QuotePublicPage() {
   async function act(decision: "accepted" | "rejected") {
     setActing(decision === "accepted" ? "accept" : "reject");
     try {
+      const payload: Record<string, unknown> = { status: decision };
+      if (decision === "accepted" && shipCountry.trim()) {
+        payload.destination = {
+          country: shipCountry.trim(),
+          state: shipState.trim() || undefined,
+          city: shipCity.trim() || undefined,
+          zip: shipZip.trim() || undefined,
+        };
+      }
       const res = await fetch(`/api/quotes/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: decision }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error("Update failed");
       // Refetch to confirm
       const fresh = await fetch(`/api/quotes/${id}?t=${encodeURIComponent(token)}`);
       const data = await fresh.json();
       if (fresh.ok) setQuote(data.quote);
+      setShowShipForm(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Action failed");
     } finally {
@@ -203,27 +223,103 @@ export default function QuotePublicPage() {
         {!finalState && !expired && (
           <div className="rounded-xl border border-bg-border bg-bg-card p-5">
             <div className="mb-3 text-sm font-semibold">Decision</div>
-            <p className="mb-3 text-xs text-ink-secondary">
-              Click below to accept or decline this quote. Both parties will be notified by email.
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => act("accepted")}
-                disabled={acting !== null}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-brand px-4 py-3 text-sm font-semibold shadow-glow disabled:opacity-60"
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                {acting === "accept" ? "Accepting…" : "Accept quote"}
-              </button>
-              <button
-                onClick={() => act("rejected")}
-                disabled={acting !== null}
-                className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card px-4 py-3 text-sm hover:bg-bg-hover disabled:opacity-60"
-              >
-                <XCircle className="h-4 w-4" />
-                {acting === "reject" ? "Declining…" : "Decline"}
-              </button>
-            </div>
+            {!showShipForm ? (
+              <>
+                <p className="mb-3 text-xs text-ink-secondary">
+                  Accept the quote to share your ship-to address; we&apos;ll generate a contract from there.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowShipForm(true)}
+                    disabled={acting !== null}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-brand px-4 py-3 text-sm font-semibold shadow-glow disabled:opacity-60"
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    Accept quote
+                  </button>
+                  <button
+                    onClick={() => act("rejected")}
+                    disabled={acting !== null}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-bg-border bg-bg-card px-4 py-3 text-sm hover:bg-bg-hover disabled:opacity-60"
+                  >
+                    <XCircle className="h-4 w-4" />
+                    {acting === "reject" ? "Declining…" : "Decline"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="mb-3 text-xs text-ink-secondary">
+                  Where should we ship to? Country is required; state/city/zip are optional but help us
+                  plan freight + lead time.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                      Country *
+                    </div>
+                    <input
+                      value={shipCountry}
+                      onChange={(e) => setShipCountry(e.target.value.toUpperCase())}
+                      maxLength={2}
+                      placeholder="US"
+                      className="h-10 w-full rounded-md border border-bg-border bg-bg-app px-3 text-sm uppercase font-mono"
+                    />
+                  </label>
+                  <label className="block">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                      State
+                    </div>
+                    <input
+                      value={shipState}
+                      onChange={(e) => setShipState(e.target.value.toUpperCase())}
+                      maxLength={2}
+                      placeholder="TX"
+                      className="h-10 w-full rounded-md border border-bg-border bg-bg-app px-3 text-sm uppercase font-mono"
+                    />
+                  </label>
+                  <label className="block">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                      City
+                    </div>
+                    <input
+                      value={shipCity}
+                      onChange={(e) => setShipCity(e.target.value)}
+                      placeholder="Dallas"
+                      className="h-10 w-full rounded-md border border-bg-border bg-bg-app px-3 text-sm"
+                    />
+                  </label>
+                  <label className="block">
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                      ZIP / postal code
+                    </div>
+                    <input
+                      value={shipZip}
+                      onChange={(e) => setShipZip(e.target.value)}
+                      placeholder="75201"
+                      className="h-10 w-full rounded-md border border-bg-border bg-bg-app px-3 text-sm"
+                    />
+                  </label>
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={() => act("accepted")}
+                    disabled={acting !== null || !shipCountry.trim() || shipCountry.trim().length !== 2}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-brand px-4 py-3 text-sm font-semibold shadow-glow disabled:opacity-60"
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    {acting === "accept" ? "Accepting…" : "Confirm + accept"}
+                  </button>
+                  <button
+                    onClick={() => setShowShipForm(false)}
+                    disabled={acting !== null}
+                    className="rounded-lg border border-bg-border bg-bg-card px-4 py-3 text-sm hover:bg-bg-hover disabled:opacity-60"
+                  >
+                    Back
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

@@ -168,6 +168,15 @@ export type Quote = {
   estCostUsd?: number;
   usedFallback: boolean;
   generatedRationale?: string;  // AI's reasoning for the price/terms
+  // ── Buyer destination (captured at quote acceptance) ──────────────
+  // Buyer fills these in when accepting the quote on /quote/[id].
+  // createTransactionFromQuote copies them onto the Transaction so
+  // Layer 6 distribution lanes populate without operator backfill.
+  buyerCountry?: string;        // ISO-3166 alpha-2
+  buyerState?: string;          // 2-letter US state when applicable
+  buyerCity?: string;
+  buyerZip?: string;
+  buyerDestinationCapturedAt?: string;
 };
 
 // ─── Transactions: full deal-to-cash orchestration (slice 39) ───────────────

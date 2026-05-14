@@ -134,6 +134,16 @@ export async function createTransactionFromQuote(quote: Quote, options: {
     buyerName: quote.buyerName,
     buyerEmail: options.buyerEmail,
     productName: quote.productName,
+    // Inherit buyer destination from the Quote when present. Quote
+    // captures it on the buyer's "Accept" form (/quote/[id]); having
+    // it on the Transaction means Layer 6 distribution lanes
+    // populate without operator backfill.
+    buyerCountry: quote.buyerCountry,
+    buyerState: quote.buyerState,
+    buyerCity: quote.buyerCity,
+    buyerZip: quote.buyerZip,
+    buyerDestinationSetAt: quote.buyerDestinationCapturedAt,
+    buyerDestinationSetBy: quote.buyerDestinationCapturedAt ? "buyer-on-accept" : undefined,
 
     unitPriceCents: Math.round(quote.unitPrice * 100),
     quantity: quote.quantity,
