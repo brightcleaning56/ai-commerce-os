@@ -106,6 +106,10 @@ export type QueueItem = {
   // Outcome (set once status→done)
   outcome?: string;
   notes?: string;
+  /** Set true by the cadence runner when workspace approval mode says
+   *  the operator must sign off before this item can be acted on.
+   *  Surfaces as a "Needs approval" badge on /queue + filter pill. */
+  requiresApproval?: boolean;
 
   createdAt: string;    // ISO
   updatedAt: string;    // ISO
@@ -376,6 +380,7 @@ async function deriveFromCadenceItems(): Promise<QueueItem[]> {
       }),
       ref: { kind: "cadence", id: c.id },
       source: `Cadence · ${c.cadenceName} · step ${c.stepIndex + 1}`,
+      requiresApproval: c.requiresApproval,
       createdAt: c.createdAt,
       updatedAt: c.updatedAt,
     });

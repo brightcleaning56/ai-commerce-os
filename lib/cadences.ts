@@ -118,6 +118,11 @@ export type CadenceQueueItem = {
   body?: string;
   dueAt: string;
   status: QueueStatus;
+  /** Set true by the cadence runner when workspace config requires
+   *  human signoff before this item can be acted on. Operator sees a
+   *  "Needs approval" badge on /queue + this gates the auto-send
+   *  shortcut (slice 11+). Cleaner than overloading `outcome`. */
+  requiresApproval?: boolean;
   outcome?: string;
   doneAt?: string;
   createdAt: string;
@@ -490,10 +495,9 @@ export async function runCadenceTick(): Promise<CadenceTickResult> {
       const body = applyMergeTags(step.bodyTemplate, merge);
 
       // Approval-mode policy. The first step (index 0) counts as the
-      // "first touch"; later steps are follow-ups. When approval is
-      // required, the queue item still lands as "pending" but we tag
-      // it with a notes line so the operator UI can flag it. Slice
-      // 10.5+ adds an explicit `requiresApproval` flag on QueueItem.
+      // "first touch"; later steps are follow-ups. The flag flows
+      // through to the unified queue (lib/queue.ts) so /queue can
+      // render a "Needs approval" badge.
       const needsApproval = requiresApproval({
         config: wsConfig,
         isFirstTouch: stepIndexToSchedule === 0,
@@ -513,7 +517,7 @@ export async function runCadenceTick(): Promise<CadenceTickResult> {
         body,
         dueAt: new Date().toISOString(),
         status: "pending",
-        outcome: needsApproval ? "requires-approval" : undefined,
+        requiresApproval: needsApproval || undefined,
       });
       scheduledTodayByChannel[step.channel] += 1;
 

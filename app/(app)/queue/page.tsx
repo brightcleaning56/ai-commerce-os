@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  ShieldCheck,
   SkipForward,
   Voicemail,
   X,
@@ -69,6 +70,7 @@ type QueueItem = {
   source: string;
   outcome?: string;
   notes?: string;
+  requiresApproval?: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -155,6 +157,7 @@ export default function QueuePage() {
   const [error, setError] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<QueueChannel | "all">("all");
   const [directionFilter, setDirectionFilter] = useState<QueueDirection | "all">("all");
+  const [needsApprovalOnly, setNeedsApprovalOnly] = useState(false);
   const [search, setSearch] = useState("");
   // Cadence rows can expand inline to reveal an action drawer (send /
   // skip / record outcome) so the operator works the queue without
@@ -243,6 +246,7 @@ export default function QueuePage() {
     let items = data.items;
     if (channelFilter !== "all") items = items.filter((i) => i.channel === channelFilter);
     if (directionFilter !== "all") items = items.filter((i) => i.direction === directionFilter);
+    if (needsApprovalOnly) items = items.filter((i) => i.requiresApproval);
     const q = search.trim().toLowerCase();
     if (q) {
       items = items.filter((i) => {
@@ -271,6 +275,7 @@ export default function QueuePage() {
       call: items.filter((i) => i.channel === "call").length,
       email: items.filter((i) => i.channel === "email").length,
       sms: items.filter((i) => i.channel === "sms").length,
+      needsApproval: items.filter((i) => i.requiresApproval).length,
     };
   }, [data]);
 
@@ -348,6 +353,13 @@ export default function QueuePage() {
           Icon={ArrowUpCircle}
           active={directionFilter === "outbound"}
           onClick={() => setDirectionFilter("outbound")}
+        />
+        <span className="mx-1 h-5 w-px bg-bg-border" />
+        <FilterPill
+          label={`Needs approval (${counts.needsApproval})`}
+          Icon={ShieldCheck}
+          active={needsApprovalOnly}
+          onClick={() => setNeedsApprovalOnly((v) => !v)}
         />
         <div className="relative ml-auto">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-tertiary" />
@@ -586,6 +598,15 @@ function QueueRow({
 
       {/* Meta + priority */}
       <div className="flex shrink-0 items-center gap-2">
+        {item.requiresApproval && (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-full border border-accent-amber/40 bg-accent-amber/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-amber"
+            title="Workspace approval policy says this needs human signoff before it can be sent"
+          >
+            <ShieldCheck className="h-2.5 w-2.5" />
+            Approval
+          </span>
+        )}
         <span
           className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${PRIORITY_TONE[item.priority]}`}
           title={`Source: ${item.source}`}
