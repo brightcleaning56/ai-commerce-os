@@ -67,6 +67,15 @@ export async function POST(
   const isOwner = auth.mode === "production" ? !auth.user : true;
   const linkedBy = isOwner ? op.email : (auth.user?.email ?? "unknown");
 
+  // Bidirectional Stripe Connect sync: if either side already knows the
+  // Stripe Connect account id, copy it to the other so the loop closes.
+  // Best-effort — failures don't block the link itself.
+  if (txn.supplierStripeAccountId && !supplier.stripeConnectAccountId) {
+    await supplierRegistry.update(supplier.id, {
+      stripeConnectAccountId: txn.supplierStripeAccountId,
+    }).catch(() => {});
+  }
+
   const updated = await store.patchTransaction(id, {
     supplierRegistryId: supplier.id,
     supplierLinkedAt: new Date().toISOString(),
@@ -74,6 +83,9 @@ export async function POST(
     // Backfill supplierName from the registry record if it's not already
     // set on the transaction (older txns predate this field).
     supplierName: txn.supplierName || supplier.legalName,
+    // Backfill Stripe account from the registry if the transaction
+    // doesn't have one yet (rare — usually it's the other direction).
+    supplierStripeAccountId: txn.supplierStripeAccountId || supplier.stripeConnectAccountId,
   });
 
   return NextResponse.json({

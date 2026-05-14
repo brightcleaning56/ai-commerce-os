@@ -308,3 +308,75 @@ export async function parseSupplierDoc(input: {
 // Local type alias so we can reference Anthropic types without importing
 // the SDK in every consumer.
 import type Anthropic from "@anthropic-ai/sdk";
+
+/**
+ * Fire-and-forget AI parse for documents uploaded via the upload
+ * endpoints. Returns immediately; the parse runs in the background
+ * and persists onto the SupplierDoc record when done.
+ *
+ * Failure modes (all silent — operator can manually re-parse later):
+ *   - No ANTHROPIC_API_KEY: the parse function returns ok:false and
+ *     we still cache the failure so the UI shows the reason
+ *   - Daily budget exceeded: same — failure is cached
+ *   - Document or supplier deleted between upload + parse: silently
+ *     drop, log a warn
+ *   - Network/SDK error: the cached aiParse will reflect it
+ *
+ * NOT awaited by the caller. Behavior is "eventually consistent" —
+ * the next /documents poll picks up the result.
+ */
+export function autoParseDocInBackground(input: { docId: string; supplierId: string }): void {
+  // Don't even start if we know there's no API key — saves a store
+  // round-trip per upload in dev environments.
+  if (!getAnthropicClient()) return;
+
+  // Wrap in a promise so unhandled rejections can't take down the
+  // route handler. We deliberately don't await this from the caller.
+  void (async () => {
+    try {
+      // Lazy import to avoid a top-level circular dep between
+      // supplierDocs <-> supplierDocAI <-> supplierRegistry.
+      const { supplierDocs } = await import("./supplierDocs");
+      const { supplierRegistry } = await import("./supplierRegistry");
+
+      const [doc, supplier] = await Promise.all([
+        supplierDocs.get(input.docId),
+        supplierRegistry.get(input.supplierId),
+      ]);
+      if (!doc || !supplier) {
+        console.warn(
+          `[supplier-doc-ai] auto-parse skipped — doc=${!!doc} supplier=${!!supplier}`,
+        );
+        return;
+      }
+      const result = await parseSupplierDoc({ doc, supplier });
+      const summary: import("./supplierDocs").DocAIParseSummary = result.ok
+        ? {
+            ok: true,
+            docKindGuess: result.docKindGuess,
+            businessNameOnDoc: result.businessNameOnDoc,
+            documentNumber: result.documentNumber,
+            issueDate: result.issueDate,
+            expiryDate: result.expiryDate,
+            summary: result.summary,
+            confidence: result.confidence,
+            redFlags: result.redFlags,
+            recommendation: result.recommendation,
+            modelUsed: result.modelUsed,
+            estCostUsd: result.estCostUsd,
+            parsedAt: result.parsedAt,
+          }
+        : {
+            ok: false,
+            reason: result.reason,
+            parsedAt: result.parsedAt,
+          };
+      await supplierDocs.update(input.docId, { aiParse: summary });
+    } catch (e) {
+      console.warn(
+        "[supplier-doc-ai] background auto-parse threw:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  })();
+}

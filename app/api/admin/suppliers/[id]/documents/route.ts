@@ -8,6 +8,7 @@ import {
   type SupplierDocKind,
 } from "@/lib/supplierDocs";
 import { supplierRegistry } from "@/lib/supplierRegistry";
+import { autoParseDocInBackground } from "@/lib/supplierDocAI";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,5 +105,12 @@ export async function POST(
     contentBase64,
     uploadedBy,
   });
+
+  // Auto-parse with Claude in the background — doesn't block the
+  // upload response. The parse result lands on the doc record when
+  // ready; the next /documents GET picks it up. Skips silently on
+  // unsupported MIME / no API key / over budget.
+  autoParseDocInBackground({ docId: doc.id, supplierId: id });
+
   return NextResponse.json({ ok: true, document: doc });
 }

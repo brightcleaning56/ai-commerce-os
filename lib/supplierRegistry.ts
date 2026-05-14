@@ -101,6 +101,18 @@ export type SupplierRecord = {
    */
   externalId?: string;
   externalIdSource?: "usaspending" | "opencorporates" | "gleif" | "other";
+  /**
+   * Stripe Connect account id (acct_...) when this supplier has been
+   * onboarded for direct payouts. Populated either:
+   *   - automatically when /api/transactions/[id]/connect-supplier is
+   *     called for a transaction already linked to this supplier, or
+   *   - manually via PATCH /api/admin/suppliers/[id]
+   *
+   * Lets new transactions auto-link to the registry by reverse-resolving
+   * supplierStripeAccountId. Closes the loop between Layer 8 (Tx Routing)
+   * and the registry.
+   */
+  stripeConnectAccountId?: string;
   createdAt: string;
   updatedAt: string;
   // ── Operator notes ────────────────────────────────────────────────
@@ -169,6 +181,16 @@ export const supplierRegistry = {
     if (!externalId) return null;
     const all = await supplierRegistry.list();
     return all.find((s) => s.externalId === externalId) ?? null;
+  },
+
+  /**
+   * Find a supplier by Stripe Connect account id. Used by transaction
+   * creation to auto-link to the registry without operator action.
+   */
+  async getByStripeConnectAccountId(acct: string): Promise<SupplierRecord | null> {
+    if (!acct) return null;
+    const all = await supplierRegistry.list();
+    return all.find((s) => s.stripeConnectAccountId === acct) ?? null;
   },
 
   async create(input: Omit<SupplierRecord, "id" | "createdAt" | "updatedAt" | "tier" | "verificationRuns"> & {

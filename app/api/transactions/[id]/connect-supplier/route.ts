@@ -2,6 +2,7 @@
 import { requireCapability } from "@/lib/auth";
 import { createAccountLink, createConnectedAccount, retrieveConnectedAccount } from "@/lib/payments";
 import { store } from "@/lib/store";
+import { supplierRegistry } from "@/lib/supplierRegistry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,6 +67,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
     accountId = created.accountId;
     await store.patchTransaction(txn.id, { supplierStripeAccountId: accountId });
+
+    // If this transaction is already linked to a supplier registry
+    // record, mirror the new Stripe Connect account back onto the
+    // registry so future transactions for this supplier can auto-link.
+    // Best-effort — failure here doesn't roll back the Connect creation.
+    if (txn.supplierRegistryId) {
+      const supplier = await supplierRegistry.get(txn.supplierRegistryId).catch(() => null);
+      if (supplier && !supplier.stripeConnectAccountId) {
+        await supplierRegistry.update(supplier.id, {
+          stripeConnectAccountId: accountId,
+        }).catch(() => {});
+      }
+    }
   }
 
   const link = await createAccountLink({

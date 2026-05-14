@@ -61,6 +61,7 @@ export async function PATCH(
   str("zip", 20);
   str("country", 2);
   str("internalNotes", 2000);
+  str("stripeConnectAccountId", 80);
 
   if (Array.isArray(body.categories)) {
     patch.categories = body.categories

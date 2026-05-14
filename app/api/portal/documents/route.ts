@@ -6,6 +6,7 @@ import {
   supplierDocs,
   type SupplierDocKind,
 } from "@/lib/supplierDocs";
+import { autoParseDocInBackground } from "@/lib/supplierDocAI";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -78,5 +79,10 @@ export async function POST(req: NextRequest) {
     contentBase64,
     uploadedBy: auth.email,
   });
+
+  // Background AI parse — runs while the supplier sees their upload
+  // confirmed. Result appears on the next /documents poll.
+  autoParseDocInBackground({ docId: doc.id, supplierId: auth.supplierId });
+
   return NextResponse.json({ ok: true, document: doc });
 }
