@@ -546,19 +546,274 @@ function QuestionField({
         </div>
       );
     }
-    case "file":
     case "email-verify":
-      // Slice 7 wires these. Render a placeholder that doesn't break the
-      // engine but tells the operator/tester the type is reserved.
       return (
-        <div className="rounded-md border border-dashed border-bg-border bg-bg-app/40 px-3 py-3 text-[12px] text-ink-tertiary">
+        <div>
           {labelBlock}
-          {question.type === "file"
-            ? "(File upload — wired in slice 7)"
-            : "(Email magic-link verification — wired in slice 7)"}
+          <EmailVerifyControl />
+          {errorBlock}
+        </div>
+      );
+    case "file":
+      return (
+        <div>
+          {labelBlock}
+          <FileUploadControl kind={question.id} filename={typeof value === "string" ? value : undefined} />
+          {errorBlock}
         </div>
       );
     default:
       return null;
   }
+}
+
+// ─── Email verify control ───────────────────────────────────────────
+
+function EmailVerifyControl() {
+  const [step, setStep] = useState<"idle" | "sent" | "verified">("idle");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
+
+  // Hydrate verified state from the session on mount so a returning
+  // user sees "Verified" instead of "Send code" if they already did it.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/onboarding/save", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled) return;
+        if (d?.session?.emailVerified) setStep("verified");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function sendCode() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/onboarding/verify-email/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Failed (${r.status})`);
+      setStep("sent");
+      setMsg({
+        tone: d.sent ? "ok" : "err",
+        text: d.sent
+          ? "Code sent — check your inbox (and spam folder)."
+          : "Email send failed; if you got a code another way, you can still enter it below.",
+      });
+    } catch (e) {
+      setMsg({ tone: "err", text: e instanceof Error ? e.message : "Couldn't send code" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmCode() {
+    if (code.trim().length === 0) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/onboarding/verify-email/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.reason ?? `Failed (${r.status})`);
+      setStep("verified");
+      setMsg({ tone: "ok", text: "Email verified." });
+    } catch (e) {
+      setMsg({ tone: "err", text: e instanceof Error ? e.message : "Couldn't verify" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (step === "verified") {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-accent-green/40 bg-accent-green/5 px-3 py-2 text-[12px] text-accent-green">
+        <CheckCircle2 className="h-3.5 w-3.5" />
+        Email verified
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-bg-border bg-bg-app px-3 py-3">
+      {step === "idle" ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void sendCode()}
+          className="inline-flex items-center gap-1 rounded-md bg-accent-blue px-3 py-1.5 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+          Send verification code
+        </button>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            placeholder="6-digit code"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            className="h-9 w-32 rounded-md border border-bg-border bg-bg-card px-3 text-center text-base font-mono tracking-[0.5em]"
+            maxLength={6}
+          />
+          <button
+            type="button"
+            disabled={busy || code.length !== 6}
+            onClick={() => void confirmCode()}
+            className="inline-flex items-center gap-1 rounded-md bg-accent-blue px-3 py-1.5 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+            Confirm
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void sendCode()}
+            className="text-[11px] text-ink-tertiary underline hover:text-ink-secondary disabled:opacity-50"
+          >
+            Resend
+          </button>
+        </div>
+      )}
+      {msg && (
+        <div
+          className={`mt-2 text-[11px] ${
+            msg.tone === "ok" ? "text-accent-green" : "text-accent-red"
+          }`}
+        >
+          {msg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── File upload control ────────────────────────────────────────────
+
+function FileUploadControl({ kind, filename }: { kind: string; filename?: string }) {
+  const [uploaded, setUploaded] = useState<string | null>(filename ?? null);
+  const [size, setSize] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Check on mount whether this kind is already uploaded for this session
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/onboarding/documents", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d?.documents) return;
+        const match = (d.documents as Array<{ kind: string; filename: string; sizeBytes: number }>).find(
+          (doc) => doc.kind === kind,
+        );
+        if (match) {
+          setUploaded(match.filename);
+          setSize(match.sizeBytes);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [kind]);
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setError("File too large -- max 2 MB");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.set("kind", kind);
+      fd.set("file", file);
+      const r = await fetch("/api/onboarding/documents", { method: "POST", body: fd });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? d.reason ?? `Upload failed (${r.status})`);
+      setUploaded(d.document?.filename ?? file.name);
+      setSize(d.document?.sizeBytes ?? file.size);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/onboarding/documents", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind }),
+      });
+      if (!r.ok) throw new Error(`Remove failed (${r.status})`);
+      setUploaded(null);
+      setSize(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Remove failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-bg-border bg-bg-app px-3 py-3">
+      {uploaded ? (
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-accent-green" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[12px] font-medium">{uploaded}</div>
+            {size != null && (
+              <div className="text-[10px] text-ink-tertiary">
+                {(size / 1024).toFixed(1)} KB · uploaded
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void remove()}
+            className="text-[11px] text-ink-tertiary underline hover:text-accent-red disabled:opacity-50"
+          >
+            Replace
+          </button>
+        </div>
+      ) : (
+        <label className="flex cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-bg-border px-3 py-4 text-[12px] text-ink-secondary hover:bg-bg-hover">
+          {busy ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Uploading…
+            </>
+          ) : (
+            <>
+              <ArrowRight className="h-3.5 w-3.5 -rotate-90" />
+              Click to upload (max 2 MB)
+            </>
+          )}
+          <input type="file" className="hidden" onChange={onPick} disabled={busy} />
+        </label>
+      )}
+      {error && <div className="mt-2 text-[11px] text-accent-red">{error}</div>}
+    </div>
+  );
 }
