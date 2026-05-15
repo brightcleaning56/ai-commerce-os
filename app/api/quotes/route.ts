@@ -94,6 +94,13 @@ export async function POST(req: NextRequest) {
     : 0;
   const notes = typeof body.notes === "string" ? body.notes.trim().slice(0, 1000) : undefined;
   const overrideCap = body.overrideCap === true;
+  // Slice 53: optional supplierRegistryId from the operator -- when
+  // set, slice-47 freight estimator (at quote-accept time) uses the
+  // supplier's country/state as origin instead of defaulting to US.
+  const supplierRegistryId =
+    typeof body.supplierRegistryId === "string" && body.supplierRegistryId.trim()
+      ? body.supplierRegistryId.trim().slice(0, 80)
+      : undefined;
 
   // ── Slice 33: per-teammate quote / discount cap enforcement ──────
   // Sums every line's subtotal (qty * price) + shipping to compute
@@ -198,6 +205,7 @@ export async function POST(req: NextRequest) {
       generatedRationale: `Created via the manual bulk-quote builder by ${
         auth.user ? auth.user.email : "owner"
       }${notes ? ` — operator note: ${notes}` : ""}`,
+      supplierRegistryId,
     };
     await store.saveQuote(quote);
     created.push(quote);
