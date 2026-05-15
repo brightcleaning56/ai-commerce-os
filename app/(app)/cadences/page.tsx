@@ -598,8 +598,66 @@ type CadenceTemplate = {
   cadenceName: string;
   cadenceDescription: string;
   steps: DraftStep[];
+  /** "seed" = built-in. "custom" = operator-created via
+   *  POST /api/cadences/templates. Set on server-fetched entries
+   *  (slice 44+); the local fallback const is "seed" only. */
+  source?: "seed" | "custom";
 };
 
+/**
+ * Server template shape (slice 44 API). Numeric values; we convert
+ * to DraftStep on hydration so the create-form's string-typed inputs
+ * still work.
+ */
+type ServerTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  cadenceName: string;
+  cadenceDescription: string;
+  source: "seed" | "custom";
+  createdAt?: string;
+  createdBy?: string;
+  steps: Array<{
+    channel: Channel;
+    delayHours: number;
+    label?: string;
+    subject?: string;
+    bodyTemplate?: string;
+    branches?: Array<{ ifOutcome: string; gotoIndex: number }>;
+    maxRetries?: number;
+    retryDelayMinutes?: number;
+  }>;
+};
+
+function serverTemplateToDraft(t: ServerTemplate): CadenceTemplate {
+  return {
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    cadenceName: t.cadenceName,
+    cadenceDescription: t.cadenceDescription,
+    source: t.source,
+    steps: t.steps.map((s) => ({
+      channel: s.channel,
+      delayHours: String(s.delayHours),
+      label: s.label ?? "",
+      subject: s.subject ?? "",
+      bodyTemplate: s.bodyTemplate ?? "",
+      branches: (s.branches ?? []).map((b) => ({
+        ifOutcome: b.ifOutcome,
+        gotoIndex: String(b.gotoIndex),
+      })),
+      maxRetries: String(s.maxRetries ?? 0),
+      retryDelayMinutes: String(s.retryDelayMinutes ?? 30),
+    })),
+  };
+}
+
+// Local fallback gallery -- used only when /api/cadences/templates
+// fails or hasn't returned yet. Mirrors the slice 44 SEED_TEMPLATES
+// content so the operator always sees something even if the API
+// degrades.
 const CADENCE_TEMPLATES: CadenceTemplate[] = [
   {
     id: "b2b-3-touch",
@@ -739,6 +797,27 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
   ]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Slice 48: hydrate templates from /api/cadences/templates so
+  // operator-created customs (slice 44 POST) appear alongside seeds.
+  // Falls back to the local CADENCE_TEMPLATES const on fetch failure
+  // so the gallery never goes blank.
+  const [templates, setTemplates] = useState<CadenceTemplate[]>(CADENCE_TEMPLATES);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/cadences/templates", { cache: "no-store", credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d?.templates) return;
+        const hydrated = (d.templates as ServerTemplate[]).map(serverTemplateToDraft);
+        if (hydrated.length > 0) setTemplates(hydrated);
+      })
+      .catch(() => {
+        // Keep the local fallback when the API is unreachable
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function applyTemplate(t: CadenceTemplate) {
     setName(t.cadenceName);
@@ -838,14 +917,21 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
           Start from a template
         </div>
         <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
-          {CADENCE_TEMPLATES.map((t) => (
+          {templates.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => applyTemplate(t)}
               className="rounded-md border border-bg-border bg-bg-app px-2.5 py-1.5 text-left text-[11px] hover:border-accent-blue/50 hover:bg-bg-hover"
             >
-              <div className="font-semibold">{t.name}</div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold">{t.name}</span>
+                {t.source === "custom" && (
+                  <span className="rounded-full border border-accent-blue/30 bg-accent-blue/10 px-1 py-0 text-[8px] font-semibold uppercase tracking-wider text-accent-blue">
+                    custom
+                  </span>
+                )}
+              </div>
               <div className="mt-0.5 text-[10px] text-ink-tertiary">{t.description}</div>
             </button>
           ))}
