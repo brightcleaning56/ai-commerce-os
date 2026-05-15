@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { estimateLane } from "@/lib/freight";
 import { store } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -90,6 +91,35 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       patch.buyerCity = str(body.destination.city, 80);
       patch.buyerZip = str(body.destination.zip, 20);
       patch.buyerDestinationCapturedAt = new Date().toISOString();
+
+      // ── Slice 47: auto-attach freight estimate ────────────────────
+      // Now that we have a destination, call estimateLane() so the
+      // resulting Transaction has freight cost ready to show. Best-
+      // effort -- a freight failure does NOT block the accept.
+      //
+      // Origin: defaults to US for now since OutreachDraft doesn't
+      // carry a supplier link. Slice 47.5 will pull from a future
+      // Quote.supplierRegistryId field once quotes get supplier-aware.
+      // Weight is approximated quantity * 0.5kg/unit (placeholder).
+      try {
+        const existingQuote = await store.getQuote(params.id);
+        if (existingQuote) {
+          const originCountry = "US"; // TODO slice 47.5: resolve via supplier
+          const weightKg = Math.max(1, (existingQuote.quantity ?? 1) * 0.5);
+          const quote = await estimateLane({
+            originCountry,
+            destCountry: country,
+            destState: patch.buyerState as string | undefined,
+            weightKg,
+          });
+          patch.freightEstimate = quote;
+        }
+      } catch (e) {
+        console.warn(
+          `[quote accept] freight estimate failed for ${params.id}:`,
+          e instanceof Error ? e.message : e,
+        );
+      }
     }
   }
 

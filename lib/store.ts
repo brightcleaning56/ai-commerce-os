@@ -177,6 +177,23 @@ export type Quote = {
   buyerCity?: string;
   buyerZip?: string;
   buyerDestinationCapturedAt?: string;
+  // ── Freight estimates (slice 47) ──────────────────────────────────
+  // Computed at quote acceptance from lib/freight.estimateLane(). The
+  // operator sees the cheapest mode + cost on /transactions immediately;
+  // they don't have to manually estimate freight before booking.
+  // Only populated when buyerCountry was captured + estimate succeeded.
+  freightEstimate?: {
+    provider: "shippo" | "fallback";
+    laneKey: string;
+    rates: Array<{
+      mode: string;
+      estimateUsd: number;
+      transitDaysMin: number;
+      transitDaysMax: number;
+      notes?: string;
+    }>;
+    computedAt: string;
+  };
 };
 
 // ─── Transactions: full deal-to-cash orchestration (slice 39) ───────────────
@@ -324,6 +341,24 @@ export type Transaction = {
   buyerZip?: string;
   buyerDestinationSetAt?: string;
   buyerDestinationSetBy?: string;
+
+  // ── Freight estimate (slice 47) -- propagated from Quote.freightEstimate
+  // when createTransactionFromQuote runs. Operator-side surfaces (the
+  // /transactions detail panel, quote PDF generator) read this so they
+  // don't have to re-call /api/freight/estimate. Same shape as
+  // Quote.freightEstimate.
+  freightEstimate?: {
+    provider: "shippo" | "fallback";
+    laneKey: string;
+    rates: Array<{
+      mode: string;
+      estimateUsd: number;
+      transitDaysMin: number;
+      transitDaysMax: number;
+      notes?: string;
+    }>;
+    computedAt: string;
+  };
 
   // Dispute / refund
   disputedAt?: string;

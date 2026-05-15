@@ -144,6 +144,9 @@ export async function createTransactionFromQuote(quote: Quote, options: {
     buyerZip: quote.buyerZip,
     buyerDestinationSetAt: quote.buyerDestinationCapturedAt,
     buyerDestinationSetBy: quote.buyerDestinationCapturedAt ? "buyer-on-accept" : undefined,
+    // Slice 47: propagate freight estimate from Quote -> Transaction
+    // so /transactions panels can show cost without re-fetching.
+    freightEstimate: quote.freightEstimate,
 
     unitPriceCents: Math.round(quote.unitPrice * 100),
     quantity: quote.quantity,
