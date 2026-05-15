@@ -8,6 +8,7 @@ import SetupChecklist from "@/components/dashboard/SetupChecklist";
 import TopProductsTable from "@/components/dashboard/TopProductsTable";
 import TopBuyersTable from "@/components/dashboard/TopBuyersTable";
 import AgentFeed from "@/components/dashboard/AgentFeed";
+import VoiceActivityCard from "@/components/dashboard/VoiceActivityCard";
 import {
   CategoryDonut,
   DemandRadar,
@@ -115,6 +116,10 @@ export default function DashboardPage() {
         <RevenueArea />
         <CategoryDonut />
       </div>
+
+      {/* Slice 42: voice activity card -- self-fetches, hides quietly
+          on a fresh workspace with zero calls + zero voicemails. */}
+      <VoiceActivityCard />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <AgentFeed />
