@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -148,15 +149,18 @@ export default function CadenceItemsPage() {
             outcomes. Read-only.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <CleanupButton onCleaned={load} />
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {summary && (
@@ -336,5 +340,60 @@ function Tile({
         <div className="text-lg font-bold tabular-nums">{value}</div>
       </div>
     </div>
+  );
+}
+
+// ─── CleanupButton (slice 37) ──────────────────────────────────────
+
+function CleanupButton({ onCleaned }: { onCleaned: () => void }) {
+  const [busy, setBusy] = useState(false);
+
+  async function run() {
+    const days = window.prompt(
+      "Drop done / skipped / failed cadence items older than how many days?\n\n" +
+        "Pending items are NEVER touched.\n" +
+        "Default: 30 (most operators run this quarterly).",
+      "30",
+    );
+    if (days === null) return;
+    const n = Number.parseInt(days, 10);
+    if (!Number.isFinite(n) || n < 0) {
+      alert("Enter a non-negative number");
+      return;
+    }
+    if (!window.confirm(`Drop done/skipped/failed items older than ${n} days?\n\nThis cannot be undone.`)) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/admin/cadence-items/cleanup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          statuses: ["done", "skipped", "failed"],
+          olderThanDays: n,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Cleanup failed (${r.status})`);
+      alert(`Removed ${d.removed} item${d.removed === 1 ? "" : "s"}`);
+      onCleaned();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Cleanup failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void run()}
+      disabled={busy}
+      className="inline-flex items-center gap-1 rounded-md border border-accent-red/30 bg-accent-red/5 px-2.5 py-1.5 text-[12px] text-accent-red hover:bg-accent-red/15 disabled:opacity-50"
+      title="Drop completed items older than N days. Pending items not affected."
+    >
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+      Cleanup
+    </button>
   );
 }

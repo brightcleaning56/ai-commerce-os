@@ -407,6 +407,30 @@ export const cadenceQueueItemsStore = {
     if (removed > 0) await getBackend().write(CADENCE_QUEUE_ITEMS_FILE, next);
     return removed;
   },
+
+  /**
+   * Slice 37: bulk cleanup. Drops every item whose status is in
+   * `statuses` AND whose updatedAt is older than `olderThanDays`.
+   * Pending items are NEVER touched (would lose work-in-flight).
+   * Returns the count removed.
+   */
+  async cleanup(args: {
+    statuses: Array<"done" | "skipped" | "failed">;
+    olderThanDays: number;
+  }): Promise<number> {
+    if (args.statuses.length === 0) return 0;
+    const cutoffMs = Date.now() - Math.max(0, args.olderThanDays) * 24 * 60 * 60 * 1000;
+    const all = await cadenceQueueItemsStore.list();
+    const keep = all.filter((q) => {
+      // Never delete pending items (in-flight)
+      if (q.status === "pending") return true;
+      if (!args.statuses.includes(q.status as "done" | "skipped" | "failed")) return true;
+      return new Date(q.updatedAt).getTime() >= cutoffMs;
+    });
+    const removed = all.length - keep.length;
+    if (removed > 0) await getBackend().write(CADENCE_QUEUE_ITEMS_FILE, keep);
+    return removed;
+  },
 };
 
 // ─── Runner ─────────────────────────────────────────────────────────
