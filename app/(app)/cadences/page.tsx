@@ -362,11 +362,11 @@ export default function CadencesPage() {
                 {/* Expanded: enrollments table */}
                 {isExpanded && (
                   <div className="border-t border-bg-border px-4 py-3">
+                    <BulkEnrollPanel cadenceId={c.id} onEnrolled={load} />
                     {enrs.length === 0 ? (
                       <div className="py-6 text-center text-[11px] text-ink-tertiary">
-                        No enrollments yet. Open a buyer detail page and click
-                        "Enroll in cadence" to add one (slice 5.5 ships the
-                        button; for now POST <span className="font-mono">/api/cadences/{c.id}/enroll</span>).
+                        No enrollments yet. Use the bulk-enroll above or open a buyer
+                        detail page and click "Enroll in cadence".
                       </div>
                     ) : (
                       <table className="w-full text-[12px]">
@@ -897,6 +897,161 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Bulk-enroll panel (slice 24) ────────────────────────────────────
+
+/**
+ * CSV-paste bulk enrollment for a single cadence. Each line is a
+ * buyer in the format:
+ *   buyerId,buyerName,buyerCompany[,email][,phone]
+ *
+ * Comma-quoted fields aren't supported -- this is a paste-from-spreadsheet
+ * shortcut, not a full RFC 4180 parser. Operator can also paste from
+ * /buyers CSV export which uses the same column order.
+ */
+function BulkEnrollPanel({ cadenceId, onEnrolled }: { cadenceId: string; onEnrolled: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [csv, setCsv] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{
+    tone: "ok" | "err";
+    text: string;
+    failures: Array<{ row: number; reason: string }>;
+  } | null>(null);
+
+  function parseCsv(text: string): Array<{
+    buyerId: string;
+    buyerName: string;
+    buyerCompany: string;
+    buyerEmail?: string;
+    buyerPhone?: string;
+  }> {
+    return text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#") && !line.startsWith("buyerId,"))
+      .map((line) => {
+        const cols = line.split(",").map((c) => c.trim());
+        return {
+          buyerId: cols[0] ?? "",
+          buyerName: cols[1] ?? "",
+          buyerCompany: cols[2] ?? "",
+          buyerEmail: cols[3] || undefined,
+          buyerPhone: cols[4] || undefined,
+        };
+      });
+  }
+
+  async function submit() {
+    const buyers = parseCsv(csv);
+    if (buyers.length === 0) {
+      setResult({ tone: "err", text: "No rows parsed", failures: [] });
+      return;
+    }
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await fetch(`/api/cadences/${cadenceId}/enroll/bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ buyers }),
+      });
+      const d = await r.json();
+      if (!r.ok && r.status !== 207) {
+        throw new Error(d.error ?? `Bulk enroll failed (${r.status})`);
+      }
+      const failures = (d.results ?? [])
+        .filter((rr: { ok: boolean; skipped?: boolean }) => !rr.ok && !rr.skipped)
+        .map((rr: { row: number; reason: string }) => ({ row: rr.row, reason: rr.reason }));
+      setResult({
+        tone: d.summary?.failed === 0 ? "ok" : "err",
+        text: `${d.summary?.enrolled ?? 0} enrolled, ${d.summary?.skipped ?? 0} skipped (already enrolled), ${d.summary?.failed ?? 0} failed of ${d.summary?.total ?? buyers.length}`,
+        failures,
+      });
+      if ((d.summary?.enrolled ?? 0) > 0) {
+        setCsv("");
+        onEnrolled();
+      }
+    } catch (e) {
+      setResult({
+        tone: "err",
+        text: e instanceof Error ? e.message : "Bulk enroll failed",
+        failures: [],
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mb-3 rounded-md border border-bg-border bg-bg-app/40 px-3 py-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between text-[11px] font-medium text-ink-secondary hover:text-ink-primary"
+      >
+        <span>Bulk enroll via CSV</span>
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <p className="text-[10px] text-ink-tertiary">
+            One buyer per line: <span className="font-mono">buyerId,buyerName,buyerCompany,email,phone</span>{" "}
+            (email + phone optional). Header line + lines starting with <span className="font-mono">#</span> are
+            skipped. Max 500 per call.
+          </p>
+          <textarea
+            value={csv}
+            onChange={(e) => setCsv(e.target.value)}
+            rows={6}
+            placeholder="biz_abc123,Sarah Lee,FitLife Co.,sarah@fitlife.com,+15551234567"
+            className="w-full rounded-md border border-bg-border bg-bg-card px-2 py-1.5 font-mono text-[11px]"
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-ink-tertiary">
+              {csv.trim() ? `${csv.split(/\r?\n/).filter((l) => l.trim()).length} lines` : ""}
+            </span>
+            <button
+              type="button"
+              disabled={busy || !csv.trim()}
+              onClick={() => void submit()}
+              className="inline-flex items-center gap-1 rounded-md bg-accent-blue px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+              Enroll all
+            </button>
+          </div>
+          {result && (
+            <div
+              className={`rounded-md border px-2 py-1.5 text-[11px] ${
+                result.tone === "ok"
+                  ? "border-accent-green/30 bg-accent-green/5 text-accent-green"
+                  : "border-accent-red/30 bg-accent-red/5 text-accent-red"
+              }`}
+            >
+              <div>{result.text}</div>
+              {result.failures.length > 0 && (
+                <ul className="mt-1 space-y-0.5">
+                  {result.failures.slice(0, 10).map((f) => (
+                    <li key={f.row} className="text-[10px]">
+                      row {f.row + 1}: {f.reason}
+                    </li>
+                  ))}
+                  {result.failures.length > 10 && (
+                    <li className="text-[10px] text-ink-tertiary">
+                      + {result.failures.length - 10} more failures
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
