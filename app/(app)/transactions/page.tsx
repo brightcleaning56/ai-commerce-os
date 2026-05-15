@@ -234,6 +234,37 @@ export default function TransactionsPage() {
         body: body ? JSON.stringify(body) : undefined,
       });
       const data = await res.json().catch(() => ({}));
+      // ── Slice 43: refund-cap gate UI ─────────────────────────────
+      // The /resolve endpoint returns 412 with gatedBy="team-prefs-
+      // refund-cap" when the teammate's onboarding refund cap is
+      // exceeded. Surface a confirm prompt with the cap + attempted
+      // amount + offer to override + retry.
+      if (res.status === 412 && data.gatedBy === "team-prefs-refund-cap") {
+        const ok = window.confirm(
+          `Refund cap exceeded\n\n` +
+            `This refund is $${data.attempted?.toFixed?.(2) ?? "?"} but your approval cap is $${data.cap}.\n\n` +
+            `OK = override + send anyway (audit trail will record the override).\n` +
+            `Cancel = abort.`,
+        );
+        if (ok) {
+          // Retry with overrideCap:true
+          const retry = await fetch(`/api/transactions/${txnId}/${path}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...(body ?? {}), overrideCap: true }),
+          });
+          const retryData = await retry.json().catch(() => ({}));
+          if (!retry.ok) {
+            toast(`${label ?? path} failed: ${retryData.error ?? retry.statusText}`);
+            return;
+          }
+          toast(`${label ?? path} ✓ (cap overridden)`);
+          await load();
+          return;
+        }
+        toast("Aborted — refund not issued");
+        return;
+      }
       if (!res.ok) {
         toast(`${label ?? path} failed: ${data.error ?? res.statusText}`);
         return;
