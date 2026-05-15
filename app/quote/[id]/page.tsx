@@ -70,6 +70,53 @@ export default function QuotePublicPage() {
   const [shipState, setShipState] = useState("");
   const [shipCity, setShipCity] = useState("");
   const [shipZip, setShipZip] = useState("");
+  // Slice 58: pre-accept freight preview. Buyer fills in destination,
+  // hits "Preview freight", we hit /api/freight/estimate without
+  // committing the accept. They can adjust country/state and re-estimate.
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewRates, setPreviewRates] = useState<
+    | Array<{
+        mode: string;
+        estimateUsd: number;
+        transitDaysMin: number;
+        transitDaysMax: number;
+        notes?: string;
+      }>
+    | null
+  >(null);
+
+  async function previewFreight() {
+    const country = shipCountry.trim().toUpperCase();
+    if (country.length !== 2) {
+      setPreviewError("Country code must be 2 letters (e.g. US, GB, DE)");
+      return;
+    }
+    setPreviewBusy(true);
+    setPreviewError(null);
+    try {
+      // Public, share-token-gated freight preview. Weight + origin
+      // are derived server-side from the quote -- buyer can't spoof.
+      const r = await fetch(
+        `/api/quotes/${id}/freight-preview?t=${encodeURIComponent(token)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            destCountry: country,
+            destState: shipState.trim() || undefined,
+          }),
+        },
+      );
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Freight preview failed (${r.status})`);
+      setPreviewRates(d.rates ?? []);
+    } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : "Couldn't estimate freight");
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/quotes/${id}?t=${encodeURIComponent(token)}`)
@@ -316,6 +363,57 @@ export default function QuotePublicPage() {
                     />
                   </label>
                 </div>
+
+                {/* Slice 58: preview freight before accepting. Lets the
+                    buyer see what shipping will cost without committing
+                    to the quote. Same /api/freight/estimate endpoint
+                    the auto-attach calls at accept time. */}
+                <div className="mt-4 rounded-lg border border-bg-border bg-bg-app/40 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                      Freight preview (optional)
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void previewFreight()}
+                      disabled={previewBusy || shipCountry.trim().length !== 2}
+                      className="rounded-md border border-accent-blue/40 bg-accent-blue/10 px-3 py-1 text-[11px] font-semibold text-accent-blue hover:bg-accent-blue/15 disabled:opacity-50"
+                    >
+                      {previewBusy ? "Estimating…" : "Preview freight"}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-ink-secondary">
+                    Get a rough freight cost before you commit. Final freight is quoted by
+                    the carrier at booking time and may differ.
+                  </p>
+                  {previewError && (
+                    <div className="mt-2 text-[11px] text-accent-red">{previewError}</div>
+                  )}
+                  {previewRates && previewRates.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {previewRates.slice(0, 4).map((r) => (
+                        <div
+                          key={r.mode}
+                          className="flex items-center justify-between gap-2 rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-[12px]"
+                        >
+                          <span className="font-mono text-ink-secondary">{r.mode}</span>
+                          <div className="flex items-center gap-3 text-ink-tertiary">
+                            <span>{r.transitDaysMin}-{r.transitDaysMax}d</span>
+                            <span className="font-mono font-semibold text-accent-green">
+                              ${r.estimateUsd.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {previewRates && previewRates.length === 0 && (
+                    <div className="mt-2 text-[11px] text-ink-tertiary">
+                      No freight modes available for this lane.
+                    </div>
+                  )}
+                </div>
+
                 <div className="mt-4 flex gap-2">
                   <button
                     onClick={() => act("accepted")}
