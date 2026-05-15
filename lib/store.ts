@@ -177,6 +177,13 @@ export type Quote = {
   buyerCity?: string;
   buyerZip?: string;
   buyerDestinationCapturedAt?: string;
+  // ── Supplier link (slice 51) ──────────────────────────────────────
+  // When present, the freight estimator (slice 47 quote-accept handler)
+  // resolves origin country + state from the supplier's registry entry
+  // instead of defaulting to US. Stamped at quote creation time when
+  // we know which supplier this quote came from (operator-side only --
+  // public quote builder leaves it unset).
+  supplierRegistryId?: string;
   // ── Freight estimates (slice 47) ──────────────────────────────────
   // Computed at quote acceptance from lib/freight.estimateLane(). The
   // operator sees the cheapest mode + cost on /transactions immediately;

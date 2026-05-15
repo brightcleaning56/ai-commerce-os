@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { estimateLane } from "@/lib/freight";
 import { store } from "@/lib/store";
+import { supplierRegistry } from "@/lib/supplierRegistry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,22 +93,33 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       patch.buyerZip = str(body.destination.zip, 20);
       patch.buyerDestinationCapturedAt = new Date().toISOString();
 
-      // ── Slice 47: auto-attach freight estimate ────────────────────
+      // ── Slice 47/51: auto-attach freight estimate ─────────────────
       // Now that we have a destination, call estimateLane() so the
       // resulting Transaction has freight cost ready to show. Best-
       // effort -- a freight failure does NOT block the accept.
       //
-      // Origin: defaults to US for now since OutreachDraft doesn't
-      // carry a supplier link. Slice 47.5 will pull from a future
-      // Quote.supplierRegistryId field once quotes get supplier-aware.
-      // Weight is approximated quantity * 0.5kg/unit (placeholder).
+      // Origin (slice 51): resolved from Quote.supplierRegistryId
+      // when set, falls back to "US" otherwise. Operator-side quote
+      // creation should stamp supplierRegistryId so the estimate is
+      // accurate; legacy/manual quotes use the US default.
       try {
         const existingQuote = await store.getQuote(params.id);
         if (existingQuote) {
-          const originCountry = "US"; // TODO slice 47.5: resolve via supplier
+          let originCountry = "US";
+          let originState: string | undefined;
+          if (existingQuote.supplierRegistryId) {
+            const supplier = await supplierRegistry
+              .get(existingQuote.supplierRegistryId)
+              .catch(() => null);
+            if (supplier) {
+              originCountry = supplier.country || "US";
+              originState = supplier.state;
+            }
+          }
           const weightKg = Math.max(1, (existingQuote.quantity ?? 1) * 0.5);
           const quote = await estimateLane({
             originCountry,
+            originState,
             destCountry: country,
             destState: patch.buyerState as string | undefined,
             weightKg,
