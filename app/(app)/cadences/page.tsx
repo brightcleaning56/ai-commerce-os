@@ -797,17 +797,25 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                     />
                   )}
                   {(s.channel === "email" || s.channel === "sms") && (
-                    <textarea
-                      value={s.bodyTemplate}
-                      onChange={(e) => updateStep(i, { bodyTemplate: e.target.value })}
-                      placeholder={
-                        s.channel === "email"
-                          ? "Email body — supports {{name}} {{company}}"
-                          : "SMS body — keep it short. Supports {{name}} {{company}}"
-                      }
-                      rows={s.channel === "email" ? 4 : 2}
-                      className="mt-2 w-full rounded-md border border-bg-border bg-bg-app px-2 py-1.5 text-[12px]"
-                    />
+                    <>
+                      <textarea
+                        value={s.bodyTemplate}
+                        onChange={(e) => updateStep(i, { bodyTemplate: e.target.value })}
+                        placeholder={
+                          s.channel === "email"
+                            ? "Email body — supports {{name}} {{company}}"
+                            : "SMS body — keep it short. Supports {{name}} {{company}}"
+                        }
+                        rows={s.channel === "email" ? 4 : 2}
+                        className="mt-2 w-full rounded-md border border-bg-border bg-bg-app px-2 py-1.5 text-[12px]"
+                      />
+                      {/* Slice 29: SMS character counter + GSM validation.
+                          GSM-7 is the basic SMS encoding (160 chars per
+                          segment). Non-GSM characters (emoji, smart quotes,
+                          most accents) push the message into UCS-2 which
+                          caps each segment at 70 chars and ~2x the cost. */}
+                      {s.channel === "sms" && <SmsCounter body={s.bodyTemplate} />}
+                    </>
                   )}
 
                   {/* Slice 27: live merge-tag preview. Only renders for
@@ -1128,6 +1136,71 @@ function BulkEnrollPanel({ cadenceId, onEnrolled }: { cadenceId: string; onEnrol
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SMS counter (slice 29) ────────────────────────────────────────
+
+/** GSM-7 default + extension table. Anything outside this set forces
+ *  the message into UCS-2 encoding (70-char segments instead of 160). */
+const GSM_BASIC = new Set(
+  "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà".split(""),
+);
+const GSM_EXTENDED = new Set("\f^{}\[~]|€".split(""));
+
+function isGsm7(body: string): boolean {
+  for (const ch of body) {
+    if (!GSM_BASIC.has(ch) && !GSM_EXTENDED.has(ch)) return false;
+  }
+  return true;
+}
+
+function countSmsSegments(body: string): { length: number; segments: number; encoding: "GSM-7" | "UCS-2"; perSegment: number } {
+  const isGsm = isGsm7(body);
+  // GSM extended chars count as 2 (each takes an escape sequence).
+  let length = 0;
+  if (isGsm) {
+    for (const ch of body) length += GSM_EXTENDED.has(ch) ? 2 : 1;
+  } else {
+    // UCS-2 counts each code point as 2 bytes (1 char in JS string for BMP).
+    length = [...body].length;
+  }
+  // Single segment caps: 160 GSM, 70 UCS-2.
+  // Multi-segment caps: 153 GSM, 67 UCS-2 (UDH overhead).
+  const single = isGsm ? 160 : 70;
+  const multi = isGsm ? 153 : 67;
+  const segments =
+    length === 0 ? 0 : length <= single ? 1 : Math.ceil(length / multi);
+  const perSegment = segments <= 1 ? single : multi;
+  return { length, segments, encoding: isGsm ? "GSM-7" : "UCS-2", perSegment };
+}
+
+function SmsCounter({ body }: { body: string }) {
+  // Use the merge-tagged body for the count -- otherwise the operator
+  // sees an artificially low count when the template has placeholders
+  // that expand at send time.
+  const merged = body
+    .replace(/\{\{\s*name\s*\}\}/gi, "Sarah")
+    .replace(/\{\{\s*company\s*\}\}/gi, "FitLife Co.");
+  const m = countSmsSegments(merged);
+  const tone =
+    m.segments >= 3 ? "text-accent-red" : m.segments === 2 ? "text-accent-amber" : "text-ink-tertiary";
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
+      <span className={`font-mono ${tone}`}>
+        {m.length} chars · {m.segments} segment{m.segments === 1 ? "" : "s"} · {m.encoding}
+      </span>
+      {m.encoding === "UCS-2" && (
+        <span className="rounded border border-accent-amber/40 bg-accent-amber/10 px-1.5 py-0.5 text-[9px] font-semibold text-accent-amber">
+          Non-GSM detected — emoji/smart-quote/accent doubles cost
+        </span>
+      )}
+      {m.segments > 1 && (
+        <span className="text-ink-tertiary">
+          ({m.length}/{m.perSegment} per segment)
+        </span>
       )}
     </div>
   );
