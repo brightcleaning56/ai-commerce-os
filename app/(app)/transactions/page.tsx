@@ -92,6 +92,21 @@ type Transaction = {
   aiConfidenceScore?: number;
   supplierName?: string;
   supplierStripeAccountId?: string;
+  // Slice 49: freight estimate propagated from Quote.freightEstimate
+  // when slice 47 quote-accept ran. Optional -- legacy txns or
+  // accepts without destination won't have it.
+  freightEstimate?: {
+    provider: "shippo" | "fallback";
+    laneKey: string;
+    rates: Array<{
+      mode: string;
+      estimateUsd: number;
+      transitDaysMin: number;
+      transitDaysMax: number;
+      notes?: string;
+    }>;
+    computedAt: string;
+  };
 };
 
 type RevenueStats = {
@@ -551,6 +566,13 @@ function TxnRow({
             <MiniStat label="Escrow Fee" value={fmtCents(txn.escrowFeeCents)} tone="brand" />
             <MiniStat label="Supplier Out" value={fmtCents(txn.supplierPayoutCents)} />
           </div>
+
+          {/* Slice 49: freight estimate panel -- shown when slice 47
+              auto-attached an estimate at quote-accept time. Renders
+              cheapest mode + cost + transit days + provider source. */}
+          {txn.freightEstimate && txn.freightEstimate.rates.length > 0 && (
+            <FreightPanel estimate={txn.freightEstimate} />
+          )}
 
           {/* Stripe Connect supplier onboarding */}
           <SupplierConnectPanel txn={txn} />
@@ -1235,5 +1257,59 @@ function OperatorNotes({ txn }: { txn: Transaction }) {
         {txn.operatorNotes}
       </div>
     </button>
+  );
+}
+
+// ─── FreightPanel (slice 49) ───────────────────────────────────────
+
+function FreightPanel({
+  estimate,
+}: {
+  estimate: NonNullable<Transaction["freightEstimate"]>;
+}) {
+  const cheapest = estimate.rates[0];
+  const fmtUsd = (n: number) =>
+    `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return (
+    <div className="rounded-lg border border-accent-blue/30 bg-accent-blue/5 p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-blue">
+          Freight estimate · {estimate.laneKey}
+        </div>
+        <span className="rounded-md bg-bg-card px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-tertiary">
+          {estimate.provider}
+        </span>
+      </div>
+      {cheapest && (
+        <div className="mb-2 flex flex-wrap items-baseline gap-2 text-[12px]">
+          <span className="text-ink-tertiary">Cheapest:</span>
+          <span className="font-mono font-semibold text-accent-green">
+            {fmtUsd(cheapest.estimateUsd)}
+          </span>
+          <span className="text-ink-secondary">via {cheapest.mode}</span>
+          <span className="text-ink-tertiary">
+            · {cheapest.transitDaysMin}-{cheapest.transitDaysMax} days
+          </span>
+        </div>
+      )}
+      <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+        {estimate.rates.slice(0, 4).map((r) => (
+          <div
+            key={r.mode}
+            className="flex items-center justify-between gap-2 rounded-md border border-bg-border bg-bg-app px-2 py-1 text-[11px]"
+          >
+            <span className="font-mono text-ink-secondary">{r.mode}</span>
+            <div className="flex items-center gap-2 text-ink-tertiary">
+              <span>{r.transitDaysMin}-{r.transitDaysMax}d</span>
+              <span className="font-mono text-accent-green">{fmtUsd(r.estimateUsd)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 text-[10px] text-ink-tertiary">
+        Computed {new Date(estimate.computedAt).toLocaleString()}
+        {cheapest?.notes ? ` · ${cheapest.notes}` : ""}
+      </div>
+    </div>
   );
 }
