@@ -160,17 +160,33 @@ export default function SuppressionsPage() {
   }
 
   async function removeOne(sup: Suppression) {
-    const reauth = window.confirm(
-      `Remove ${sup.email} from the suppression list?\n\n` +
-      "WARNING: Re-enabling outreach to someone who unsubscribed is a CAN-SPAM violation UNLESS you have explicit re-opt-in consent (e.g. they replied asking to be added back).\n\n" +
-      "Click OK only if you have that consent on file.",
+    // Slice 30: explicit consent reason required by the API. Prompt
+    // for it via window.prompt -- short + sufficient for ops review.
+    const target = sup.email || sup.phone || sup.id;
+    const reason = window.prompt(
+      `Remove ${target} from suppression list?\n\n` +
+      "CAN-SPAM § 7704 requires explicit recipient consent before re-enabling outreach. Removing without consent risks $50,120 per email per FTC enforcement.\n\n" +
+      "Enter the consent reason (min 10 chars). Examples:\n" +
+      "- Replied to email asking to be added back\n" +
+      "- Phone confirmation 2024-01-15 from ops\n" +
+      "- Web re-opt-in form submission, IP 1.2.3.4\n",
+      "",
     );
-    if (!reauth) return;
+    if (reason === null) return; // operator cancelled
+    if (reason.trim().length < 10) {
+      toast("Consent reason must be at least 10 characters", "error");
+      return;
+    }
     setRemovingId(sup.id);
     try {
-      const r = await fetch(`/api/admin/suppressions/${sup.id}`, { method: "DELETE" });
-      if (!r.ok) throw new Error(`Remove failed (${r.status})`);
-      toast(`Removed ${sup.email} — they can receive outreach again`, "success");
+      const r = await fetch(`/api/admin/suppressions/${sup.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ consentReason: reason.trim() }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? `Remove failed (${r.status})`);
+      toast(`Resubscribed ${target} — audit recorded`, "success");
       await load();
     } catch (e) {
       toast(e instanceof Error ? e.message : "Remove failed", "error");
