@@ -755,6 +755,29 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                       className="mt-2 w-full rounded-md border border-bg-border bg-bg-app px-2 py-1.5 text-[12px]"
                     />
                   )}
+
+                  {/* Slice 27: live merge-tag preview. Only renders for
+                      email/sms channels with non-empty body. Operator
+                      sees what a real send looks like with the test
+                      values "Sarah" + "FitLife Co." substituted. */}
+                  {(s.channel === "email" || s.channel === "sms") && s.bodyTemplate.trim() && (
+                    <div className="mt-2 rounded-md border border-accent-blue/20 bg-accent-blue/5 px-2.5 py-2">
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-accent-blue">
+                        Preview · merged with test values "Sarah" + "FitLife Co."
+                      </div>
+                      {s.channel === "email" && s.subject.trim() && (
+                        <div className="mb-1 text-[11px] font-semibold text-ink-primary">
+                          Subject: {s.subject.replace(/\{\{\s*name\s*\}\}/gi, "Sarah").replace(/\{\{\s*company\s*\}\}/gi, "FitLife Co.")}
+                        </div>
+                      )}
+                      <div className="whitespace-pre-wrap text-[11px] text-ink-secondary">
+                        {s.bodyTemplate
+                          .replace(/\{\{\s*name\s*\}\}/gi, "Sarah")
+                          .replace(/\{\{\s*company\s*\}\}/gi, "FitLife Co.")}
+                      </div>
+                    </div>
+                  )}
+
                   {s.channel === "call" && (
                     <p className="mt-2 text-[11px] text-ink-tertiary">
                       Call steps are operator-led — the runner schedules a queue item;
