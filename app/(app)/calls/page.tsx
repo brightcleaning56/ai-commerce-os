@@ -437,6 +437,9 @@ export default function CallsPage() {
         />
       </div>
 
+      {/* Slice 50: voicemail transcript search */}
+      <TranscriptSearch />
+
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[220px]">
@@ -734,5 +737,113 @@ function Tile({ label, value, hint, tone }: { label: string; value: string; hint
       <div className={`mt-1 text-2xl font-bold ${valueClass}`}>{value}</div>
       {hint && <div className="mt-0.5 text-[10px] text-ink-tertiary">{hint}</div>}
     </div>
+  );
+}
+
+// ─── TranscriptSearch (slice 50) ───────────────────────────────────
+
+type TranscriptHit = {
+  id: string;
+  from: string;
+  durationSec: number;
+  recordedAt: string;
+  read: boolean;
+  snippet: string;
+  matchOffset: number;
+};
+
+function TranscriptSearch() {
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<TranscriptHit[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function search() {
+    if (q.trim().length < 2) {
+      setError("Enter at least 2 characters");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ q: q.trim(), limit: "50" });
+      const r = await fetch(`/api/voice/transcripts/search?${params}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Search failed (${r.status})`);
+      setHits(d.results ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Search failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <details className="rounded-xl border border-bg-border bg-bg-card">
+      <summary className="cursor-pointer px-4 py-2.5 text-[12px] font-semibold text-ink-secondary hover:text-ink-primary">
+        🔍 Search voicemail transcripts (slice 50)
+      </summary>
+      <div className="border-t border-bg-border px-4 py-3 space-y-2">
+        <p className="text-[10px] text-ink-tertiary">
+          Full-text search across captured voicemail transcripts. Matches return ±60-char
+          snippets so you can scan results without playing each recording.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void search();
+            }}
+            placeholder='e.g. "shipping cost", "RFQ", company name'
+            className="h-8 flex-1 min-w-[200px] rounded-md border border-bg-border bg-bg-app px-2 text-[12px]"
+          />
+          <button
+            type="button"
+            disabled={busy || !q.trim()}
+            onClick={() => void search()}
+            className="rounded-md bg-accent-blue px-3 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {busy ? "Searching..." : "Search"}
+          </button>
+        </div>
+        {error && <div className="text-[11px] text-accent-red">{error}</div>}
+        {hits && hits.length === 0 && (
+          <div className="rounded-md border border-bg-border bg-bg-app/40 px-3 py-2 text-[11px] text-ink-tertiary">
+            No matches in voicemail transcripts.
+          </div>
+        )}
+        {hits && hits.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">
+              {hits.length} match{hits.length === 1 ? "" : "es"}
+            </div>
+            {hits.map((h) => (
+              <div
+                key={h.id}
+                className="rounded-md border border-bg-border bg-bg-app/40 px-3 py-2 text-[11px]"
+              >
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="font-mono text-ink-secondary">{h.from}</span>
+                  <div className="flex items-center gap-2 text-[10px] text-ink-tertiary">
+                    {!h.read && (
+                      <span className="rounded-full border border-accent-amber/40 bg-accent-amber/10 px-1.5 py-0.5 font-semibold text-accent-amber">
+                        unread
+                      </span>
+                    )}
+                    <span>{Math.round(h.durationSec)}s</span>
+                    <span>{new Date(h.recordedAt).toLocaleString()}</span>
+                  </div>
+                </div>
+                <div className="text-ink-primary">{h.snippet}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
