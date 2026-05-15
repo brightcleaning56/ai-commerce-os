@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth";
 import { enrollmentsStore } from "@/lib/cadences";
+import { getWorkspaceConfig } from "@/lib/workspaceConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,6 +49,13 @@ export async function POST(
     buyerCompany?: string;
     buyerEmail?: string;
     buyerPhone?: string;
+    /** Optional 0-100 match-fit score. Used by aiAggressiveness gate
+     *  in slice 25. Omitting bypasses the fit check (caller didn't
+     *  compute a score, default to enroll). */
+    fitScore?: number;
+    /** Set true to bypass the fit gate (operator explicitly chose
+     *  this buyer despite low fit). */
+    overrideFit?: boolean;
   } = {};
   try {
     body = await req.json();
@@ -60,6 +68,30 @@ export async function POST(
       { error: "buyerId, buyerName, and buyerCompany are required" },
       { status: 400 },
     );
+  }
+
+  // Slice 25: aiAggressiveness gate. When workspace config is
+  // "conservative", enrollments with a fitScore below the threshold
+  // are blocked unless overrideFit=true. "balanced" uses a lower
+  // threshold. "aggressive" bypasses entirely. Callers that don't
+  // pass fitScore also bypass (we can't gate what we can't score).
+  if (typeof body.fitScore === "number" && !body.overrideFit) {
+    const wsConfig = await getWorkspaceConfig().catch(() => null);
+    const aggressiveness = wsConfig?.aiAggressiveness ?? "balanced";
+    const threshold =
+      aggressiveness === "conservative" ? 70 : aggressiveness === "balanced" ? 50 : 0;
+    if (body.fitScore < threshold) {
+      return NextResponse.json(
+        {
+          error: `Buyer fit score ${body.fitScore} below workspace threshold ${threshold} (mode: ${aggressiveness}). Set overrideFit:true to enroll anyway.`,
+          gatedBy: "aiAggressiveness",
+          mode: aggressiveness,
+          threshold,
+          fitScore: body.fitScore,
+        },
+        { status: 412 },
+      );
+    }
   }
 
   try {
