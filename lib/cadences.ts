@@ -32,6 +32,7 @@
 import crypto from "node:crypto";
 import { getBackend } from "./store";
 import type { QueueChannel, QueueStatus } from "./queue";
+import { teamPrefs } from "./teamPrefs";
 import { getWorkspaceConfig, requiresApproval } from "./workspaceConfig";
 
 const CADENCES_FILE = "cadences.json";
@@ -467,16 +468,28 @@ export async function runCadenceTick(): Promise<CadenceTickResult> {
   const wsConfig = await getWorkspaceConfig();
   const cap = wsConfig.dailySendCap || 0;
   let scheduledTodayByChannel: Record<QueueChannel, number> = { call: 0, email: 0, sms: 0 };
-  if (cap > 0) {
-    // Count items already scheduled today across all enrollments so we
-    // don't blow past the cap by adding items in the same tick batch.
+  // Slice 40: per-teammate daily volume cap. Mirrors the workspace
+  // cap above but scoped per enrollment.enrolledBy (set at enroll
+  // time from the operator's email). Two separate counters because
+  // the workspace cap and the per-teammate cap can both be hit
+  // independently.
+  const scheduledTodayByEnroller = new Map<string, number>();
+  if (cap > 0 || true) {
     const all = await cadenceQueueItemsStore.list();
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const since = startOfDay.getTime();
+    // Build an enrollment lookup so we can attribute items to enrollers
+    const allEnrollments = await enrollmentsStore.list();
+    const enrollerById = new Map<string, string | undefined>();
+    for (const e of allEnrollments) enrollerById.set(e.id, e.enrolledBy);
     for (const item of all) {
       if (new Date(item.createdAt).getTime() < since) continue;
       scheduledTodayByChannel[item.channel] = (scheduledTodayByChannel[item.channel] ?? 0) + 1;
+      const enroller = enrollerById.get(item.enrollmentId);
+      if (enroller) {
+        scheduledTodayByEnroller.set(enroller, (scheduledTodayByEnroller.get(enroller) ?? 0) + 1);
+      }
     }
   }
 
@@ -536,6 +549,23 @@ export async function runCadenceTick(): Promise<CadenceTickResult> {
         continue;
       }
 
+      // Slice 40: per-teammate daily volume cap. Read team-prefs
+      // for the enroller. When their outreachVolumeCap is set + hit,
+      // defer the same way as the workspace cap. Owner / unattributed
+      // enrollments bypass entirely (no email -> no pref lookup).
+      if (enr.enrolledBy) {
+        const pref = await teamPrefs.getByEmail(enr.enrolledBy).catch(() => null);
+        if (pref && pref.outreachVolumeCap != null && pref.outreachVolumeCap > 0) {
+          const enrolledByCount = scheduledTodayByEnroller.get(enr.enrolledBy) ?? 0;
+          if (enrolledByCount >= pref.outreachVolumeCap) {
+            await enrollmentsStore.patch(enr.id, {
+              nextStepDueAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+            });
+            continue;
+          }
+        }
+      }
+
       const merge = { name: enr.buyerName, company: enr.buyerCompany };
       const subject = applyMergeTags(step.subject, merge);
       const body = applyMergeTags(step.bodyTemplate, merge);
@@ -566,6 +596,13 @@ export async function runCadenceTick(): Promise<CadenceTickResult> {
         requiresApproval: needsApproval || undefined,
       });
       scheduledTodayByChannel[step.channel] += 1;
+      // Bump per-enroller counter for the rest of this tick
+      if (enr.enrolledBy) {
+        scheduledTodayByEnroller.set(
+          enr.enrolledBy,
+          (scheduledTodayByEnroller.get(enr.enrolledBy) ?? 0) + 1,
+        );
+      }
 
       // Advance enrollment to next step, schedule its dueAt based on the
       // NEXT step's delay. If the just-scheduled step was the last, mark
