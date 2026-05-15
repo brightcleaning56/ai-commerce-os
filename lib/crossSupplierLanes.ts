@@ -78,6 +78,113 @@ export type CrossLanesRollup = {
   destinationCountries: string[];
 };
 
+/**
+ * Per-lane time-series bucketed by week (slice 35).
+ *
+ * For each lane, returns an array of { weekStartIso, transactionCount,
+ *   totalRevenueCents } covering the last `weeks` weeks. Used by the
+ * /admin/lanes sparkline column to show growing/shrinking trends.
+ *
+ * Returned shape is keyed by laneKey so the client can join against
+ * the lanes array from computeCrossSupplierLanes() without recomputing.
+ */
+export type LaneSeriesBucket = {
+  weekStartIso: string;          // Monday 00:00 UTC of the week
+  transactionCount: number;
+  totalRevenueCents: number;
+};
+export type LaneSeries = {
+  laneKey: string;
+  buckets: LaneSeriesBucket[];   // chronological, oldest first
+  /** delta% comparing the most-recent half of the window to the older half.
+   *  Positive = growing, negative = shrinking. null when one side is empty. */
+  trendPct: number | null;
+};
+
+export function computeLaneSeries(
+  suppliers: SupplierRecord[],
+  transactions: Transaction[],
+  options: { weeks?: number } = {},
+): LaneSeries[] {
+  const weeks = options.weeks && options.weeks > 0 ? Math.min(52, options.weeks) : 13;
+  const supplierById = new Map<string, SupplierRecord>();
+  for (const s of suppliers) supplierById.set(s.id, s);
+
+  // Build week buckets: bucketIndex 0 = oldest, bucketIndex N-1 = current
+  const now = Date.now();
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  // Anchor the most-recent bucket to now-rounded-down-to-week-start
+  const currentBucketEnd = now;
+  const oldestBucketStart = currentBucketEnd - weeks * weekMs;
+
+  function bucketIndex(iso: string): number {
+    const ts = new Date(iso).getTime();
+    if (!Number.isFinite(ts) || ts < oldestBucketStart || ts > currentBucketEnd) return -1;
+    const fromOldest = ts - oldestBucketStart;
+    return Math.min(weeks - 1, Math.floor(fromOldest / weekMs));
+  }
+
+  function laneKeyFor(t: Transaction): string | null {
+    if (!t.supplierRegistryId) return null;
+    const s = supplierById.get(t.supplierRegistryId);
+    if (!s) return null;
+    if (!t.buyerCountry) return null;
+    const oCountry = s.country || "??";
+    const oState = s.state || "";
+    const dCountry = t.buyerCountry;
+    const dState = t.buyerState || "";
+    return `${oState}-${oCountry}->${dState}-${dCountry}`;
+  }
+
+  // laneKey -> bucketIndex -> { count, revenue }
+  const series = new Map<string, LaneSeriesBucket[]>();
+  function ensureLane(key: string): LaneSeriesBucket[] {
+    let buckets = series.get(key);
+    if (!buckets) {
+      buckets = Array.from({ length: weeks }, (_, i) => ({
+        weekStartIso: new Date(oldestBucketStart + i * weekMs).toISOString(),
+        transactionCount: 0,
+        totalRevenueCents: 0,
+      }));
+      series.set(key, buckets);
+    }
+    return buckets;
+  }
+
+  for (const t of transactions) {
+    const key = laneKeyFor(t);
+    if (!key) continue;
+    const idx = bucketIndex(t.createdAt);
+    if (idx < 0) continue;
+    const buckets = ensureLane(key);
+    buckets[idx].transactionCount += 1;
+    // Use supplierPayoutCents to match the lane revenue field
+    // computed in computeCrossSupplierLanes (other revenue surrogates
+    // would diverge from the lanes-table totals).
+    buckets[idx].totalRevenueCents += t.supplierPayoutCents ?? 0;
+  }
+
+  // Compute trend: avg of recent half vs avg of older half
+  const out: LaneSeries[] = [];
+  for (const [laneKey, buckets] of series.entries()) {
+    const half = Math.floor(weeks / 2);
+    const older = buckets.slice(0, half);
+    const recent = buckets.slice(weeks - half);
+    const olderAvg =
+      older.reduce((s, b) => s + b.totalRevenueCents, 0) / Math.max(1, older.length);
+    const recentAvg =
+      recent.reduce((s, b) => s + b.totalRevenueCents, 0) / Math.max(1, recent.length);
+    let trendPct: number | null = null;
+    if (olderAvg > 0) {
+      trendPct = ((recentAvg - olderAvg) / olderAvg) * 100;
+    } else if (recentAvg > 0) {
+      trendPct = 100; // grew from zero
+    }
+    out.push({ laneKey, buckets, trendPct });
+  }
+  return out;
+}
+
 export function computeCrossSupplierLanes(
   suppliers: SupplierRecord[],
   transactions: Transaction[],

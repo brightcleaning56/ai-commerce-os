@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth";
 import { store } from "@/lib/store";
 import { supplierRegistry } from "@/lib/supplierRegistry";
-import { computeCrossSupplierLanes } from "@/lib/crossSupplierLanes";
+import { computeCrossSupplierLanes, computeLaneSeries } from "@/lib/crossSupplierLanes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,6 +54,16 @@ export async function GET(req: NextRequest) {
       // Region rollup stays as-is — operators usually want the full
       // regional picture even when they're drilling into one country.
     };
+  }
+
+  // Slice 35: optional time-series include. ?series=true attaches a
+  // per-lane sparkline + trend% computed across the last 13 weeks
+  // (90 days). Off by default to keep the default response cheap.
+  if (url.searchParams.get("series") === "true") {
+    const weeksRaw = parseInt(url.searchParams.get("weeks") ?? "13", 10);
+    const weeks = Number.isFinite(weeksRaw) && weeksRaw > 0 ? Math.min(52, weeksRaw) : 13;
+    const series = computeLaneSeries(suppliers, transactions, { weeks });
+    return NextResponse.json({ ...rollup, series });
   }
 
   return NextResponse.json(rollup);

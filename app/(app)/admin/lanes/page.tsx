@@ -53,11 +53,23 @@ type RegionLane = {
   totalRevenueCents: number;
 };
 
+type LaneSeriesBucket = {
+  weekStartIso: string;
+  transactionCount: number;
+  totalRevenueCents: number;
+};
+type LaneSeries = {
+  laneKey: string;
+  buckets: LaneSeriesBucket[];
+  trendPct: number | null;
+};
+
 type LanesRollup = {
   computedAt: string;
   totalLinkedTransactions: number;
   missingDestinationCount: number;
   lanes: CrossLane[];
+  series?: LaneSeries[];
   regions: RegionLane[];
   originCountries: string[];
   destinationCountries: string[];
@@ -106,8 +118,11 @@ export default function CrossSupplierLanesPage() {
       const params = new URLSearchParams();
       if (originFilter) params.set("originCountry", originFilter);
       if (destFilter) params.set("destCountry", destFilter);
+      // Slice 35: always request the 13-week (90-day) series so the
+      // sparkline column renders. Cheap to compute server-side.
+      params.set("series", "true");
       const qs = params.toString();
-      const r = await fetch(`/api/admin/lanes${qs ? `?${qs}` : ""}`, { cache: "no-store" });
+      const r = await fetch(`/api/admin/lanes?${qs}`, { cache: "no-store" });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
         throw new Error(d.error ?? `Load failed (${r.status})`);
@@ -276,12 +291,14 @@ export default function CrossSupplierLanesPage() {
                   <th className="px-3 py-2.5 text-right font-medium">Txns</th>
                   <th className="px-3 py-2.5 text-right font-medium">Units</th>
                   <th className="px-3 py-2.5 text-right font-medium">Revenue</th>
+                  <th className="px-3 py-2.5 text-right font-medium">90d trend</th>
                   <th className="px-3 py-2.5 text-right font-medium">Last shipment</th>
                 </tr>
               </thead>
               <tbody>
                 {data.lanes.map((lane) => {
                   const isOpen = expandedLane === lane.key;
+                  const series = data.series?.find((s) => s.laneKey === lane.key);
                   return (
                     <>
                       <tr
@@ -300,13 +317,16 @@ export default function CrossSupplierLanesPage() {
                         <td className="px-3 py-3 text-right text-ink-secondary">{lane.transactionCount}</td>
                         <td className="px-3 py-3 text-right text-ink-secondary">{lane.totalUnits.toLocaleString()}</td>
                         <td className="px-3 py-3 text-right font-mono text-accent-green">{fmtUsd(lane.totalRevenueCents)}</td>
+                        <td className="px-3 py-3 text-right">
+                          <TrendCell series={series} />
+                        </td>
                         <td className="px-3 py-3 text-right text-[11px] text-ink-tertiary">
                           {lane.lastShipmentAt ? relTime(lane.lastShipmentAt) : "—"}
                         </td>
                       </tr>
                       {isOpen && (
                         <tr key={`${lane.key}-detail`} className="border-t border-bg-border bg-bg-app/40">
-                          <td colSpan={6} className="px-4 py-3">
+                          <td colSpan={7} className="px-4 py-3">
                             <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
                               Top suppliers on this lane
                             </div>
@@ -345,6 +365,61 @@ export default function CrossSupplierLanesPage() {
           tuned for freight planning, not full UN/M.49.
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── TrendCell (slice 35) ──────────────────────────────────────────
+
+/** Tiny SVG sparkline + trend% chip. Renders nothing when series
+ *  data hasn't loaded yet (no flash of empty cells). */
+function TrendCell({ series }: { series?: LaneSeries }) {
+  if (!series || series.buckets.length === 0) {
+    return <span className="text-[10px] text-ink-tertiary">—</span>;
+  }
+  const values = series.buckets.map((b) => b.totalRevenueCents);
+  const max = Math.max(...values, 1);
+  const w = 80;
+  const h = 22;
+  const points = values
+    .map((v, i) => {
+      const x = (i / Math.max(1, values.length - 1)) * w;
+      const y = h - (v / max) * (h - 2) - 1;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const trend = series.trendPct;
+  const tone =
+    trend == null
+      ? "text-ink-tertiary"
+      : trend > 5
+        ? "text-accent-green"
+        : trend < -5
+          ? "text-accent-red"
+          : "text-ink-tertiary";
+  const stroke =
+    trend == null
+      ? "currentColor"
+      : trend > 5
+        ? "#22c55e"
+        : trend < -5
+          ? "#ef4444"
+          : "#a3a3a3";
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      <svg width={w} height={h} className="opacity-80">
+        <polyline
+          fill="none"
+          stroke={stroke}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={points}
+        />
+      </svg>
+      <span className={`font-mono text-[10px] ${tone}`}>
+        {trend == null ? "—" : `${trend >= 0 ? "+" : ""}${Math.round(trend)}%`}
+      </span>
     </div>
   );
 }
