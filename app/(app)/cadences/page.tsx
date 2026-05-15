@@ -589,6 +589,134 @@ function blankStep(channel: Channel = "email"): DraftStep {
   };
 }
 
+// ─── Cadence templates (slice 36) ────────────────────────────────────
+
+type CadenceTemplate = {
+  id: string;
+  name: string;
+  description: string;
+  cadenceName: string;
+  cadenceDescription: string;
+  steps: DraftStep[];
+};
+
+const CADENCE_TEMPLATES: CadenceTemplate[] = [
+  {
+    id: "b2b-3-touch",
+    name: "B2B intro · 3-touch",
+    description: "Email today → call in 3 days → SMS nudge in 5. Conservative.",
+    cadenceName: "B2B intro · 3-touch",
+    cadenceDescription: "Standard B2B intro sequence. First-touch email, follow-up call, then SMS nudge.",
+    steps: [
+      {
+        channel: "email", delayHours: "0", label: "Day 1 — intro",
+        subject: "Quick intro for {{company}}",
+        bodyTemplate:
+          "Hi {{name}},\n\nNoticed {{company}} has been growing in your category. We've got a product mix that could fit -- happy to send a one-pager or hop on a 15-min call.\n\nWhich works?",
+        branches: [{ ifOutcome: "replied", gotoIndex: "-1" }],
+        maxRetries: "2", retryDelayMinutes: "60",
+      },
+      {
+        channel: "call", delayHours: "48", label: "Day 3 — call",
+        subject: "", bodyTemplate: "",
+        branches: [{ ifOutcome: "voicemail", gotoIndex: "2" }, { ifOutcome: "wrong-number", gotoIndex: "-1" }],
+        maxRetries: "0", retryDelayMinutes: "30",
+      },
+      {
+        channel: "sms", delayHours: "48", label: "Day 5 — SMS nudge",
+        subject: "",
+        bodyTemplate: "Hey {{name}} — left you a voicemail Tue. Easier to text? Quick yes/no on whether to send the one-pager.",
+        branches: [],
+        maxRetries: "1", retryDelayMinutes: "30",
+      },
+    ],
+  },
+  {
+    id: "supplier-revival",
+    name: "Supplier revival · 4-touch",
+    description: "Bring back lapsed suppliers. Personalized + escalation.",
+    cadenceName: "Supplier revival",
+    cadenceDescription: "Re-engage suppliers who haven't shipped in 90+ days. Soft -> hard escalation.",
+    steps: [
+      {
+        channel: "email", delayHours: "0", label: "Day 1 — friendly check-in",
+        subject: "Long time, {{name}} — anything new at {{company}}?",
+        bodyTemplate:
+          "Hi {{name}},\n\nIt's been a while since we worked together. Curious what's been happening at {{company}} -- new product lines? Capacity changes?\n\nWe've got a couple of buyers asking about your category lately. Worth a 15-min catch-up?",
+        branches: [{ ifOutcome: "replied", gotoIndex: "-1" }],
+        maxRetries: "2", retryDelayMinutes: "60",
+      },
+      {
+        channel: "email", delayHours: "120", label: "Day 6 — concrete offer",
+        subject: "Two buyers in your category looking right now",
+        bodyTemplate:
+          "Hi {{name}},\n\nDidn't hear back -- thought I'd send something concrete. Two of our active buyers are sourcing in your category this month. If you've got capacity I can intro you.\n\nReply with a yes and I'll send their briefs.",
+        branches: [{ ifOutcome: "replied", gotoIndex: "-1" }],
+        maxRetries: "2", retryDelayMinutes: "60",
+      },
+      {
+        channel: "call", delayHours: "120", label: "Day 11 — call",
+        subject: "", bodyTemplate: "",
+        branches: [{ ifOutcome: "voicemail", gotoIndex: "3" }],
+        maxRetries: "0", retryDelayMinutes: "30",
+      },
+      {
+        channel: "sms", delayHours: "48", label: "Day 13 — final nudge",
+        subject: "",
+        bodyTemplate: "Hey {{name}} -- quick text. Still interested in working with {{company}} on AVYN buyers? Yes/no is plenty.",
+        branches: [],
+        maxRetries: "1", retryDelayMinutes: "30",
+      },
+    ],
+  },
+  {
+    id: "buyer-onboarding",
+    name: "Buyer onboarding · 5-touch",
+    description: "Activate new buyers in their first 14 days.",
+    cadenceName: "Buyer onboarding",
+    cadenceDescription: "Help fresh buyers complete their first transaction. Day 1 welcome, day 7 check-in, day 14 escalation.",
+    steps: [
+      {
+        channel: "email", delayHours: "0", label: "Day 1 — welcome",
+        subject: "Welcome to AVYN, {{name}}",
+        bodyTemplate:
+          "Hi {{name}},\n\nWelcome aboard. {{company}} is now in our verified buyer network.\n\nThree quick wins to get you to your first transaction:\n1. Set your sourcing preferences -- /onboarding/buyer\n2. Browse trending products in your industries -- /products\n3. Use the marketplace search to find verified suppliers -- /marketplace\n\nQuestions? Just reply.",
+        branches: [],
+        maxRetries: "2", retryDelayMinutes: "60",
+      },
+      {
+        channel: "email", delayHours: "72", label: "Day 4 — first product picks",
+        subject: "3 products trending in your industry this week",
+        bodyTemplate:
+          "Hi {{name}},\n\nBased on your industry preferences, three products are trending hard right now. I picked three suppliers worth a look:\n[product 1] -- [supplier]\n[product 2] -- [supplier]\n[product 3] -- [supplier]\n\nReply 'send' if you want me to make warm intros.",
+        branches: [{ ifOutcome: "replied", gotoIndex: "-1" }],
+        maxRetries: "2", retryDelayMinutes: "60",
+      },
+      {
+        channel: "call", delayHours: "168", label: "Day 11 — onboarding call",
+        subject: "", bodyTemplate: "",
+        branches: [{ ifOutcome: "voicemail", gotoIndex: "3" }],
+        maxRetries: "0", retryDelayMinutes: "30",
+      },
+      {
+        channel: "sms", delayHours: "48", label: "Day 13 — quick check",
+        subject: "",
+        bodyTemplate: "Hi {{name}} -- {{company}} hasn't placed a first order yet. Anything blocking? Reply or grab 15 min: [calendly]",
+        branches: [],
+        maxRetries: "1", retryDelayMinutes: "30",
+      },
+      {
+        channel: "email", delayHours: "72", label: "Day 16 — final",
+        subject: "Still looking for the right fit?",
+        bodyTemplate:
+          "Hi {{name}},\n\nLast email from me on this. If {{company}} is still figuring out the right supplier match, here's the easiest next step: reply with the SKU or category, I'll have a verified supplier ready to talk by tomorrow.\n\nIf timing isn't right, no worries -- archive this and we'll resurface trending products to you monthly.",
+        branches: [],
+        maxRetries: "2", retryDelayMinutes: "60",
+      },
+    ],
+  },
+];
+
 function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -611,6 +739,13 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
   ]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function applyTemplate(t: CadenceTemplate) {
+    setName(t.cadenceName);
+    setDescription(t.cadenceDescription);
+    // Deep-clone the steps so the template stays immutable across applies
+    setSteps(t.steps.map((s) => ({ ...s, branches: s.branches.map((b) => ({ ...b })) })));
+  }
 
   function updateStep(i: number, patch: Partial<DraftStep>) {
     setSteps((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
@@ -694,6 +829,27 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
         <button onClick={onClose} className="text-ink-tertiary hover:text-ink-primary">
           <X className="h-4 w-4" />
         </button>
+      </div>
+
+      {/* Slice 36: template gallery -- one-click pre-fill of name +
+          description + steps. Operator can edit anything afterwards. */}
+      <div className="mb-3 rounded-md border border-bg-border bg-bg-card/40 p-2.5">
+        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+          Start from a template
+        </div>
+        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+          {CADENCE_TEMPLATES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => applyTemplate(t)}
+              className="rounded-md border border-bg-border bg-bg-app px-2.5 py-1.5 text-left text-[11px] hover:border-accent-blue/50 hover:bg-bg-hover"
+            >
+              <div className="font-semibold">{t.name}</div>
+              <div className="mt-0.5 text-[10px] text-ink-tertiary">{t.description}</div>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-3">
