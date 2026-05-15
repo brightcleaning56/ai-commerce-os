@@ -3,6 +3,7 @@ import { sendEmail } from "@/lib/email";
 import { getOperator } from "@/lib/operator";
 import { verifyTwilioSignature } from "@/lib/twilioVoice";
 import { patchVoicemailTranscript } from "@/lib/voicemails";
+import { patchVoiceRecordingTranscript } from "@/lib/voiceRecordings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,6 +54,35 @@ export async function POST(req: NextRequest) {
 
   if (!recordingSid) {
     return NextResponse.json({ error: "Missing RecordingSid" }, { status: 400 });
+  }
+
+  // Slice 52: route by ?source=outbound vs the existing voicemail
+  // path. The recording-status webhook sets ?source=outbound on its
+  // transcribeCallback URL; voicemails leave it unset.
+  const sourceParam = req.nextUrl.searchParams.get("source");
+  if (sourceParam === "outbound") {
+    const updated = await patchVoiceRecordingTranscript({
+      recordingSid,
+      transcription: text,
+      status,
+      transcriptionSid: formParams.TranscriptionSid,
+    });
+    if (!updated) {
+      console.info(
+        `[voice/transcription-status] no outbound recording for RecordingSid ${recordingSid} -- "${text.slice(0, 80)}"`,
+      );
+      return NextResponse.json({ ok: true, persisted: false, kind: "outbound" });
+    }
+    // Don't email -- outbound transcripts aren't novelty events for
+    // the operator the way an unread voicemail is. They just become
+    // searchable via /api/voice/transcripts/search (slice 52.5 will
+    // extend that endpoint to include outbound recordings).
+    return NextResponse.json({
+      ok: true,
+      persisted: true,
+      kind: "outbound",
+      textLength: text.length,
+    });
   }
 
   const updated = await patchVoicemailTranscript({

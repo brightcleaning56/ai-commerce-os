@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth";
 import { listVoicemails } from "@/lib/voicemails";
+import { listVoiceRecordings } from "@/lib/voiceRecordings";
+import { callsStore } from "@/lib/calls";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,10 +45,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "q is required" }, { status: 400 });
   }
 
-  const all = await listVoicemails();
+  const [voicemailList, recordings] = await Promise.all([
+    listVoicemails(),
+    listVoiceRecordings(),
+  ]);
   const needle = q.toLowerCase();
   const out: Array<{
     id: string;
+    kind: "voicemail" | "outbound";
     from: string;
     durationSec: number;
     recordedAt: string;
@@ -55,7 +61,8 @@ export async function GET(req: NextRequest) {
     matchOffset: number;
   }> = [];
 
-  for (const vm of all) {
+  // ── Voicemail transcripts ───────────────────────────────────────
+  for (const vm of voicemailList) {
     if (!vm.transcription) continue;
     if (vm.transcriptionStatus && vm.transcriptionStatus !== "completed") continue;
     if (unreadOnly && vm.read) continue;
@@ -65,7 +72,6 @@ export async function GET(req: NextRequest) {
     const idx = lower.indexOf(needle);
     if (idx === -1) continue;
 
-    // Snippet: ±60 chars around the match, with ellipses
     const snippetStart = Math.max(0, idx - 60);
     const snippetEnd = Math.min(vm.transcription.length, idx + needle.length + 60);
     const prefix = snippetStart > 0 ? "…" : "";
@@ -74,6 +80,7 @@ export async function GET(req: NextRequest) {
 
     out.push({
       id: vm.id,
+      kind: "voicemail",
       from: vm.from,
       durationSec: vm.durationSec,
       recordedAt: vm.recordedAt,
@@ -83,6 +90,42 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // ── Slice 52: outbound recording transcripts ────────────────────
+  // Recordings don't have a `from` (they have callSid + we fetch the
+  // matching Call's toContact / toNumber for display). unreadOnly
+  // is meaningless for outbound (always treat as "read"); skip when
+  // the operator filters to unread-only.
+  if (!unreadOnly) {
+    for (const rec of recordings) {
+      if (!rec.transcription) continue;
+      if (rec.transcriptionStatus && rec.transcriptionStatus !== "completed") continue;
+      if (sinceMs > 0 && new Date(rec.recordedAt).getTime() < sinceMs) continue;
+
+      const lower = rec.transcription.toLowerCase();
+      const idx = lower.indexOf(needle);
+      if (idx === -1) continue;
+
+      const snippetStart = Math.max(0, idx - 60);
+      const snippetEnd = Math.min(rec.transcription.length, idx + needle.length + 60);
+      const prefix = snippetStart > 0 ? "…" : "";
+      const suffix = snippetEnd < rec.transcription.length ? "…" : "";
+      const snippet = `${prefix}${rec.transcription.slice(snippetStart, snippetEnd)}${suffix}`;
+
+      // Lookup the Call record for display context (best-effort)
+      const call = await callsStore.getByCallSid(rec.callSid).catch(() => null);
+      out.push({
+        id: rec.callSid,
+        kind: "outbound",
+        from: call?.toContact || call?.toNumber || rec.callSid.slice(-8),
+        durationSec: rec.durationSec,
+        recordedAt: rec.recordedAt,
+        read: true,
+        snippet,
+        matchOffset: idx,
+      });
+    }
+  }
+
   out.sort((a, b) => new Date(b.recordedAt).getTime() - new Date(a.recordedAt).getTime());
 
   return NextResponse.json({
@@ -90,6 +133,9 @@ export async function GET(req: NextRequest) {
     total: out.length,
     results: out.slice(0, limit),
     truncated: out.length > limit,
-    sources: { voicemails: out.length },
+    sources: {
+      voicemails: out.filter((r) => r.kind === "voicemail").length,
+      outbound: out.filter((r) => r.kind === "outbound").length,
+    },
   });
 }

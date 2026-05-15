@@ -28,6 +28,13 @@ export type VoiceRecording = {
   durationSec: number;
   recordedAt: string;          // ISO -- when the webhook fired
   channels: number;            // 1 (mono) or 2 (dual-channel)
+  // Slice 52: outbound call transcripts. recording-status webhook
+  // kicks off a Twilio transcription request after persisting the
+  // recording; the transcription-status webhook fills these in
+  // asynchronously (typically 30s-2min later).
+  transcription?: string;
+  transcriptionStatus?: "pending" | "completed" | "failed";
+  transcriptionSid?: string;
 };
 
 export async function listVoiceRecordings(): Promise<VoiceRecording[]> {
@@ -60,4 +67,28 @@ export async function saveVoiceRecording(rec: VoiceRecording): Promise<void> {
   const filtered = existing.filter((r) => r.callSid !== rec.callSid);
   const next = [rec, ...filtered].slice(0, MAX_ENTRIES);
   await getBackend().write(VOICE_RECORDINGS_FILE, next);
+}
+
+/**
+ * Patch transcript fields onto a recording by RecordingSid (Twilio's
+ * transcription webhook gives us that, not the original CallSid).
+ * Idempotent -- safe to call multiple times.
+ */
+export async function patchVoiceRecordingTranscript(args: {
+  recordingSid: string;
+  transcription: string;
+  status: "completed" | "failed";
+  transcriptionSid?: string;
+}): Promise<VoiceRecording | null> {
+  const all = await listVoiceRecordings();
+  const idx = all.findIndex((r) => r.recordingSid === args.recordingSid);
+  if (idx === -1) return null;
+  all[idx] = {
+    ...all[idx],
+    transcription: args.transcription,
+    transcriptionStatus: args.status,
+    transcriptionSid: args.transcriptionSid,
+  };
+  await getBackend().write(VOICE_RECORDINGS_FILE, all);
+  return all[idx];
 }

@@ -137,7 +137,44 @@ export async function POST(req: NextRequest) {
     durationSec,
     recordedAt,
     channels: parseInt(formParams.RecordingChannels ?? "1", 10) || 1,
+    transcriptionStatus: process.env.TWILIO_TRANSCRIBE_OUTBOUND === "true" ? "pending" : undefined,
   });
+
+  // ── Slice 52: outbound call transcription request ────────────────
+  // Twilio's <Dial> verb doesn't support transcribe="true" inline, so
+  // we trigger transcription via the Recording resource's REST endpoint
+  // after the recording lands. Twilio fires our existing
+  // /api/voice/transcription-status webhook (extended in this slice
+  // to handle the outbound source) when the transcript is ready.
+  // Gated by TWILIO_TRANSCRIBE_OUTBOUND=true so operators can opt in
+  // (transcripts cost extra per Twilio billing).
+  if (process.env.TWILIO_TRANSCRIBE_OUTBOUND === "true") {
+    try {
+      const url = new URL(req.url);
+      const transcribeCallback = `${url.protocol}//${url.host}/api/voice/transcription-status?source=outbound&callSid=${encodeURIComponent(callSid)}`;
+      const sid = process.env.TWILIO_ACCOUNT_SID;
+      const token = process.env.TWILIO_AUTH_TOKEN;
+      if (sid && token) {
+        const params = new URLSearchParams();
+        params.set("TranscribeCallback", transcribeCallback);
+        await fetch(
+          `https://api.twilio.com/2010-04-01/Accounts/${sid}/Recordings/${recordingSid}/Transcriptions.json`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Basic ${Buffer.from(`${sid}:${token}`).toString("base64")}`,
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: params.toString(),
+          },
+        ).catch((err) => {
+          console.warn(`[voice/recording-status] transcription request failed:`, err);
+        });
+      }
+    } catch (e) {
+      console.warn("[voice/recording-status] transcription request setup failed:", e);
+    }
+  }
 
   // Attach recordingSid + connected outcome to the server-side Call
   // record so /calls can show it alongside the row. Best-effort: a
