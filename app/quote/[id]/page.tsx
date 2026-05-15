@@ -25,6 +25,21 @@ type QuoteData = {
   notes?: string;
   status: "draft" | "sent" | "accepted" | "rejected" | "expired";
   shareExpiresAt: string;
+  // Slice 57: freight estimate auto-attached on accept (slice 47).
+  // Renders as a transparency card alongside the "accepted" message
+  // so the buyer sees what the operator sees.
+  freightEstimate?: {
+    provider: "shippo" | "fallback";
+    laneKey: string;
+    rates: Array<{
+      mode: string;
+      estimateUsd: number;
+      transitDaysMin: number;
+      transitDaysMax: number;
+      notes?: string;
+    }>;
+    computedAt: string;
+  };
 };
 
 function fmt(n: number, currency: string): string {
@@ -344,6 +359,45 @@ export default function QuotePublicPage() {
                 ? "Thank you. Our team has been notified and will follow up with the PO + onboarding details."
                 : "Understood. Feel free to reach out if circumstances change — we can revisit terms."}
             </p>
+          </div>
+        )}
+
+        {/* Slice 57: freight estimate transparency for the buyer.
+            Shown on accepted quotes when the slice-47 estimator landed
+            a result. Buyer sees same options + costs the operator sees
+            -- no surprise freight charges later. */}
+        {quote.status === "accepted" && quote.freightEstimate && quote.freightEstimate.rates.length > 0 && (
+          <div className="rounded-xl border border-bg-border bg-bg-card p-5">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold">Estimated freight options</div>
+              <span className="rounded-md bg-bg-hover px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                {quote.freightEstimate.provider === "shippo" ? "live carrier rates" : "rate-card estimate"}
+              </span>
+            </div>
+            <p className="mb-3 text-[11px] text-ink-secondary">
+              Approximate cost from {quote.freightEstimate.laneKey}. Final freight is
+              quoted with the carrier at booking time and may differ based on actual
+              weight / dims / fuel surcharge.
+            </p>
+            <div className="space-y-1">
+              {quote.freightEstimate.rates.slice(0, 5).map((r) => (
+                <div
+                  key={r.mode}
+                  className="flex items-center justify-between gap-2 rounded-md border border-bg-border bg-bg-app px-3 py-2 text-[12px]"
+                >
+                  <span className="font-mono text-ink-secondary">{r.mode}</span>
+                  <div className="flex items-center gap-3 text-ink-tertiary">
+                    <span>{r.transitDaysMin}-{r.transitDaysMax} days</span>
+                    <span className="font-mono font-semibold text-accent-green">
+                      ${r.estimateUsd.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 text-[10px] text-ink-tertiary">
+              Computed {new Date(quote.freightEstimate.computedAt).toLocaleString()}.
+            </div>
           </div>
         )}
 
