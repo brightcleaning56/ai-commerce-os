@@ -744,6 +744,8 @@ function Tile({ label, value, hint, tone }: { label: string; value: string; hint
 
 type TranscriptHit = {
   id: string;
+  /** Slice 52: distinguishes voicemail vs outbound call recording. */
+  kind?: "voicemail" | "outbound";
   from: string;
   durationSec: number;
   recordedAt: string;
@@ -752,9 +754,36 @@ type TranscriptHit = {
   matchOffset: number;
 };
 
+/**
+ * Slice 54: split a snippet around every case-insensitive occurrence
+ * of `needle`. Returns an array of { text, isMatch } parts so React
+ * can render <mark> wrappers without dangerouslySetInnerHTML.
+ */
+function splitOnMatch(snippet: string, needle: string): Array<{ text: string; isMatch: boolean }> {
+  if (!needle) return [{ text: snippet, isMatch: false }];
+  const parts: Array<{ text: string; isMatch: boolean }> = [];
+  const lower = snippet.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  let i = 0;
+  while (i < snippet.length) {
+    const idx = lower.indexOf(lowerNeedle, i);
+    if (idx === -1) {
+      parts.push({ text: snippet.slice(i), isMatch: false });
+      break;
+    }
+    if (idx > i) parts.push({ text: snippet.slice(i, idx), isMatch: false });
+    parts.push({ text: snippet.slice(idx, idx + needle.length), isMatch: true });
+    i = idx + needle.length;
+  }
+  return parts;
+}
+
 function TranscriptSearch() {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<TranscriptHit[] | null>(null);
+  // Slice 54: track the query that produced the current hits so the
+  // highlighter doesn't re-highlight against an in-flight typed query.
+  const [highlightQuery, setHighlightQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -774,6 +803,7 @@ function TranscriptSearch() {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? `Search failed (${r.status})`);
       setHits(d.results ?? []);
+      setHighlightQuery(q.trim());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Search failed");
     } finally {
@@ -784,12 +814,13 @@ function TranscriptSearch() {
   return (
     <details className="rounded-xl border border-bg-border bg-bg-card">
       <summary className="cursor-pointer px-4 py-2.5 text-[12px] font-semibold text-ink-secondary hover:text-ink-primary">
-        🔍 Search voicemail transcripts (slice 50)
+        🔍 Search transcripts
       </summary>
       <div className="border-t border-bg-border px-4 py-3 space-y-2">
         <p className="text-[10px] text-ink-tertiary">
-          Full-text search across captured voicemail transcripts. Matches return ±60-char
-          snippets so you can scan results without playing each recording.
+          Full-text search across voicemail + outbound call transcripts. Matches show
+          ±60-char snippets with the query <mark className="rounded-sm bg-accent-amber/30 px-0.5">highlighted</mark>.
+          Outbound transcripts require <span className="font-mono">TWILIO_TRANSCRIBE_OUTBOUND=true</span>.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -823,13 +854,24 @@ function TranscriptSearch() {
             </div>
             {hits.map((h) => (
               <div
-                key={h.id}
+                key={`${h.kind ?? "voicemail"}-${h.id}-${h.matchOffset}`}
                 className="rounded-md border border-bg-border bg-bg-app/40 px-3 py-2 text-[11px]"
               >
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="font-mono text-ink-secondary">{h.from}</span>
+                  <div className="flex items-center gap-1.5">
+                    {h.kind === "outbound" ? (
+                      <span className="rounded-full border border-accent-blue/40 bg-accent-blue/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-accent-blue">
+                        outbound
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-bg-border bg-bg-card px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                        voicemail
+                      </span>
+                    )}
+                    <span className="font-mono text-ink-secondary">{h.from}</span>
+                  </div>
                   <div className="flex items-center gap-2 text-[10px] text-ink-tertiary">
-                    {!h.read && (
+                    {h.kind === "voicemail" && !h.read && (
                       <span className="rounded-full border border-accent-amber/40 bg-accent-amber/10 px-1.5 py-0.5 font-semibold text-accent-amber">
                         unread
                       </span>
@@ -838,7 +880,20 @@ function TranscriptSearch() {
                     <span>{new Date(h.recordedAt).toLocaleString()}</span>
                   </div>
                 </div>
-                <div className="text-ink-primary">{h.snippet}</div>
+                <div className="text-ink-primary">
+                  {splitOnMatch(h.snippet, highlightQuery).map((p, i) =>
+                    p.isMatch ? (
+                      <mark
+                        key={i}
+                        className="rounded-sm bg-accent-amber/30 px-0.5 text-ink-primary"
+                      >
+                        {p.text}
+                      </mark>
+                    ) : (
+                      <span key={i}>{p.text}</span>
+                    ),
+                  )}
+                </div>
               </div>
             ))}
           </div>
