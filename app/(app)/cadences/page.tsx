@@ -510,25 +510,50 @@ function StepStrip({ steps }: { steps: CadenceStep[] }) {
 
 // ─── Create form ────────────────────────────────────────────────────
 
+type DraftBranch = { ifOutcome: string; gotoIndex: string };
 type DraftStep = {
   channel: Channel;
   delayHours: string;       // string in form so we can validate empty
   label: string;
   subject: string;
   bodyTemplate: string;
+  branches: DraftBranch[];
+  maxRetries: string;       // string for empty-state
+  retryDelayMinutes: string;
 };
 
 function blankStep(channel: Channel = "email"): DraftStep {
-  return { channel, delayHours: "0", label: "", subject: "", bodyTemplate: "" };
+  return {
+    channel,
+    delayHours: "0",
+    label: "",
+    subject: "",
+    bodyTemplate: "",
+    branches: [],
+    maxRetries: "0",
+    retryDelayMinutes: "30",
+  };
 }
 
 function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [steps, setSteps] = useState<DraftStep[]>([
-    { channel: "email", delayHours: "0", label: "Day 1 — intro", subject: "Quick intro for {{company}}", bodyTemplate: "" },
-    { channel: "call", delayHours: "48", label: "Day 3 — call", subject: "", bodyTemplate: "" },
-    { channel: "sms", delayHours: "48", label: "Day 5 — SMS nudge", subject: "", bodyTemplate: "Hey {{name}} — quick follow-up?" },
+    {
+      channel: "email", delayHours: "0", label: "Day 1 — intro",
+      subject: "Quick intro for {{company}}", bodyTemplate: "",
+      branches: [], maxRetries: "0", retryDelayMinutes: "30",
+    },
+    {
+      channel: "call", delayHours: "48", label: "Day 3 — call",
+      subject: "", bodyTemplate: "",
+      branches: [], maxRetries: "0", retryDelayMinutes: "30",
+    },
+    {
+      channel: "sms", delayHours: "48", label: "Day 5 — SMS nudge",
+      subject: "", bodyTemplate: "Hey {{name}} — quick follow-up?",
+      branches: [], maxRetries: "0", retryDelayMinutes: "30",
+    },
   ]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -559,12 +584,26 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
       if (Number.isNaN(delay) || delay < 0) {
         throw new Error(`Step ${i + 1}: delayHours must be a non-negative number`);
       }
+      const maxRetries = Number.parseInt(s.maxRetries || "0", 10);
+      const retryDelayMinutes = Number.parseInt(s.retryDelayMinutes || "30", 10);
+      const branches = s.branches
+        .filter((b) => b.ifOutcome.trim() !== "" && b.gotoIndex.trim() !== "")
+        .map((b, bi) => {
+          const idx = Number.parseInt(b.gotoIndex, 10);
+          if (Number.isNaN(idx) || idx < -1 || idx >= steps.length) {
+            throw new Error(`Step ${i + 1} branch ${bi + 1}: gotoIndex must be -1 (stop) or 0..${steps.length - 1}`);
+          }
+          return { ifOutcome: b.ifOutcome.trim(), gotoIndex: idx };
+        });
       return {
         channel: s.channel,
         delayHours: delay,
         label: s.label.trim() || undefined,
         subject: s.subject.trim() || undefined,
         bodyTemplate: s.bodyTemplate.trim() || undefined,
+        branches: branches.length > 0 ? branches : undefined,
+        maxRetries: maxRetries > 0 ? maxRetries : undefined,
+        retryDelayMinutes: maxRetries > 0 ? retryDelayMinutes : undefined,
       };
     });
 
@@ -722,6 +761,111 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                       you click through to dial. Subject/body don't apply.
                     </p>
                   )}
+
+                  {/* Slice 23: branching + retry policy controls */}
+                  <details className="mt-3 rounded-md border border-bg-border bg-bg-app/40 px-2.5 py-2">
+                    <summary className="cursor-pointer text-[11px] font-medium text-ink-secondary hover:text-ink-primary">
+                      Advanced — branching + retry
+                    </summary>
+                    <div className="mt-2 space-y-3">
+                      {/* Branching */}
+                      <div>
+                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                          Outcome branches
+                        </div>
+                        <p className="mb-1.5 text-[10px] text-ink-tertiary">
+                          When the previous step's outcome matches, jump to a different step
+                          instead of advancing. Use index <span className="font-mono">-1</span> to
+                          stop the cadence (e.g. "if buyer replied, end").
+                        </p>
+                        {s.branches.map((b, bi) => (
+                          <div key={bi} className="mb-1 flex items-center gap-1.5">
+                            <span className="text-[10px] text-ink-tertiary">if outcome =</span>
+                            <input
+                              type="text"
+                              value={b.ifOutcome}
+                              onChange={(e) =>
+                                updateStep(i, {
+                                  branches: s.branches.map((bb, bbi) =>
+                                    bbi === bi ? { ...bb, ifOutcome: e.target.value } : bb,
+                                  ),
+                                })
+                              }
+                              placeholder="voicemail"
+                              className="h-6 w-32 rounded border border-bg-border bg-bg-card px-1.5 text-[11px]"
+                            />
+                            <span className="text-[10px] text-ink-tertiary">goto step</span>
+                            <input
+                              type="number"
+                              value={b.gotoIndex}
+                              onChange={(e) =>
+                                updateStep(i, {
+                                  branches: s.branches.map((bb, bbi) =>
+                                    bbi === bi ? { ...bb, gotoIndex: e.target.value } : bb,
+                                  ),
+                                })
+                              }
+                              placeholder="0"
+                              className="h-6 w-14 rounded border border-bg-border bg-bg-card px-1.5 text-right text-[11px] tabular-nums"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateStep(i, {
+                                  branches: s.branches.filter((_, bbi) => bbi !== bi),
+                                })
+                              }
+                              className="rounded border border-accent-red/30 bg-accent-red/5 p-0.5 text-accent-red hover:bg-accent-red/15"
+                              aria-label="Remove branch"
+                            >
+                              <Trash2 className="h-2.5 w-2.5" />
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateStep(i, {
+                              branches: [...s.branches, { ifOutcome: "", gotoIndex: "" }],
+                            })
+                          }
+                          className="inline-flex items-center gap-1 rounded border border-bg-border bg-bg-app px-1.5 py-0.5 text-[10px] text-ink-secondary hover:bg-bg-hover"
+                        >
+                          <Plus className="h-2.5 w-2.5" /> Add branch
+                        </button>
+                      </div>
+
+                      {/* Retry policy */}
+                      <div>
+                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                          Retry on transient failure
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] text-ink-tertiary">max retries</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="10"
+                            value={s.maxRetries}
+                            onChange={(e) => updateStep(i, { maxRetries: e.target.value })}
+                            className="h-6 w-12 rounded border border-bg-border bg-bg-card px-1.5 text-right text-[11px] tabular-nums"
+                          />
+                          <span className="text-[10px] text-ink-tertiary">delay (min)</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="1440"
+                            value={s.retryDelayMinutes}
+                            onChange={(e) => updateStep(i, { retryDelayMinutes: e.target.value })}
+                            className="h-6 w-14 rounded border border-bg-border bg-bg-card px-1.5 text-right text-[11px] tabular-nums"
+                          />
+                          <span className="text-[10px] text-ink-tertiary">
+                            (0 = no retries; rate-limit + timeout + 5xx auto-retry)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
                 </div>
               );
             })}
