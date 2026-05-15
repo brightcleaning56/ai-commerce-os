@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runSupplierFinder } from "@/lib/agents/supplierFinder";
 import { checkKillSwitch } from "@/lib/killSwitch";
+import { gateAgentAccess } from "@/lib/teamPrefs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,9 @@ const RATE_WINDOW_MS = 60_000;
 const recent: number[] = [];
 
 export async function POST(req: NextRequest) {
+  const blocked = await gateAgentAccess(req, "supplier-finder");
+  if (blocked) return blocked;
+
   const ks = await checkKillSwitch();
   if (ks.killed) {
     return NextResponse.json(

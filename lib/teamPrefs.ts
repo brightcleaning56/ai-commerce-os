@@ -128,3 +128,59 @@ export const teamPrefs = {
     return pref.agents.includes(agent);
   },
 };
+
+/**
+ * Slice 21 gate. Reads the user-token cookie from the request,
+ * extracts the email, and checks team-pref agent allowlist.
+ *
+ * Owner / dev-mode sessions bypass entirely (cookie holds the
+ * ADMIN_TOKEN, not a per-user u_ token, so no email is extracted).
+ * Teammates who haven't completed team onboarding bypass too
+ * (default: all agents allowed -- onboarding ADDS restrictions,
+ * not REMOVE existing access).
+ *
+ * Returns null when access is allowed; returns a Response 403 when
+ * the teammate has explicitly de-selected this agent in their
+ * slice-3 onboarding.
+ *
+ * Usage in an agent route handler:
+ *   import { gateAgentAccess } from "@/lib/teamPrefs";
+ *   const blocked = await gateAgentAccess(req, "outreach");
+ *   if (blocked) return blocked;
+ */
+export async function gateAgentAccess(
+  req: { headers: Headers },
+  agentKind: string,
+): Promise<Response | null> {
+  // Lazy-import the token verifier to avoid a cycle (lib/userToken
+  // is a fundamental edge-runtime module).
+  let email: string | undefined;
+  try {
+    const cookieHeader = req.headers.get("cookie") ?? "";
+    const match = /(?:^|;\s*)aicos_admin=([^;]+)/.exec(cookieHeader);
+    const cookieValue = match ? decodeURIComponent(match[1]) : null;
+    if (cookieValue && cookieValue.startsWith("u_")) {
+      const { verifyUserToken } = await import("./userToken");
+      const v = await verifyUserToken(cookieValue);
+      if (v.ok && v.payload.email) email = v.payload.email;
+    }
+  } catch {
+    // Cookie parsing or token verification failed -- treat as
+    // owner-equivalent (no per-user gate). The middleware already
+    // enforced auth at the request boundary.
+  }
+  if (!email) return null;
+  const allowed = await teamPrefs.hasAgentAccess(email, agentKind);
+  if (allowed) return null;
+  return new Response(
+    JSON.stringify({
+      error: `Agent "${agentKind}" is not in your team-prefs allowlist. Update via /onboarding/team or ask the workspace owner to grant it.`,
+      gatedBy: "team-prefs",
+      agentKind,
+    }),
+    {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+    },
+  );
+}

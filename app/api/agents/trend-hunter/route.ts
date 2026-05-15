@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runTrendHunter } from "@/lib/agents/trendHunter";
 import { checkKillSwitch } from "@/lib/killSwitch";
+import { gateAgentAccess } from "@/lib/teamPrefs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,9 @@ const RATE_WINDOW_MS = 60_000;
 const recentRuns: number[] = [];
 
 export async function POST(req: NextRequest) {
+  const blocked = await gateAgentAccess(req, "trend-hunter");
+  if (blocked) return blocked;
+
   const ks = await checkKillSwitch();
   if (ks.killed) {
     return NextResponse.json(

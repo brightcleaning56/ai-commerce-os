@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { runNegotiation } from "@/lib/agents/negotiation";
 import { checkKillSwitch } from "@/lib/killSwitch";
 import { store } from "@/lib/store";
+import { gateAgentAccess } from "@/lib/teamPrefs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,6 +12,9 @@ const RATE_WINDOW_MS = 60_000;
 const recent: number[] = [];
 
 export async function POST(req: NextRequest) {
+  const blocked = await gateAgentAccess(req, "negotiation");
+  if (blocked) return blocked;
+
   const ks = await checkKillSwitch();
   if (ks.killed) {
     return NextResponse.json(

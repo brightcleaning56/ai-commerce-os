@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runOutreach } from "@/lib/agents/outreach";
 import { checkKillSwitch } from "@/lib/killSwitch";
+import { gateAgentAccess } from "@/lib/teamPrefs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,11 @@ const RATE_WINDOW_MS = 60_000;
 const recent: number[] = [];
 
 export async function POST(req: NextRequest) {
+  // Slice 21: per-teammate agent allowlist (team-prefs). Owner +
+  // teammates without onboarding-completed bypass automatically.
+  const blocked = await gateAgentAccess(req, "outreach");
+  if (blocked) return blocked;
+
   // Server-authoritative kill switch -- when active, every agent path
   // skips. Returns 503 so the client can show "agents paused" feedback.
   const ks = await checkKillSwitch();
