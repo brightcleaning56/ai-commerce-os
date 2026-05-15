@@ -61,6 +61,133 @@ export function getFreightProvider(): "shippo" | "fallback" {
   return process.env.SHIPPO_API_KEY ? "shippo" : "fallback";
 }
 
+// ─── Shippo adapter (slice 45) ──────────────────────────────────────
+//
+// Lightweight wrapper around https://goshippo.com/docs/reference/.
+// We use the freight-rate endpoint (POST /v2/freight/rates) for
+// LCL/FCL/air; for parcel + LTL we'd hit /v1/shipments. To keep the
+// surface simple, slice 45 uses /v2/freight/rates only and returns
+// what's available; modes Shippo doesn't quote fall through to the
+// rate card.
+//
+// Shippo address shape requires a structured address object. We
+// supply minimal fields (country + state); when state is missing we
+// pass country only -- most shipping APIs accept a 2-letter ISO and
+// pick a default port for quoting. Full street address support is
+// slice 45.5 (pulls from buyerAddress on the quote).
+
+type ShippoRate = {
+  amount: string;            // decimal string, e.g. "4250.00"
+  currency: string;          // "USD"
+  service_level?: { name?: string; token?: string };
+  estimated_days?: number;
+  provider?: string;
+  duration_terms?: string;
+};
+
+type ShippoFreightResponse = {
+  results?: ShippoRate[];
+  // Slice 45.5 will handle the paginated/async case where Shippo
+  // returns a request id + rates arrive via webhook.
+};
+
+const SHIPPO_TO_AVYN_MODE: Record<string, FreightMode> = {
+  ocean_lcl: "ocean-lcl",
+  ocean_fcl: "ocean-fcl",
+  air: "air-cargo",
+  truckload: "ftl",
+  ltl: "ltl",
+  parcel: "parcel",
+  rail: "rail",
+};
+
+function laneKeyOf(i: FreightEstimateInput): string {
+  return `${i.originCountry}${i.originState ? `-${i.originState}` : ""} -> ${i.destCountry}${i.destState ? `-${i.destState}` : ""}`;
+}
+
+async function fetchShippoRates(input: FreightEstimateInput): Promise<FreightRate[] | null> {
+  const key = process.env.SHIPPO_API_KEY;
+  if (!key) return null;
+
+  const body = {
+    address_from: {
+      country: input.originCountry,
+      state: input.originState,
+    },
+    address_to: {
+      country: input.destCountry,
+      state: input.destState,
+    },
+    parcels: [
+      {
+        weight: String(Math.max(1, input.weightKg)),
+        mass_unit: "kg",
+        // Approximate cubic dimensions from volume if provided;
+        // otherwise pass a small default so Shippo accepts the call.
+        length: input.volumeCbm ? String(Math.round(Math.cbrt(input.volumeCbm) * 100)) : "100",
+        width: "100",
+        height: "100",
+        distance_unit: "cm",
+      },
+    ],
+    async: false,
+  };
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10_000);
+  try {
+    const res = await fetch("https://api.goshippo.com/v2/freight/rates", {
+      method: "POST",
+      headers: {
+        Authorization: `ShippoToken ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`Shippo ${res.status}: ${txt.slice(0, 200)}`);
+    }
+    const data = (await res.json()) as ShippoFreightResponse;
+    if (!data.results || data.results.length === 0) return [];
+
+    // Group Shippo rates by their AVYN-mode mapping; pick cheapest
+    // per mode (Shippo often returns multiple carriers per mode).
+    const byMode = new Map<FreightMode, ShippoRate>();
+    for (const r of data.results) {
+      const tok = (r.service_level?.token ?? "").toLowerCase();
+      const avynMode = (Object.entries(SHIPPO_TO_AVYN_MODE).find(
+        ([k]) => tok.includes(k),
+      )?.[1]) as FreightMode | undefined;
+      if (!avynMode) continue;
+      const existing = byMode.get(avynMode);
+      if (!existing || Number(r.amount) < Number(existing.amount)) {
+        byMode.set(avynMode, r);
+      }
+    }
+
+    const rates: FreightRate[] = [];
+    for (const [mode, r] of byMode.entries()) {
+      const days = r.estimated_days ?? 0;
+      const cfg = MODE_MULTIPLIERS[mode];
+      rates.push({
+        mode,
+        estimateUsd: Math.round(Number(r.amount)),
+        transitDaysMin: days > 0 ? Math.max(1, Math.floor(days * 0.8)) : cfg.min,
+        transitDaysMax: days > 0 ? Math.ceil(days * 1.2) : cfg.max,
+        notes: `Shippo · ${r.provider ?? "carrier"} · ${r.service_level?.name ?? r.service_level?.token ?? mode}`,
+      });
+    }
+    rates.sort((a, b) => a.estimateUsd - b.estimateUsd);
+    return rates;
+  } catch (e) {
+    clearTimeout(timer);
+    throw e;
+  }
+}
+
 // ─── Rate card (slice 34 fallback implementation) ────────────────────
 //
 // Source: industry-standard order-of-magnitude rates as of 2024 Q4.
@@ -170,8 +297,27 @@ export async function estimateLane(input: FreightEstimateInput): Promise<Freight
   const baseRate = basePerKg(originRegion, destRegion);
   const weightKg = Math.max(1, input.weightKg);
 
-  // When SHIPPO_API_KEY is set, future code would hit the real
-  // provider here. For now we always use the rate card.
+  // Slice 45: real Shippo adapter when SHIPPO_API_KEY is set. Falls
+  // back to the rate card on any error so freight estimates never
+  // hard-fail the operator's flow.
+  if (provider === "shippo") {
+    try {
+      const live = await fetchShippoRates(input);
+      if (live && live.length > 0) {
+        return {
+          provider: "shippo",
+          laneKey: laneKeyOf(input),
+          rates: live,
+          computedAt: new Date().toISOString(),
+        };
+      }
+      // Empty Shippo response -> fall through to rate card
+    } catch (e) {
+      // Logged for ops visibility; quietly degrade
+      console.warn(`[freight] Shippo failed, falling back to rate card: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
   const modes = input.mode ? [input.mode] : plausibleModesFor(originRegion, destRegion);
   const rates: FreightRate[] = modes.map((mode) => {
     const cfg = MODE_MULTIPLIERS[mode];
