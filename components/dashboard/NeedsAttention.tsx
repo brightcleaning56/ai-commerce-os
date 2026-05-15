@@ -11,6 +11,7 @@ import {
   MessageSquare,
   Package,
   ShieldAlert,
+  ShieldCheck,
   Smartphone,
   Truck,
   Voicemail,
@@ -30,7 +31,8 @@ type AttentionType =
   | "lead_hot_unhandled"
   | "inbound_reply"
   | "lead_sms_reply"
-  | "voicemail_pending";
+  | "voicemail_pending"
+  | "cadence_approval";
 
 type Item = {
   type: AttentionType;
@@ -60,6 +62,7 @@ const ICON: Record<AttentionType, React.ComponentType<{ className?: string }>> =
   inbound_reply: MessageSquare,
   lead_sms_reply: Smartphone,
   voicemail_pending: Voicemail,
+  cadence_approval: ShieldCheck,
 };
 
 const URGENCY_TONE: Record<Item["urgency"], { ring: string; bg: string; iconBg: string; iconText: string; cta: string }> = {

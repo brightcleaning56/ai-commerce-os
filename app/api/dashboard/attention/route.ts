@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cadenceQueueItemsStore } from "@/lib/cadences";
 import { store } from "@/lib/store";
 import { scoreLead } from "@/lib/leadScore";
 import { unreadVoicemailCount } from "@/lib/voicemails";
@@ -54,7 +55,8 @@ export async function GET() {
       | "lead_hot_unhandled"
       | "inbound_reply"
       | "lead_sms_reply"
-      | "voicemail_pending";
+      | "voicemail_pending"
+      | "cadence_approval";
     count: number;
     urgency: "high" | "medium" | "low";
     label: string;
@@ -195,6 +197,36 @@ export async function GET() {
       href: "/approvals",
       cta: "Review queue",
     });
+  }
+
+  // ── Cadence touches needing approval (slice 18) ───────────────────────
+  // Surfaces approval-gated cadence-scheduled items so the operator
+  // sees the depth at a glance instead of having to filter on /queue.
+  // High urgency when any item has been pending >24h (matches the
+  // Slack stale-approvals cron threshold).
+  try {
+    const cadenceItems = await cadenceQueueItemsStore.list();
+    const needsApproval = cadenceItems.filter(
+      (i) => i.status === "pending" && i.requiresApproval,
+    );
+    if (needsApproval.length > 0) {
+      const oldestMs = Math.min(...needsApproval.map((i) => new Date(i.createdAt).getTime()));
+      const hoursOld = (Date.now() - oldestMs) / (60 * 60 * 1000);
+      const stale = hoursOld > 24;
+      items.push({
+        type: "cadence_approval",
+        count: needsApproval.length,
+        urgency: stale ? "high" : needsApproval.length >= 5 ? "medium" : "low",
+        label: `${needsApproval.length} cadence touch${needsApproval.length === 1 ? "" : "es"} need approval`,
+        detail: stale
+          ? `Oldest is ${Math.floor(hoursOld)}h old — workspace policy is blocking sends.`
+          : "Bulk-approve from /queue · Needs approval filter.",
+        href: "/queue",
+        cta: "Open queue",
+      });
+    }
+  } catch {
+    // Best-effort -- if cadence store is unreadable, skip this item.
   }
 
   // ── Transactions in escrow_held — supplier prep / ship ────────────────
