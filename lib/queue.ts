@@ -116,6 +116,10 @@ export type QueueItem = {
    *  trail survives even if the send adapter throws. */
   approvedBy?: string;
   approvedAt?: string;
+  /** Slice 32: retry counters from cadence runner. Item stays
+   *  status="pending" while retries remain; counter shows progress. */
+  retryCount?: number;
+  lastRetryAt?: string;
 
   createdAt: string;    // ISO
   updatedAt: string;    // ISO
@@ -408,6 +412,8 @@ async function deriveFromCadenceItems(args: { includeCompletedWithinMs?: number 
       requiresApproval: c.requiresApproval,
       approvedBy: c.approvedBy,
       approvedAt: c.approvedAt,
+      retryCount: c.retryCount,
+      lastRetryAt: c.lastRetryAt,
       outcome: c.outcome,
       doneAt: c.doneAt,
       createdAt: c.createdAt,

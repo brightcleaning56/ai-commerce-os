@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Phone,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
   ShieldCheck,
@@ -74,6 +75,8 @@ type QueueItem = {
   requiresApproval?: boolean;
   approvedBy?: string;
   approvedAt?: string;
+  retryCount?: number;
+  lastRetryAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -900,6 +903,22 @@ function QueueRow({
           >
             {item.status === "done" ? <Check className="h-2.5 w-2.5" /> : null}
             {item.outcome || item.status}
+          </span>
+        )}
+        {/* Slice 32: retry-in-progress badge for pending items mid-retry.
+            Shown only when retryCount > 0 AND status is still pending
+            (the runner pushed dueAt forward, item is back in queue). */}
+        {item.status === "pending" && (item.retryCount ?? 0) > 0 && (
+          <span
+            className="inline-flex items-center gap-0.5 rounded-full border border-accent-amber/40 bg-accent-amber/10 px-2 py-0.5 text-[10px] font-medium text-accent-amber"
+            title={
+              item.lastRetryAt
+                ? `Retry attempt ${item.retryCount}, last retried ${new Date(item.lastRetryAt).toLocaleString()}`
+                : `Retry attempt ${item.retryCount}`
+            }
+          >
+            <RotateCcw className="h-2.5 w-2.5" />
+            retry {item.retryCount}
           </span>
         )}
         {/* Approval audit -- shown when stamp present (completed approval-required items).
