@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { requireCapability } from "@/lib/auth";
+import { teamPrefs } from "@/lib/teamPrefs";
 import { expiryFromTtlHours, genShareToken } from "@/lib/shareTokens";
 import { store, type Quote } from "@/lib/store";
 
@@ -92,6 +93,53 @@ export async function POST(req: NextRequest) {
     ? Math.round(body.shippingCents)
     : 0;
   const notes = typeof body.notes === "string" ? body.notes.trim().slice(0, 1000) : undefined;
+  const overrideCap = body.overrideCap === true;
+
+  // ── Slice 33: per-teammate quote / discount cap enforcement ──────
+  // Sums every line's subtotal (qty * price) + shipping to compute
+  // the total quote value, then checks against this teammate's
+  // team-prefs (slice 3 onboarding answers). Owner / non-team
+  // sessions bypass entirely (no email -> no pref lookup).
+  // overrideCap=true in the body skips the gate (operator explicitly
+  // chose to exceed the cap; logged via the audit trail later).
+  if (!overrideCap && "user" in auth && auth.user?.email) {
+    const pref = await teamPrefs.getByEmail(auth.user.email).catch(() => null);
+    if (pref) {
+      const totalDollars = lines.reduce((s, l) => s + l.qty * l.price, 0)
+        + (totalShippingCents / 100);
+      if (
+        pref.quoteApprovalCap != null &&
+        pref.quoteApprovalCap > 0 &&
+        totalDollars > pref.quoteApprovalCap
+      ) {
+        return NextResponse.json(
+          {
+            error: `Quote total $${totalDollars.toFixed(2)} exceeds your approval cap of $${pref.quoteApprovalCap}. Set overrideCap:true to send to /approvals queue, or have the workspace owner raise your cap on /admin/team-prefs.`,
+            gatedBy: "team-prefs-quote-cap",
+            cap: pref.quoteApprovalCap,
+            attempted: totalDollars,
+          },
+          { status: 412 },
+        );
+      }
+      if (
+        pref.discountCap != null &&
+        pref.discountCap > 0 &&
+        discountPct > pref.discountCap
+      ) {
+        return NextResponse.json(
+          {
+            error: `Discount ${discountPct}% exceeds your approval cap of ${pref.discountCap}%. Set overrideCap:true to send to /approvals queue, or have the workspace owner raise your cap.`,
+            gatedBy: "team-prefs-discount-cap",
+            cap: pref.discountCap,
+            attempted: discountPct,
+          },
+          { status: 412 },
+        );
+      }
+    }
+  }
+
   const leadTimeDays = typeof body.leadTimeDays === "number" && body.leadTimeDays > 0
     ? Math.min(365, Math.max(1, Math.round(body.leadTimeDays)))
     : 14;
