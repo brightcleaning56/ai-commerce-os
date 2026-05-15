@@ -20,7 +20,7 @@ import {
   Unlock,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ACTIVITY,
   LISTINGS,
@@ -231,6 +231,38 @@ function RFQDetail({ r, onAward }: { r: RFQ; onAward: (r: RFQ) => void }) {
 export default function MarketplacePage() {
   const [tab, setTab] = useState<"listings" | "rfqs" | "orders">("listings");
   const [openListing, setOpenListing] = useState<Listing | null>(null);
+  // Slice 41: live counts from the supplier registry + transactions
+  // store. The listings + RFQs + orders below are still mock data
+  // (preview surface), but the operator sees a real signal of how
+  // many vetted suppliers + linked txns are actually in the workspace.
+  const [liveCounts, setLiveCounts] = useState<{
+    activeSuppliers: number;
+    pendingSuppliers: number;
+    linkedTransactions: number;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetch("/api/admin/suppliers", { cache: "no-store", credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch("/api/transactions", { cache: "no-store", credentials: "include" })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]).then(([suppliers, txns]) => {
+      if (cancelled) return;
+      const supplierList: Array<{ status?: string }> = suppliers?.suppliers ?? [];
+      const txnList: Array<{ supplierRegistryId?: string }> = txns?.transactions ?? [];
+      setLiveCounts({
+        activeSuppliers: supplierList.filter((s) => s.status === "active").length,
+        pendingSuppliers: supplierList.filter((s) => s.status === "pending").length,
+        linkedTransactions: txnList.filter((t) => !!t.supplierRegistryId).length,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [openRfq, setOpenRfq] = useState<RFQ | null>(null);
   const [query, setQuery] = useState("");
   const [orders, setOrders] = useState<Order[]>(ORDERS);
@@ -393,6 +425,44 @@ export default function MarketplacePage() {
         <Kpi label="In Escrow" value={fmtUSD(totals.inEscrow)} delta={`${orders.filter((o) => o.escrowStatus !== "Released").length} active`} Icon={Lock} tone="amber" href="/escrow" />
         <Kpi label="Cross-border Orders" value={`${orders.length}`} delta="6 countries" Icon={Globe} tone="blue" href="/transactions" />
       </div>
+
+      {/* Slice 41: live counts from supplier registry + transactions
+          stores. The marketplace tabs below are still preview/mock --
+          this row is the only real-data anchor on the page so the
+          operator can tell which tile reflects reality. */}
+      {liveCounts && (
+        <div className="rounded-xl border border-accent-blue/40 bg-accent-blue/5 px-4 py-3">
+          <div className="mb-1 flex items-center gap-2">
+            <ShieldCheck className="h-3.5 w-3.5 text-accent-blue" />
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-accent-blue">
+              Live workspace data
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-[12px]">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Active suppliers</div>
+              <div className="text-base font-bold tabular-nums">{liveCounts.activeSuppliers}</div>
+              <Link href="/admin/suppliers" className="text-[10px] text-accent-blue hover:underline">
+                Open registry →
+              </Link>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Pending verification</div>
+              <div className="text-base font-bold tabular-nums">{liveCounts.pendingSuppliers}</div>
+              <Link href="/admin/suppliers" className="text-[10px] text-accent-blue hover:underline">
+                Review →
+              </Link>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Linked transactions</div>
+              <div className="text-base font-bold tabular-nums">{liveCounts.linkedTransactions}</div>
+              <Link href="/transactions" className="text-[10px] text-accent-blue hover:underline">
+                Open transactions →
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
         <div className="space-y-4">
