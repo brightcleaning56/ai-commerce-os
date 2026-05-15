@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { callsStore } from "@/lib/calls";
 import { sendEmail } from "@/lib/email";
 import { getOperator } from "@/lib/operator";
+import { store } from "@/lib/store";
 import { verifyTwilioSignature } from "@/lib/twilioVoice";
 import { patchVoicemailTranscript } from "@/lib/voicemails";
 import { patchVoiceRecordingTranscript } from "@/lib/voiceRecordings";
+
+/** Strip non-digits + suffix-match phones (last 10 chars). Same
+ *  heuristic used by IncomingCallWidget for cross-format matching. */
+function phonesMatch(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  const na = a.replace(/\D/g, "");
+  const nb = b.replace(/\D/g, "");
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const len = Math.min(na.length, nb.length, 10);
+  return na.slice(-len) === nb.slice(-len);
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -73,10 +87,54 @@ export async function POST(req: NextRequest) {
       );
       return NextResponse.json({ ok: true, persisted: false, kind: "outbound" });
     }
+
+    // ── Slice 60: auto-attach to lead thread ─────────────────────
+    // Look up the Call by callSid (slice 52 stamps the recording
+    // with the originating callSid in the URL params + persists on
+    // VoiceRecording). Match the call's toNumber against any lead's
+    // phone using the suffix-match helper. When matched, append a
+    // callTranscripts[] entry on the lead so the conversation
+    // history shows in /leads detail rail alongside inboundSms.
+    if (status === "completed" && text) {
+      try {
+        const callSidParam = req.nextUrl.searchParams.get("callSid") ?? updated.callSid;
+        if (callSidParam) {
+          const call = await callsStore.getByCallSid(callSidParam).catch(() => null);
+          const targetPhone = call?.toNumber;
+          if (targetPhone) {
+            const leads = await store.getLeads();
+            const lead = leads.find((l) => phonesMatch(l.phone, targetPhone));
+            if (lead) {
+              const entry = {
+                at: new Date().toISOString(),
+                callSid: callSidParam,
+                durationSec: updated.durationSec ?? 0,
+                text: text.slice(0, 4000),
+                direction: (call?.direction === "inbound" ? "inbound" : "outbound") as
+                  | "outbound"
+                  | "inbound",
+              };
+              const existing = lead.callTranscripts ?? [];
+              // Idempotent on callSid -- Twilio retries the
+              // transcribeCallback occasionally.
+              const deduped = existing.filter((t) => t.callSid !== callSidParam);
+              await store.updateLead(lead.id, {
+                callTranscripts: [...deduped, entry],
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn(
+          `[voice/transcription-status] lead auto-attach failed:`,
+          e instanceof Error ? e.message : e,
+        );
+      }
+    }
+
     // Don't email -- outbound transcripts aren't novelty events for
-    // the operator the way an unread voicemail is. They just become
-    // searchable via /api/voice/transcripts/search (slice 52.5 will
-    // extend that endpoint to include outbound recordings).
+    // the operator the way an unread voicemail is. They become
+    // searchable via /api/voice/transcripts/search.
     return NextResponse.json({
       ok: true,
       persisted: true,

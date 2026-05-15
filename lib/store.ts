@@ -699,6 +699,19 @@ export type Lead = {
     body: string;        // raw message body
     messageSid?: string; // Twilio MessageSid for de-dup / debugging
   }>;
+  // ── Call transcripts (slice 60) ───────────────────────────────────
+  // Outbound call transcripts (slice 52) auto-attach here when the
+  // recording's transcribeCallback fires AND the call's toContact /
+  // toNumber matches this lead's phone. Surfaces alongside inboundSms
+  // in the /leads detail rail so the operator sees the full
+  // conversation history (texts + call snippets) in one place.
+  callTranscripts?: Array<{
+    at: string;          // ISO when transcription completed
+    callSid: string;     // Twilio CallSid (links to the audio recording)
+    durationSec: number;
+    text: string;        // truncated to 4000 chars defensively
+    direction: "outbound" | "inbound";
+  }>;
   // ── Lead → Buyer promotion (slice: lead-promotion) ───────────────────────
   // Set when an operator (or auto-promote rule) one-clicks the lead into a
   // DiscoveredBuyer record on /leads. Once set, the same lead can't be
