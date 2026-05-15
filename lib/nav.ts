@@ -198,6 +198,9 @@ export const ADMIN_NAV: NavItem[] = [
   // walking through the persona-aware setup flow. Drill in to see
   // their answers + uploaded docs, delete spam/test sessions.
   { label: "Onboarding Sessions", href: "/admin/onboarding-sessions", icon: Inbox, badge: "NEW", requires: "users:read" },
+  // Team prefs -- per-teammate slice 3 onboarding answers
+  // (department, AI agent access, approval limits, comms channels).
+  { label: "Team Preferences", href: "/admin/team-prefs", icon: Users, badge: "NEW", requires: "users:read" },
   // Workspace config -- the admin onboarding answers that actually
   // drive app behavior (AI tone, approval mode, daily send cap, etc.).
   // Edit inline without re-running onboarding.
