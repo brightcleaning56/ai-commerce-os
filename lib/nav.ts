@@ -205,6 +205,9 @@ export const ADMIN_NAV: NavItem[] = [
   // drive app behavior (AI tone, approval mode, daily send cap, etc.).
   // Edit inline without re-running onboarding.
   { label: "Workspace Config", href: "/admin/workspace-config", icon: SettingsIcon, badge: "NEW", requires: "system:read" },
+  // Cadence items audit -- full read-only audit of every cadence
+  // queue item across cadences with approval audit + retry counters.
+  { label: "Cadence Items", href: "/admin/cadence-items", icon: ScrollText, badge: "NEW", requires: "outreach:read" },
   { label: "Billing & Plans", href: "/admin/billing", icon: FileText, requires: "billing:read" },
   { label: "API Keys", href: "/admin/api-keys", icon: Plug, requires: "apikeys:read" },
   { label: "Suppressions", href: "/admin/suppressions", icon: MailX, badge: "NEW", requires: "system:read" },
