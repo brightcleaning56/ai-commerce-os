@@ -281,7 +281,16 @@ export default function SignupPage() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await fetch("/api/leads", {
+      // Dual-write (slice 20):
+      //   1. POST /api/leads -- preserves operator visibility into who's
+      //      interested even when they bail mid-onboarding (the lead
+      //      is the marketing-side artifact)
+      //   2. POST /api/onboarding/start with persona inferred from goal
+      //      so the prospect lands in the right setup track
+      // Failure on (1) blocks submit; failure on (2) is best-effort
+      // (we still show the completion screen even if onboarding session
+      // mint fails -- they can hit /onboarding/start manually).
+      const leadRes = await fetch("/api/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -297,10 +306,28 @@ export default function SignupPage() {
             `Revenue range: ${revenue || "—"}`,
         }),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Request failed (${res.status})`);
+      if (!leadRes.ok) {
+        const data = await leadRes.json().catch(() => ({}));
+        throw new Error(data.error || `Request failed (${leadRes.status})`);
       }
+
+      // Goal -> persona inference. Most signups are admins; the
+      // sourcing-flavored goals lean buyer; supplier-flavored
+      // signups land on /portal/signup so don't try to detect those
+      // here.
+      const persona =
+        goal === "find-products" ? "buyer" : "admin";
+      try {
+        await fetch("/api/onboarding/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ persona, email }),
+        });
+      } catch {
+        // Non-blocking -- the resume banner will catch them later,
+        // and the completion screen has a CTA back to /onboarding/start.
+      }
+
       setDone(true);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to submit. Please try again.");
@@ -404,12 +431,23 @@ export default function SignupPage() {
           </div>
 
           <div className="mt-8 flex flex-col items-center gap-3">
+            {/* Slice 20: continue straight into onboarding now that the
+                lead capture has landed. Persona was inferred from the
+                operator's primary goal. They can still pick a different
+                track from the chooser if it's wrong. */}
             <Link
-              href="/demo"
+              href={goal === "find-products" ? "/onboarding/buyer" : "/onboarding/admin"}
               className="inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-sm font-bold text-white"
               style={{ background: "linear-gradient(135deg, #7c3aed, #6d28d9)", boxShadow: "0 0 32px rgba(124,58,237,0.45)" }}
             >
-              Preview the Platform <ArrowRight className="h-4 w-4" />
+              Continue setup <ArrowRight className="h-4 w-4" />
+            </Link>
+            <Link
+              href="/demo"
+              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 py-2.5 text-xs"
+              style={{ color: "rgba(255,255,255,0.7)" }}
+            >
+              Or preview the platform first
             </Link>
             <p className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>
               Check your inbox for access details · No credit card needed
