@@ -2,6 +2,7 @@
 import { requireCapability } from "@/lib/auth";
 import { refundCharge } from "@/lib/payments";
 import { store } from "@/lib/store";
+import { teamPrefs } from "@/lib/teamPrefs";
 import { transitionTransaction } from "@/lib/transactions";
 
 export const runtime = "nodejs";
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   let body: {
     resolution?: "refund_buyer" | "release_supplier" | "split";
     notes?: string;
+    overrideCap?: boolean;
   } = {};
   try {
     body = await req.json();
@@ -56,6 +58,39 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       { error: `Can only resolve disputed transactions, currently '${txn.state}'` },
       { status: 400 },
     );
+  }
+
+  // ── Slice 38: per-teammate refund cap enforcement ────────────────
+  // Refund_buyer issues a full refund of productTotalCents.
+  // Split issues a 50% refund. Either path must respect the
+  // teammate's onboarding refund cap. Owner / non-team sessions
+  // bypass entirely. overrideCap=true skips the gate (operator
+  // explicitly chose to exceed).
+  if (
+    !body.overrideCap &&
+    (body.resolution === "refund_buyer" || body.resolution === "split") &&
+    "user" in auth &&
+    auth.user?.email
+  ) {
+    const pref = await teamPrefs.getByEmail(auth.user.email).catch(() => null);
+    if (pref && pref.refundCap != null && pref.refundCap > 0) {
+      const refundCents =
+        body.resolution === "refund_buyer"
+          ? txn.productTotalCents
+          : Math.floor(txn.productTotalCents / 2);
+      const refundDollars = refundCents / 100;
+      if (refundDollars > pref.refundCap) {
+        return NextResponse.json(
+          {
+            error: `Refund $${refundDollars.toFixed(2)} exceeds your approval cap of $${pref.refundCap}. Set overrideCap:true to proceed, or have the workspace owner raise your cap on /admin/team-prefs.`,
+            gatedBy: "team-prefs-refund-cap",
+            cap: pref.refundCap,
+            attempted: refundDollars,
+          },
+          { status: 412 },
+        );
+      }
+    }
   }
 
   try {
