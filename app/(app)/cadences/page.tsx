@@ -172,6 +172,38 @@ export default function CadencesPage() {
     }
   }
 
+  async function pauseAll(c: Cadence, mode: "pause" | "resume" | "stop") {
+    const enrs = enrollmentsByCadence[c.id] ?? [];
+    const candidates =
+      mode === "resume"
+        ? enrs.filter((e) => e.status === "paused").length
+        : mode === "stop"
+          ? enrs.filter((e) => e.status === "active" || e.status === "paused").length
+          : enrs.filter((e) => e.status === "active").length;
+    if (candidates === 0) {
+      setError(`No enrollments to ${mode}.`);
+      return;
+    }
+    const verb = mode === "pause" ? "Pause" : mode === "resume" ? "Resume" : "Stop";
+    const ok = confirm(
+      `${verb} ${candidates} enrollment${candidates === 1 ? "" : "s"} in "${c.name}"?`,
+    );
+    if (!ok) return;
+    try {
+      const r = await fetch(`/api/cadences/${c.id}/pause-all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ mode }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Pause-all failed (${r.status})`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Pause-all failed");
+    }
+  }
+
   async function deleteCadence(c: Cadence) {
     const enrs = enrollmentsByCadence[c.id] ?? [];
     const active = enrs.filter((e) => e.status === "active" || e.status === "paused").length;
@@ -340,10 +372,32 @@ export default function CadencesPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
+                    {/* Slice 28: pause-all + resume-all + stop-all controls.
+                        Operate on every enrollment in this cadence at once. */}
+                    {(enrs.filter((e) => e.status === "active").length > 0) && (
+                      <button
+                        type="button"
+                        onClick={() => void pauseAll(c, "pause")}
+                        title="Pause every active enrollment in this cadence"
+                        className="rounded-md border border-accent-amber/30 bg-accent-amber/5 px-2 py-1 text-[11px] text-accent-amber hover:bg-accent-amber/15"
+                      >
+                        Pause all
+                      </button>
+                    )}
+                    {(enrs.filter((e) => e.status === "paused").length > 0) && (
+                      <button
+                        type="button"
+                        onClick={() => void pauseAll(c, "resume")}
+                        title="Resume every paused enrollment in this cadence"
+                        className="rounded-md border border-accent-green/30 bg-accent-green/5 px-2 py-1 text-[11px] text-accent-green hover:bg-accent-green/15"
+                      >
+                        Resume all
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => void toggleActive(c)}
-                      title={c.active ? "Pause new enrollments" : "Resume accepting enrollments"}
+                      title={c.active ? "Block NEW enrollments (existing keep running)" : "Resume accepting NEW enrollments"}
                       className="rounded-md border border-bg-border bg-bg-app px-2 py-1 text-[11px] text-ink-secondary hover:bg-bg-hover"
                     >
                       {c.active ? "Deactivate" : "Activate"}
