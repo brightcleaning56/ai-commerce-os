@@ -347,6 +347,11 @@ export default function CrossSupplierLanesPage() {
                                 </li>
                               ))}
                             </ul>
+                            {/* Slice 39: per-lane freight estimate panel.
+                                Hits /api/freight/estimate with the lane's
+                                origin + destination + operator-specified
+                                weight; renders rates per mode. */}
+                            <FreightEstimatePanel lane={lane} />
                           </td>
                         </tr>
                       )}
@@ -420,6 +425,119 @@ function TrendCell({ series }: { series?: LaneSeries }) {
       <span className={`font-mono text-[10px] ${tone}`}>
         {trend == null ? "—" : `${trend >= 0 ? "+" : ""}${Math.round(trend)}%`}
       </span>
+    </div>
+  );
+}
+
+// ─── Freight estimate panel (slice 39) ─────────────────────────────
+
+type FreightRate = {
+  mode: string;
+  estimateUsd: number;
+  transitDaysMin: number;
+  transitDaysMax: number;
+  notes?: string;
+};
+
+function FreightEstimatePanel({ lane }: { lane: CrossLane }) {
+  const [open, setOpen] = useState(false);
+  const [weightKg, setWeightKg] = useState("1000");
+  const [busy, setBusy] = useState(false);
+  const [rates, setRates] = useState<FreightRate[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function estimate() {
+    const w = Number.parseFloat(weightKg);
+    if (!Number.isFinite(w) || w <= 0) {
+      setError("Enter a weight in kg");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch("/api/freight/estimate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          originCountry: lane.origin.country,
+          originState: lane.origin.state,
+          destCountry: lane.destination.country,
+          destState: lane.destination.state,
+          weightKg: w,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Estimate failed (${r.status})`);
+      setRates(d.rates ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Estimate failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 border-t border-bg-border pt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="text-[11px] font-semibold text-accent-blue hover:underline"
+      >
+        {open ? "Hide" : "Estimate"} freight cost for this lane →
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-[10px] uppercase tracking-wider text-ink-tertiary">
+              Weight (kg)
+            </label>
+            <input
+              type="number"
+              min="1"
+              step="100"
+              value={weightKg}
+              onChange={(e) => setWeightKg(e.target.value)}
+              className="h-7 w-24 rounded-md border border-bg-border bg-bg-app px-2 text-right text-[12px] tabular-nums"
+            />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void estimate()}
+              className="rounded-md bg-accent-blue px-2.5 py-1 text-[11px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {busy ? "Estimating..." : "Get rates"}
+            </button>
+          </div>
+          {error && <div className="text-[11px] text-accent-red">{error}</div>}
+          {rates && rates.length > 0 && (
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-bg-border text-left text-[10px] uppercase tracking-wider text-ink-tertiary">
+                  <th className="py-1">Mode</th>
+                  <th className="py-1 text-right">Est. cost</th>
+                  <th className="py-1 text-right">Transit (days)</th>
+                  <th className="py-1">Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rates.map((r) => (
+                  <tr key={r.mode} className="border-b border-bg-border/40 last:border-0">
+                    <td className="py-1 font-mono text-[11px]">{r.mode}</td>
+                    <td className="py-1 text-right font-mono text-accent-green">
+                      ${r.estimateUsd.toLocaleString()}
+                    </td>
+                    <td className="py-1 text-right text-ink-secondary">
+                      {r.transitDaysMin}-{r.transitDaysMax}
+                    </td>
+                    <td className="py-1 text-[10px] text-ink-tertiary">{r.notes ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
   );
 }
