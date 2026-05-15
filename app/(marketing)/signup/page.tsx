@@ -461,6 +461,32 @@ export default function SignupPage() {
           </div>
         </div>
 
+        {/* ── Guided-onboarding CTA banner (slice 17) ──
+            Surfaces the new persona-aware engine for prospects who
+            land on the legacy lead-form first. The lead form below
+            still works -- this is purely additive. */}
+        <Link
+          href="/onboarding/start"
+          className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-violet-400/30 bg-violet-500/5 px-4 py-3 transition-colors hover:border-violet-400/60 hover:bg-violet-500/10"
+        >
+          <div className="flex items-center gap-3">
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-violet-500/20">
+              <Sparkles className="h-4 w-4 text-violet-300" />
+            </div>
+            <div>
+              <div className="text-[13px] font-semibold text-white">
+                New: guided AI infrastructure setup
+              </div>
+              <div className="text-[11px]" style={{ color: "rgba(255,255,255,0.55)" }}>
+                Pick your role (admin / buyer / supplier / distributor) and we'll tailor the setup track. ~5 minutes.
+              </div>
+            </div>
+          </div>
+          <span className="text-[11px] font-semibold text-violet-300">
+            Try the new flow →
+          </span>
+        </Link>
+
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_400px]">
 
           {/* ════════════════ LEFT — FORM ════════════════ */}

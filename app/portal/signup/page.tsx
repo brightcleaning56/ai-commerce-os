@@ -135,6 +135,33 @@ export default function SupplierSignupPage() {
         </p>
       </div>
 
+      {/* Guided onboarding CTA (slice 17). The legacy form below
+          still works -- this banner surfaces the new persona-aware
+          engine which collects deeper supplier profile data
+          (industries, manufacturing capabilities, verification docs,
+          etc.) in a guided 7-step flow. */}
+      <Link
+        href="/onboarding/supplier"
+        className="flex items-center justify-between gap-4 rounded-xl border border-accent-blue/40 bg-accent-blue/5 px-4 py-3 transition-colors hover:border-accent-blue/60 hover:bg-accent-blue/10"
+      >
+        <div className="flex items-center gap-3">
+          <div className="grid h-8 w-8 place-items-center rounded-lg bg-accent-blue/20">
+            <Sparkles className="h-4 w-4 text-accent-blue" />
+          </div>
+          <div>
+            <div className="text-[13px] font-semibold">
+              New: guided supplier onboarding
+            </div>
+            <div className="text-[11px] text-ink-secondary">
+              Industry-aware questions, doc uploads, public profile setup. ~10 minutes.
+            </div>
+          </div>
+        </div>
+        <span className="text-[11px] font-semibold text-accent-blue">
+          Try the new flow →
+        </span>
+      </Link>
+
       {/* Value props */}
       <div className="grid gap-3 md:grid-cols-3">
         <ValueProp Icon={ShieldCheck} label="AI Trust Score" body="Show buyers a verified 0-100 score they can rely on." />
