@@ -24,6 +24,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { useVoice } from "@/components/voice/VoiceContext";
+import OnboardingMetricsCard from "@/components/admin/OnboardingMetricsCard";
 
 type CheckResult = {
   ok: boolean;
@@ -311,6 +312,10 @@ export default function SystemHealthPage() {
           <strong className="font-semibold">Couldn&apos;t load health:</strong> {error}
         </div>
       )}
+
+      {/* Slice 26: onboarding metrics card -- self-fetches, hides
+          quietly on a fresh workspace with zero sessions. */}
+      <OnboardingMetricsCard />
 
       {data && (
         <>
