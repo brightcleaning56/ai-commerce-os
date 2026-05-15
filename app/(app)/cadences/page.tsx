@@ -918,22 +918,55 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
         </div>
         <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
           {templates.map((t) => (
-            <button
+            <div
               key={t.id}
-              type="button"
-              onClick={() => applyTemplate(t)}
-              className="rounded-md border border-bg-border bg-bg-app px-2.5 py-1.5 text-left text-[11px] hover:border-accent-blue/50 hover:bg-bg-hover"
+              className="group relative rounded-md border border-bg-border bg-bg-app text-left text-[11px] transition-colors hover:border-accent-blue/50 hover:bg-bg-hover"
             >
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold">{t.name}</span>
-                {t.source === "custom" && (
-                  <span className="rounded-full border border-accent-blue/30 bg-accent-blue/10 px-1 py-0 text-[8px] font-semibold uppercase tracking-wider text-accent-blue">
-                    custom
-                  </span>
-                )}
-              </div>
-              <div className="mt-0.5 text-[10px] text-ink-tertiary">{t.description}</div>
-            </button>
+              <button
+                type="button"
+                onClick={() => applyTemplate(t)}
+                className="block w-full px-2.5 py-1.5 text-left"
+              >
+                <div className="flex items-center gap-1.5 pr-5">
+                  <span className="font-semibold">{t.name}</span>
+                  {t.source === "custom" && (
+                    <span className="rounded-full border border-accent-blue/30 bg-accent-blue/10 px-1 py-0 text-[8px] font-semibold uppercase tracking-wider text-accent-blue">
+                      custom
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 text-[10px] text-ink-tertiary">{t.description}</div>
+              </button>
+              {/* Slice 56: delete button for custom templates only.
+                  Seed templates can't be removed (the API rejects). */}
+              {t.source === "custom" && (
+                <button
+                  type="button"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!window.confirm(`Delete custom template "${t.name}"?`)) return;
+                    try {
+                      const r = await fetch(`/api/cadences/templates/${t.id}`, {
+                        method: "DELETE",
+                        credentials: "include",
+                      });
+                      if (!r.ok) {
+                        const d = await r.json().catch(() => ({}));
+                        throw new Error(d.error ?? `Delete failed (${r.status})`);
+                      }
+                      setTemplates((prev) => prev.filter((x) => x.id !== t.id));
+                    } catch (err) {
+                      alert(err instanceof Error ? err.message : "Delete failed");
+                    }
+                  }}
+                  className="absolute right-1 top-1 rounded p-0.5 text-ink-tertiary opacity-0 transition-opacity hover:bg-accent-red/15 hover:text-accent-red group-hover:opacity-100"
+                  title="Delete this custom template"
+                  aria-label="Delete template"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -1213,6 +1246,17 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
           >
             Cancel
           </button>
+          {/* Slice 55: save the in-progress cadence definition as a
+              reusable template via the slice 44 API. Creates the
+              template only -- doesn't also create the cadence (that's
+              what "Create cadence" does). */}
+          <SaveAsTemplateButton
+            name={name}
+            description={description}
+            steps={steps}
+            disabled={submitting}
+            onSaved={() => setTemplates((prev) => prev /* fetch will refresh on next mount */)}
+          />
           <button
             type="button"
             onClick={() => void submit()}
@@ -1225,6 +1269,102 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── SaveAsTemplateButton (slice 55) ────────────────────────────────
+
+function SaveAsTemplateButton({
+  name,
+  description,
+  steps,
+  disabled,
+  onSaved,
+}: {
+  name: string;
+  description: string;
+  steps: DraftStep[];
+  disabled?: boolean;
+  onSaved: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    if (!name.trim()) {
+      alert("Set a cadence name first -- it doubles as the template name.");
+      return;
+    }
+    if (steps.length === 0) {
+      alert("Add at least one step before saving as template.");
+      return;
+    }
+    const tplName = window.prompt(
+      "Template name (shown in the gallery):",
+      `${name.trim()} template`,
+    );
+    if (!tplName?.trim()) return;
+    const tplDescription = window.prompt(
+      "Short description (1 sentence, shown under the name):",
+      description.trim() || `Custom cadence created ${new Date().toLocaleDateString()}`,
+    );
+    if (tplDescription === null) return;
+    setBusy(true);
+    try {
+      // Coerce DraftStep -> server step shape (numeric values, only
+      // include branches/retries when meaningful)
+      const serverSteps = steps.map((s) => {
+        const delay = Number.parseFloat(s.delayHours || "0");
+        const maxRetries = Number.parseInt(s.maxRetries || "0", 10);
+        const retryDelayMinutes = Number.parseInt(s.retryDelayMinutes || "30", 10);
+        const branches = s.branches
+          .filter((b) => b.ifOutcome.trim() && b.gotoIndex.trim())
+          .map((b) => ({
+            ifOutcome: b.ifOutcome.trim(),
+            gotoIndex: Number.parseInt(b.gotoIndex, 10),
+          }));
+        return {
+          channel: s.channel,
+          delayHours: Number.isFinite(delay) && delay >= 0 ? delay : 0,
+          label: s.label.trim() || undefined,
+          subject: s.subject.trim() || undefined,
+          bodyTemplate: s.bodyTemplate.trim() || undefined,
+          branches: branches.length > 0 ? branches : undefined,
+          maxRetries: maxRetries > 0 ? maxRetries : undefined,
+          retryDelayMinutes: maxRetries > 0 ? retryDelayMinutes : undefined,
+        };
+      });
+      const r = await fetch("/api/cadences/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          name: tplName.trim(),
+          description: tplDescription.trim(),
+          cadenceName: name.trim(),
+          cadenceDescription: description.trim(),
+          steps: serverSteps,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? `Save failed (${r.status})`);
+      alert(`Saved "${tplName.trim()}" -- it'll appear in the gallery on next form open.`);
+      onSaved();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void save()}
+      disabled={busy || disabled}
+      className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-bg-hover disabled:opacity-50"
+      title="Save the current step recipe as a reusable template"
+    >
+      {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+      Save as template
+    </button>
   );
 }
 
