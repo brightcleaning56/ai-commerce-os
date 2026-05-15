@@ -468,6 +468,9 @@ export default function SuppressionsPage() {
         )}
       </div>
 
+      {/* Slice 31: resubscribe audit log surface */}
+      <ResubscribeAuditPanel />
+
       <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 px-4 py-3">
         <div className="flex items-start gap-3 text-[12px]">
           <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent-red/15">
@@ -482,6 +485,110 @@ export default function SuppressionsPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Resubscribe audit panel (slice 31) ─────────────────────────────
+
+type AuditEntry = {
+  id: string;
+  action: "remove" | "add" | "import";
+  email?: string;
+  phone?: string;
+  channel?: "email" | "sms";
+  actorEmail: string;
+  consentReason?: string;
+  source?: string;
+  at: string;
+};
+
+function ResubscribeAuditPanel() {
+  const [open, setOpen] = useState(false);
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  async function load() {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const r = await fetch("/api/admin/suppressions/audits?action=remove&limit=200", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setEntries(d.audits ?? []);
+      }
+    } catch {
+      // best-effort
+    } finally {
+      setLoading(false);
+      setLoaded(true);
+    }
+  }
+
+  useEffect(() => {
+    if (open && !loaded) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-[12px] font-semibold text-ink-secondary hover:bg-bg-hover"
+      >
+        <span>Resubscribe audit log {entries.length > 0 && `(${entries.length})`}</span>
+        <span className="text-[10px] text-ink-tertiary">{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-bg-border px-4 py-3">
+          {loading ? (
+            <div className="flex items-center gap-2 text-[11px] text-ink-tertiary">
+              <Loader2 className="h-3 w-3 animate-spin" /> Loading audit log...
+            </div>
+          ) : entries.length === 0 ? (
+            <div className="text-center text-[11px] text-ink-tertiary">
+              No resubscribes recorded. (Or nothing was removed since the audit log went live in slice 30.)
+            </div>
+          ) : (
+            <table className="w-full text-[12px]">
+              <thead className="text-[10px] uppercase tracking-wider text-ink-tertiary">
+                <tr className="border-b border-bg-border">
+                  <th className="py-1.5 text-left font-medium">Contact</th>
+                  <th className="py-1.5 text-left font-medium">Channel</th>
+                  <th className="py-1.5 text-left font-medium">Resubscribed by</th>
+                  <th className="py-1.5 text-left font-medium">Consent reason</th>
+                  <th className="py-1.5 text-right font-medium">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((e) => (
+                  <tr key={e.id} className="border-b border-bg-border/40 last:border-0">
+                    <td className="py-1.5 font-mono text-[11px]">
+                      {e.email}
+                      {e.phone && (
+                        <span className="ml-1 text-ink-tertiary">· {e.phone}</span>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-[11px] text-ink-secondary">{e.channel ?? "both"}</td>
+                    <td className="py-1.5 font-mono text-[11px] text-ink-secondary">{e.actorEmail}</td>
+                    <td className="py-1.5 text-[11px] text-ink-secondary max-w-md truncate" title={e.consentReason}>
+                      {e.consentReason ?? "—"}
+                    </td>
+                    <td className="py-1.5 text-right font-mono text-[10px] text-ink-tertiary">
+                      {new Date(e.at).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
   );
 }
