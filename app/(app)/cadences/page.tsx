@@ -86,6 +86,23 @@ const STATUS_TONE: Record<Enrollment["status"], string> = {
   completed: "bg-accent-blue/15 text-accent-blue",
 };
 
+/**
+ * Slice 59: substitute every supported merge tag with sample values.
+ * The runner's actual merge logic (lib/cadences.ts) only handles
+ * {{name}} + {{company}}. Slice 59.5 will extend the runner to
+ * pull freight_* values from the buyer's most recent quote so
+ * the preview stays in sync with what's actually sent.
+ */
+function applyPreviewTags(input: string): string {
+  return input
+    .replace(/\{\{\s*name\s*\}\}/gi, "Sarah")
+    .replace(/\{\{\s*company\s*\}\}/gi, "FitLife Co.")
+    .replace(/\{\{\s*freight_lane\s*\}\}/gi, "CN -> US-CA")
+    .replace(/\{\{\s*freight_cheapest\s*\}\}/gi, "$4,200")
+    .replace(/\{\{\s*freight_mode\s*\}\}/gi, "ocean-fcl")
+    .replace(/\{\{\s*freight_transit\s*\}\}/gi, "21-45 days");
+}
+
 function relTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   if (ms < 0) {
@@ -1093,24 +1110,37 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                     </>
                   )}
 
-                  {/* Slice 27: live merge-tag preview. Only renders for
-                      email/sms channels with non-empty body. Operator
-                      sees what a real send looks like with the test
-                      values "Sarah" + "FitLife Co." substituted. */}
+                  {/* Slice 27 + 59: live merge-tag preview. Renders
+                      every supported merge tag with sample values so
+                      the operator catches typos + sees what gets
+                      substituted at send time. Slice 59 adds the
+                      freight_* family (lane / cheapest / mode /
+                      transit) for cadences that reference shipping. */}
                   {(s.channel === "email" || s.channel === "sms") && s.bodyTemplate.trim() && (
                     <div className="mt-2 rounded-md border border-accent-blue/20 bg-accent-blue/5 px-2.5 py-2">
-                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-accent-blue">
-                        Preview · merged with test values "Sarah" + "FitLife Co."
+                      <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-wider text-accent-blue">
+                        <span>Preview · sample values substituted</span>
+                        <details className="font-normal normal-case tracking-normal">
+                          <summary className="cursor-pointer text-accent-blue/70 hover:text-accent-blue">
+                            Tags
+                          </summary>
+                          <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] text-ink-secondary">
+                            <code>{`{{name}}`}</code><span>Sarah</span>
+                            <code>{`{{company}}`}</code><span>FitLife Co.</span>
+                            <code>{`{{freight_lane}}`}</code><span>CN -&gt; US-CA</span>
+                            <code>{`{{freight_cheapest}}`}</code><span>$4,200</span>
+                            <code>{`{{freight_mode}}`}</code><span>ocean-fcl</span>
+                            <code>{`{{freight_transit}}`}</code><span>21-45 days</span>
+                          </div>
+                        </details>
                       </div>
                       {s.channel === "email" && s.subject.trim() && (
                         <div className="mb-1 text-[11px] font-semibold text-ink-primary">
-                          Subject: {s.subject.replace(/\{\{\s*name\s*\}\}/gi, "Sarah").replace(/\{\{\s*company\s*\}\}/gi, "FitLife Co.")}
+                          Subject: {applyPreviewTags(s.subject)}
                         </div>
                       )}
                       <div className="whitespace-pre-wrap text-[11px] text-ink-secondary">
-                        {s.bodyTemplate
-                          .replace(/\{\{\s*name\s*\}\}/gi, "Sarah")
-                          .replace(/\{\{\s*company\s*\}\}/gi, "FitLife Co.")}
+                        {applyPreviewTags(s.bodyTemplate)}
                       </div>
                     </div>
                   )}
