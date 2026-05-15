@@ -60,6 +60,15 @@ export type CadenceStep = {
    *  in array order; first match wins. Use `gotoIndex: -1` to mark
    *  the enrollment complete (e.g. "if buyer replied, stop"). */
   branches?: Array<{ ifOutcome: string; gotoIndex: number }>;
+  /** Retry policy on transient send failures (slice 19). Default: 0
+   *  retries -- a failed send marks the item failed and the runner
+   *  continues to the next enrollment step. With retries set, the
+   *  runner re-schedules the SAME step after retryDelayMinutes
+   *  (default 30) up to maxRetries times. Outcome flips to "failed"
+   *  only after the last retry exhausts. Suppression failures do NOT
+   *  retry (they're not transient). */
+  maxRetries?: number;
+  retryDelayMinutes?: number;
 };
 
 export type Cadence = {
@@ -128,6 +137,14 @@ export type CadenceQueueItem = {
    *  on first send/skip when requiresApproval was true. */
   approvedBy?: string;
   approvedAt?: string;
+  /** Slice 19: number of times this item's send has been retried.
+   *  Incremented by the action endpoint on transient failure. When
+   *  step.maxRetries is reached, status flips to "failed" instead
+   *  of staying "pending". Suppression failures are NOT retried. */
+  retryCount?: number;
+  /** ISO of the last retry attempt -- used by /admin/cadence-items
+   *  for visibility on slow-recovering items. */
+  lastRetryAt?: string;
   outcome?: string;
   doneAt?: string;
   createdAt: string;

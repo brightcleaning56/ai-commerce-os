@@ -2,11 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth";
 import {
   cadenceQueueItemsStore,
+  cadencesStore,
   recordCadenceItemOutcome,
 } from "@/lib/cadences";
 import { sendEmail } from "@/lib/email";
 import { getOperator } from "@/lib/operator";
 import { sendSms } from "@/lib/sms";
+
+/** Whether a send-failure error string indicates a transient problem
+ *  worth retrying (rate limit, timeout, 5xx). Suppression / invalid
+ *  recipient errors are NOT transient. */
+function isTransientFailure(errorMessage: string | undefined): boolean {
+  if (!errorMessage) return false;
+  const m = errorMessage.toLowerCase();
+  if (m.includes("suppressed")) return false;
+  if (m.includes("invalid")) return false;
+  if (m.includes("not configured")) return false;
+  if (m.includes("rate limit") || m.includes("rate-limit")) return true;
+  if (m.includes("timeout") || m.includes("timed out")) return true;
+  if (m.includes("network")) return true;
+  // Generic "5xx" or "503" hints
+  if (/\b5\d{2}\b/.test(m)) return true;
+  return false;
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -155,9 +173,42 @@ export async function POST(
       }
     }
 
-    // Record outcome regardless: failed sends still take the item off
-    // the inbox (operator can re-trigger via re-enrollment) and the
-    // outcome propagates so any branch on "failed" can fire.
+    // ── Slice 19: transient-failure retry ────────────────────────
+    // If the send failed with a transient error and the step has
+    // retries remaining, push the item dueAt forward + bump retry
+    // counter instead of marking failed. The runner / operator will
+    // see the rescheduled dueAt and either auto-retry on next cron
+    // or the operator clicks send again.
+    if (!sendOk && isTransientFailure(sendError)) {
+      const cadence = await cadencesStore.get(item.cadenceId).catch(() => null);
+      const step = cadence?.steps[item.stepIndex];
+      const maxRetries = step?.maxRetries ?? 0;
+      const currentRetries = item.retryCount ?? 0;
+      if (maxRetries > 0 && currentRetries < maxRetries) {
+        const delayMin = step?.retryDelayMinutes ?? 30;
+        const nextDueAt = new Date(Date.now() + delayMin * 60 * 1000).toISOString();
+        const updated = await cadenceQueueItemsStore.patch(id, {
+          retryCount: currentRetries + 1,
+          lastRetryAt: new Date().toISOString(),
+          dueAt: nextDueAt,
+        });
+        return NextResponse.json({
+          ok: false,
+          sent: false,
+          retried: true,
+          retryCount: currentRetries + 1,
+          maxRetries,
+          nextDueAt,
+          errorMessage: sendError,
+          item: updated,
+        });
+      }
+    }
+
+    // Record outcome: success OR final-failure (retries exhausted /
+    // non-transient). Failed sends still take the item off the inbox
+    // (operator can re-trigger via re-enrollment) and the outcome
+    // propagates so any branch on "failed" can fire.
     const finalStatus = sendOk ? "done" : "failed";
     const outcome = sendOk ? "sent" : sendError ? `failed: ${sendError.slice(0, 80)}` : "failed";
     const updated = await recordCadenceItemOutcome({
