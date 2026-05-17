@@ -782,7 +782,34 @@ export default function LeadsPage() {
                 </div>
               </div>
 
-              <div className="space-y-1.5 rounded-lg border border-bg-border bg-bg-hover/30 p-3 text-xs">
+              <div className="relative space-y-1.5 rounded-lg border border-bg-border bg-bg-hover/30 p-3 text-xs">
+                {/* Slice 92: one-click copy of name/company/email/phone
+                    as a multi-line block. Pastes cleanly into a CRM
+                    note, calendar invite, or follow-up email signature.
+                    Skips lines for empty fields so the paste isn't
+                    polluted with blanks. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const lines = [
+                      selected.name,
+                      selected.company,
+                      selected.email,
+                      selected.phone,
+                    ]
+                      .map((v) => (v ?? "").trim())
+                      .filter(Boolean);
+                    navigator.clipboard.writeText(lines.join("\n")).then(
+                      () => toast("Contact info copied", "success"),
+                      () => toast("Clipboard blocked", "error"),
+                    );
+                  }}
+                  className="absolute right-1.5 top-1.5 rounded p-1 text-ink-tertiary hover:bg-bg-hover hover:text-brand-300"
+                  title="Copy name + company + email + phone"
+                  aria-label="Copy contact info"
+                >
+                  <Copy className="h-3 w-3" />
+                </button>
                 <a href={`mailto:${selected.email}`} className="flex items-center gap-2 text-brand-300 hover:text-brand-200">
                   <Mail className="h-3 w-3" /> {selected.email}
                 </a>
