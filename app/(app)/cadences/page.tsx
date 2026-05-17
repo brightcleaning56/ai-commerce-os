@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Copy,
   Download,
   Loader2,
   Mail,
@@ -650,6 +651,39 @@ type ServerTemplate = {
   }>;
 };
 
+/**
+ * Reverse of serverTemplateToDraft -- coerce a client-side
+ * DraftStep[] back into the numeric server step shape so we can POST
+ * it via /api/cadences/templates. Used by slice 77's duplicate
+ * button; mirrors the conversion inside SaveAsTemplateButton (kept
+ * inline rather than DRY-extracted because the contexts differ
+ * slightly -- duplicate is server-data round-trip, save-as-template
+ * is form-data round-trip).
+ */
+function draftStepsToServer(steps: DraftStep[]) {
+  return steps.map((s) => {
+    const delay = Number.parseFloat(s.delayHours || "0");
+    const maxRetries = Number.parseInt(s.maxRetries || "0", 10);
+    const retryDelayMinutes = Number.parseInt(s.retryDelayMinutes || "30", 10);
+    const branches = s.branches
+      .filter((b) => b.ifOutcome.trim() && b.gotoIndex.trim())
+      .map((b) => ({
+        ifOutcome: b.ifOutcome.trim(),
+        gotoIndex: Number.parseInt(b.gotoIndex, 10),
+      }));
+    return {
+      channel: s.channel,
+      delayHours: Number.isFinite(delay) && delay >= 0 ? delay : 0,
+      label: s.label.trim() || undefined,
+      subject: s.subject.trim() || undefined,
+      bodyTemplate: s.bodyTemplate.trim() || undefined,
+      branches: branches.length > 0 ? branches : undefined,
+      maxRetries: maxRetries > 0 ? maxRetries : undefined,
+      retryDelayMinutes: maxRetries > 0 ? retryDelayMinutes : undefined,
+    };
+  });
+}
+
 function serverTemplateToDraft(t: ServerTemplate): CadenceTemplate {
   return {
     id: t.id,
@@ -1114,6 +1148,44 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                 </div>
                 <div className="mt-0.5 text-[10px] text-ink-tertiary">{t.description}</div>
               </button>
+              {/* Slice 77: duplicate button -- works for both seed +
+                  custom templates. Clones the recipe to a new "Copy
+                  of X" custom. Uses POST /api/cadences/templates
+                  (same endpoint as Save-as-template, just pre-filled
+                  from this template's contents). */}
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  try {
+                    const r = await fetch("/api/cadences/templates", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify({
+                        name: `Copy of ${t.name}`.slice(0, 120),
+                        description: t.description,
+                        cadenceName: t.cadenceName,
+                        cadenceDescription: t.cadenceDescription,
+                        steps: draftStepsToServer(t.steps),
+                      }),
+                    });
+                    const d = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(d.error ?? `Duplicate failed (${r.status})`);
+                    if (d.template) {
+                      const draft = serverTemplateToDraft(d.template as ServerTemplate);
+                      setTemplates((prev) => [...prev, draft]);
+                    }
+                  } catch (err) {
+                    alert(err instanceof Error ? err.message : "Duplicate failed");
+                  }
+                }}
+                className={`absolute top-1 ${t.source === "custom" ? "right-16" : "right-6"} rounded p-0.5 text-ink-tertiary opacity-0 transition-opacity hover:bg-accent-green/15 hover:text-accent-green group-hover:opacity-100`}
+                title="Duplicate this template (new custom)"
+                aria-label="Duplicate template"
+              >
+                <Copy className="h-3 w-3" />
+              </button>
               {/* Slice 65: export download. Works for both seed +
                   custom templates -- operator can use a seed as a
                   starting point and share their tweaks. The export
@@ -1121,7 +1193,10 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                   already requires to render.
                   Slice 71: customs also get a rename pencil; seeds
                   don't (they're immutable). Both icons sit to the
-                  LEFT of the delete X (right-6 / right-11 stacking). */}
+                  LEFT of the delete X (right-6 / right-11 stacking).
+                  Slice 77: with duplicate added, the seed-card row is
+                  right-1/right-6, custom-card row is right-1/right-6/
+                  right-11/right-16. */}
               <a
                 href={`/api/cadences/templates/${t.id}/export`}
                 onClick={(e) => e.stopPropagation()}
