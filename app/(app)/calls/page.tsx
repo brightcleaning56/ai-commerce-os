@@ -1134,7 +1134,7 @@ function QuickDialBar() {
               {[...recent]
                 .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
                 .map((e) => (
-                <li key={e.num} className="flex items-center hover:bg-bg-hover">
+                <li key={e.num} className="group flex items-center hover:bg-bg-hover">
                   <button
                     type="button"
                     onClick={() => {
@@ -1176,6 +1176,32 @@ function QuickDialBar() {
                         raw E.164 stays in the title for copy-paste. */}
                     <span className="font-mono">{humanPhone(e.num)}</span>
                     <span className="pr-2 text-[10px] text-ink-tertiary">{relativeAge(e.at)}</span>
+                  </button>
+                  {/* Slice 102: per-entry × delete. Removes one number
+                      without nuking the rest (the header's Clear button
+                      does the all-at-once purge). Hover-only so the
+                      dropdown stays calm at rest. */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = recent.filter((x) => x.num !== e.num);
+                      try {
+                        if (updated.length === 0) {
+                          window.localStorage.removeItem(RECENT_KEY);
+                        } else {
+                          window.localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+                      setRecent(updated);
+                      if (updated.length === 0) setShowRecent(false);
+                    }}
+                    className="grid h-7 w-7 shrink-0 place-items-center opacity-0 transition-opacity hover:text-accent-red group-hover:opacity-100"
+                    title="Remove from recents"
+                    aria-label="Remove from recents"
+                  >
+                    <XCircle className="h-3 w-3 text-ink-tertiary hover:text-accent-red" />
                   </button>
                 </li>
               ))}
