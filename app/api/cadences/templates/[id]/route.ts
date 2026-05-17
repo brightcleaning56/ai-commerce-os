@@ -38,6 +38,7 @@ export async function PATCH(
     description?: string;
     cadenceName?: string;
     cadenceDescription?: string;
+    pinned?: boolean;
   } = {};
   try {
     body = await req.json();
@@ -52,15 +53,36 @@ export async function PATCH(
     body.name === undefined &&
     body.description === undefined &&
     body.cadenceName === undefined &&
-    body.cadenceDescription === undefined
+    body.cadenceDescription === undefined &&
+    body.pinned === undefined
   ) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });
   }
 
   try {
-    const updated = await cadenceTemplatesStore.update(id, body);
-    if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json({ ok: true, template: updated });
+    // Slice 85: pin state lives in a separate store so it can apply
+    // to seeds + customs alike. The metadata fields (name/description/
+    // etc.) only apply to customs. Handle pin first; the metadata
+    // update below is only relevant for customs and silently rejected
+    // for seeds via cadenceTemplatesStore.update().
+    if (typeof body.pinned === "boolean") {
+      await cadenceTemplatesStore.setPinned(id, body.pinned);
+    }
+    const hasMetaUpdates =
+      body.name !== undefined ||
+      body.description !== undefined ||
+      body.cadenceName !== undefined ||
+      body.cadenceDescription !== undefined;
+    if (hasMetaUpdates) {
+      const updated = await cadenceTemplatesStore.update(id, body);
+      if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
+      return NextResponse.json({ ok: true, template: updated });
+    }
+    // Pin-only update -- re-fetch so the response reflects the new
+    // pinned flag.
+    const refreshed = await cadenceTemplatesStore.get(id);
+    if (!refreshed) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ ok: true, template: refreshed });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Update failed" },

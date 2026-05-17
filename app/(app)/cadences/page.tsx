@@ -16,6 +16,7 @@ import {
   Plus,
   RefreshCw,
   Square,
+  Star,
   Trash2,
   Upload,
   Workflow,
@@ -623,6 +624,8 @@ type CadenceTemplate = {
    *  POST /api/cadences/templates. Set on server-fetched entries
    *  (slice 44+); the local fallback const is "seed" only. */
   source?: "seed" | "custom";
+  /** Slice 85: pinned-to-top flag from the server pin store. */
+  pinned?: boolean;
 };
 
 /**
@@ -639,6 +642,7 @@ type ServerTemplate = {
   source: "seed" | "custom";
   createdAt?: string;
   createdBy?: string;
+  pinned?: boolean;
   steps: Array<{
     channel: Channel;
     delayHours: number;
@@ -692,6 +696,7 @@ function serverTemplateToDraft(t: ServerTemplate): CadenceTemplate {
     cadenceName: t.cadenceName,
     cadenceDescription: t.cadenceDescription,
     source: t.source,
+    pinned: t.pinned,
     steps: t.steps.map((s) => ({
       channel: s.channel,
       delayHours: String(s.delayHours),
@@ -1131,12 +1136,65 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
           {filteredTemplates.map((t) => (
             <div
               key={t.id}
-              className="group relative rounded-md border border-bg-border bg-bg-app text-left text-[11px] transition-colors hover:border-accent-blue/50 hover:bg-bg-hover"
+              className={`group relative rounded-md border bg-bg-app text-left text-[11px] transition-colors hover:border-accent-blue/50 hover:bg-bg-hover ${
+                t.pinned
+                  ? "border-accent-amber/50"
+                  : "border-bg-border"
+              }`}
             >
+              {/* Slice 85: pin/favorite toggle. Always visible (not
+                  hover-only like the other icons) so the operator can
+                  see at a glance which templates are starred. Star is
+                  filled+amber when pinned, hollow+tertiary otherwise.
+                  Sits in the top-left to avoid colliding with the
+                  hover-only right-side icon stack. */}
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  const next = !t.pinned;
+                  // Optimistic update -- snap the UI before the round-trip
+                  // so the gallery feels responsive. Revert on failure.
+                  setTemplates((prev) =>
+                    prev
+                      .map((x) => (x.id === t.id ? { ...x, pinned: next } : x))
+                      .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)),
+                  );
+                  try {
+                    const r = await fetch(`/api/cadences/templates/${t.id}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "include",
+                      body: JSON.stringify({ pinned: next }),
+                    });
+                    if (!r.ok) {
+                      const d = await r.json().catch(() => ({}));
+                      throw new Error(d.error ?? `Pin failed (${r.status})`);
+                    }
+                  } catch (err) {
+                    setTemplates((prev) =>
+                      prev
+                        .map((x) => (x.id === t.id ? { ...x, pinned: !next } : x))
+                        .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)),
+                    );
+                    alert(err instanceof Error ? err.message : "Pin failed");
+                  }
+                }}
+                className="absolute left-1 top-1 rounded p-0.5"
+                title={t.pinned ? "Unpin from top" : "Pin to top"}
+                aria-label={t.pinned ? "Unpin template" : "Pin template"}
+                aria-pressed={!!t.pinned}
+              >
+                <Star
+                  className={`h-3 w-3 ${
+                    t.pinned ? "fill-accent-amber text-accent-amber" : "text-ink-tertiary"
+                  }`}
+                />
+              </button>
               <button
                 type="button"
                 onClick={() => applyTemplate(t)}
-                className="block w-full px-2.5 py-1.5 text-left"
+                className="block w-full px-2.5 py-1.5 pl-6 text-left"
               >
                 <div className="flex items-center gap-1.5 pr-5">
                   <span className="font-semibold">{t.name}</span>

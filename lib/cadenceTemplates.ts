@@ -19,6 +19,10 @@ import { getBackend } from "./store";
 import type { QueueChannel } from "./queue";
 
 const TEMPLATES_FILE = "cadence-templates.json";
+// Slice 85: pin state lives in a separate file so we don't have to
+// mutate the SEED_TEMPLATES const (seeds need to stay pinnable too).
+// Contents: { ids: string[] } -- presence in the array means pinned.
+const PINS_FILE = "cadence-template-pins.json";
 const MAX_RETAINED = 200;
 
 export type TemplateBranch = { ifOutcome: string; gotoIndex: number };
@@ -45,6 +49,14 @@ export type CadenceTemplate = {
   source: "seed" | "custom";
   createdAt?: string;
   createdBy?: string;
+  /**
+   * Slice 85: pinned-to-top flag. Operator marks frequently-used
+   * templates so they sort to the top of the gallery regardless
+   * of recency. Seeds + customs can both be pinned (pin state is
+   * persisted in a separate file so we don't mutate the SEED_TEMPLATES
+   * const; see pinned-templates.json in the store).
+   */
+  pinned?: boolean;
 };
 
 // ─── Seed templates (mirror the slice 36 client-side gallery) ─────
@@ -163,16 +175,52 @@ function isTemplate(v: unknown): v is CadenceTemplate {
   return typeof t.id === "string" && typeof t.name === "string" && Array.isArray(t.steps);
 }
 
+/** Slice 85: load the pin set. Tolerant of missing/corrupt file. */
+async function loadPinnedIds(): Promise<Set<string>> {
+  const raw = await getBackend().read<{ ids?: string[] }>(PINS_FILE, { ids: [] });
+  if (!raw || !Array.isArray(raw.ids)) return new Set();
+  return new Set(raw.ids.filter((v): v is string => typeof v === "string"));
+}
+
 export const cadenceTemplatesStore = {
   /**
-   * Returns seed + custom templates merged. Seeds first (consistent
-   * order), then customs newest-first.
+   * Returns seed + custom templates merged.
+   *
+   * Slice 85 ordering: pinned items first (seeds + customs interleaved
+   * in their natural order, since pin state overrides source), then
+   * unpinned seeds, then unpinned customs (newest-first). Each result
+   * carries a `pinned` boolean hydrated from the pin store.
    */
   async list(): Promise<CadenceTemplate[]> {
     const customs = (await getBackend().read<CadenceTemplate[]>(TEMPLATES_FILE, []))
       .filter(isTemplate)
       .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
-    return [...SEED_TEMPLATES, ...customs];
+    const pinned = await loadPinnedIds();
+    const merged = [...SEED_TEMPLATES, ...customs].map((t) => ({
+      ...t,
+      pinned: pinned.has(t.id),
+    }));
+    // Stable sort: pinned ahead of non-pinned, preserving the seed-then-
+    // customs-newest-first order within each group.
+    return merged.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
+  },
+
+  /**
+   * Slice 85: toggle (or set) pinned state for a template id. Returns
+   * the new pinned boolean. Accepts both seed + custom ids since either
+   * can be pinned. No-ops when the id doesn't exist in either set --
+   * the UI shouldn't be able to call this for a nonexistent id.
+   */
+  async setPinned(id: string, pinned: boolean): Promise<boolean> {
+    const all = await cadenceTemplatesStore.list();
+    if (!all.some((t) => t.id === id)) {
+      throw new Error("Template not found");
+    }
+    const current = await loadPinnedIds();
+    if (pinned) current.add(id);
+    else current.delete(id);
+    await getBackend().write(PINS_FILE, { ids: Array.from(current) });
+    return pinned;
   },
 
   async get(id: string): Promise<CadenceTemplate | null> {
