@@ -104,6 +104,10 @@ export default function Sidebar({
   // /tasks badge so operators see open work without context-
   // switching to the page.
   const [openTasks, setOpenTasks] = useState<number | null>(null);
+  // Slice 132: count of agent runs that errored in the last hour.
+  // Powers the /agent-runs badge so a flurry of cron / pipeline
+  // failures is visible from anywhere in the app.
+  const [recentRunErrors, setRecentRunErrors] = useState<number | null>(null);
   const [owner, setOwner] = useState<{ name: string; email: string; company: string; title: string; initials: string } | null>(null);
 
   useEffect(() => {
@@ -119,7 +123,7 @@ export default function Sidebar({
         // Slice 108: leads count joins the existing parallel batch.
         // Endpoint is best-effort -- silently no-ops the badge on
         // failure (e.g. role without leads:read capability).
-        const [d, f, q, l, tpls, tks] = await Promise.all([
+        const [d, f, q, l, tpls, tks, runs] = await Promise.all([
           fetch("/api/drafts").then((r) => r.json()),
           fetch("/api/risk-flags").then((r) => r.json()),
           // Queue summary is best-effort -- swallow failures so the
@@ -137,6 +141,10 @@ export default function Sidebar({
             .catch(() => null),
           // Slice 129: open task count for the /tasks badge.
           fetch("/api/tasks", { credentials: "include" })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          // Slice 132: recent agent run errors for the /agent-runs badge.
+          fetch("/api/agent-runs", { credentials: "include" })
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
         ]);
@@ -166,6 +174,17 @@ export default function Sidebar({
         if (tks?.tasks) {
           setOpenTasks(
             (tks.tasks as Array<{ done?: boolean }>).filter((x) => !x.done).length,
+          );
+        }
+        if (runs?.runs) {
+          const cutoff = Date.now() - 60 * 60 * 1000;
+          setRecentRunErrors(
+            (runs.runs as Array<{ status?: string; startedAt?: string }>).filter(
+              (r) =>
+                r.status === "error" &&
+                !!r.startedAt &&
+                new Date(r.startedAt).getTime() >= cutoff,
+            ).length,
           );
         }
       } catch {}
@@ -220,6 +239,15 @@ export default function Sidebar({
       // tasks alike.
       if (openTasks == null || openTasks === 0) return defaultBadge;
       return String(openTasks);
+    }
+    if (href === "/agent-runs") {
+      // Slice 132: count of agent runs with status:"error" in the
+      // last hour. Surfaces a flurry of cron/pipeline failures from
+      // anywhere in the app -- the operator sees a red number on
+      // the nav even if they're not on /agent-runs yet. Hidden when
+      // 0 so a healthy system has no chrome.
+      if (recentRunErrors == null || recentRunErrors === 0) return defaultBadge;
+      return String(recentRunErrors);
     }
     return defaultBadge;
   }
