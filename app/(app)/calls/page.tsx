@@ -404,7 +404,23 @@ export default function CallsPage() {
             <PhoneCall className="h-5 w-5" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">Call Log</h1>
+            <h1 className="flex items-center gap-2 text-2xl font-bold">
+              Call Log
+              {/* Slice 138: Active-call pulse next to the title --
+                  pulsing green dot + label while a Twilio call is
+                  in flight. Reads twilioInFlight from VoiceContext
+                  (already used by row-level disable logic). Disappears
+                  the instant the call ends. */}
+              {dialing && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-green">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-green opacity-75" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-green" />
+                  </span>
+                  Active call
+                </span>
+              )}
+            </h1>
             <p className="text-xs text-ink-secondary">
               Every call across every task · {tasks.length} tasks tracked · live from your browser
             </p>
