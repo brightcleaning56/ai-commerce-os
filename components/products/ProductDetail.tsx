@@ -3,6 +3,7 @@ import {
   Bookmark,
   BookmarkCheck,
   CheckCircle2,
+  Clipboard,
   ExternalLink,
   Loader2,
   Send,
@@ -121,6 +122,20 @@ export default function ProductDetail({ p }: { p: Product }) {
           <div className="text-xs text-ink-tertiary">
             {p.category} · {p.niche}
           </div>
+          {/* Slice 130: copy product ID. Tiny mono chip below the
+              category line. Useful for cross-referencing in
+              /agent-runs, supplier-quote requests, or bug reports. */}
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.writeText(p.id).catch(() => {});
+            }}
+            className="mt-1 inline-flex items-center gap-1 rounded bg-bg-hover px-1.5 py-0.5 font-mono text-[10px] text-ink-tertiary transition hover:bg-bg-app hover:text-brand-300"
+            title={`Copy ${p.id}`}
+          >
+            {p.id}
+            <Clipboard className="h-2.5 w-2.5" />
+          </button>
           <div className="mt-2 flex items-center gap-2">
             <span className="rounded-md bg-brand-500/15 px-2 py-0.5 text-[11px] font-semibold text-brand-200">
               Demand {p.demandScore}
