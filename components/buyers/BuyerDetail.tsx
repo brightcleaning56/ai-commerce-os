@@ -2,6 +2,7 @@
 import {
   Building2,
   CheckCircle2,
+  Clipboard,
   ExternalLink,
   Linkedin,
   Loader2,
@@ -245,6 +246,19 @@ export default function BuyerDetail({ b }: { b: Buyer & { rationale?: string; fo
           <div className="flex items-center gap-2 text-xs text-ink-tertiary">
             <span>{b.type}</span>·<span>{b.industry}</span>
           </div>
+          {/* Slice 131: copy buyer ID -- mirror of slice 112/117/128/130
+              clipboard pattern. */}
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.writeText(b.id).catch(() => {});
+            }}
+            className="mt-1 inline-flex items-center gap-1 rounded bg-bg-hover px-1.5 py-0.5 font-mono text-[10px] text-ink-tertiary transition hover:bg-bg-app hover:text-brand-300"
+            title={`Copy ${b.id}`}
+          >
+            {b.id}
+            <Clipboard className="h-2.5 w-2.5" />
+          </button>
           <div className="mt-2 flex items-center gap-2">
             <span className="rounded-md bg-brand-500/15 px-2 py-0.5 text-[11px] font-semibold text-brand-200">
               Intent {b.intentScore}
