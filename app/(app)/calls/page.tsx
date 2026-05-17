@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   CircleDot,
   Clock,
+  Copy,
   Download,
   Loader2,
   PhoneCall,
@@ -1176,6 +1177,24 @@ function QuickDialBar() {
                         raw E.164 stays in the title for copy-paste. */}
                     <span className="font-mono">{humanPhone(e.num)}</span>
                     <span className="pr-2 text-[10px] text-ink-tertiary">{relativeAge(e.at)}</span>
+                  </button>
+                  {/* Slice 105: copy-to-clipboard for the raw E.164.
+                      Useful when the operator needs to paste the number
+                      into Slack / a different app / a contact form.
+                      Hover-only same as the delete to keep idle UI calm. */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(e.num).then(
+                        () => toast("Number copied", "success"),
+                        () => toast("Clipboard blocked", "error"),
+                      );
+                    }}
+                    className="grid h-7 w-7 shrink-0 place-items-center opacity-0 transition-opacity hover:text-accent-blue group-hover:opacity-100"
+                    title={`Copy ${e.num}`}
+                    aria-label="Copy number"
+                  >
+                    <Copy className="h-3 w-3 text-ink-tertiary hover:text-accent-blue" />
                   </button>
                   {/* Slice 102: per-entry × delete. Removes one number
                       without nuking the rest (the header's Clear button
