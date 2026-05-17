@@ -4,6 +4,7 @@ import {
   Building2,
   CheckCircle2,
   Clock,
+  Copy,
   FileText,
   Flame,
   Inbox,
@@ -1041,6 +1042,23 @@ export default function LeadsPage() {
                             <span className="ml-auto font-mono text-[10px]">
                               {c.callSid.slice(-8)}
                             </span>
+                            {/* Slice 78: one-click copy of the transcript
+                                text. Useful when pasting into a CRM note,
+                                follow-up email, or sharing in chat. */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(c.text).then(
+                                  () => toast("Transcript copied", "success"),
+                                  () => toast("Clipboard blocked", "error"),
+                                );
+                              }}
+                              className="rounded p-0.5 text-ink-tertiary hover:bg-bg-hover hover:text-accent-blue"
+                              title="Copy transcript text"
+                              aria-label="Copy transcript"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </button>
                           </div>
                           <div className="mt-1.5 whitespace-pre-wrap text-ink-primary">{c.text}</div>
                         </div>
