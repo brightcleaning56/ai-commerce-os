@@ -1549,26 +1549,34 @@ function TwilioWebhookHelper() {
     else if (typeof window !== "undefined") setOrigin(window.location.origin);
   }, []);
 
+  // Slice 118: per-URL deep link into Twilio Console. URLs point at
+  // the listing page (TwiML Apps / Active Numbers / Sender IDs) since
+  // we don't know the operator's specific App SID or number SID. Saves
+  // clicks vs hunting through the console nav.
   const urls = [
     {
       label: "Outbound TwiML",
       path: "/api/voice/twiml",
       where: "Twilio Console > Voice > TwiML > Apps > <your app> > Voice Configuration > Request URL (POST)",
+      console: "https://console.twilio.com/us1/develop/voice/manage/twiml-apps",
     },
     {
       label: "Inbound Voice",
       path: "/api/voice/inbound",
       where: "Twilio Console > Phone Numbers > <your number> > Voice Configuration > A call comes in: Webhook (POST)",
+      console: "https://console.twilio.com/us1/develop/phone-numbers/manage/incoming",
     },
     {
       label: "Recording status",
       path: "/api/voice/recording-status",
       where: "Automatic (set in TwiML response). Listed for debugging webhook reachability.",
+      console: null as string | null,
     },
     {
       label: "Inbound SMS",
       path: "/api/webhooks/twilio/sms",
       where: "Twilio Console > Phone Numbers > <your number> > Messaging Configuration > A message comes in: Webhook (POST)",
+      console: "https://console.twilio.com/us1/develop/phone-numbers/manage/incoming",
     },
   ];
 
@@ -1613,14 +1621,31 @@ function TwilioWebhookHelper() {
                     {full}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => copy(full, u.label)}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[10px] font-semibold text-ink-secondary hover:bg-bg-hover"
-                  title="Copy URL"
-                >
-                  Copy
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  {/* Slice 118: deep-link to Twilio Console for this
+                      specific paste-target. Hidden for the rows with
+                      no actionable console page (recording status is
+                      set in TwiML, not pasted in console). */}
+                  {u.console && (
+                    <a
+                      href={u.console}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[10px] font-semibold text-ink-secondary hover:bg-bg-hover hover:text-brand-300"
+                      title="Open Twilio Console (new tab)"
+                    >
+                      Console
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => copy(full, u.label)}
+                    className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[10px] font-semibold text-ink-secondary hover:bg-bg-hover"
+                    title="Copy URL"
+                  >
+                    Copy
+                  </button>
+                </div>
               </div>
               <div className="mt-1.5 text-[10px] text-ink-tertiary">{u.where}</div>
             </li>
