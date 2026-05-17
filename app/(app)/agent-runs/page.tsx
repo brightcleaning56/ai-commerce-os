@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
+  Clipboard,
   Clock,
   Cpu,
   DollarSign,
@@ -344,7 +345,21 @@ function AgentRunsInner() {
                 return (
                   <tr key={r.id} className="border-t border-bg-border hover:bg-bg-hover/30">
                     <td className="px-5 py-3">
-                      <div className="font-mono text-[11px] text-ink-primary">{r.id}</div>
+                      {/* Slice 128: click-to-copy run ID. Useful for
+                          cross-referencing in logs, escalating to
+                          support, or pasting into a bug report.
+                          Tooltip shows the full id. */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(r.id).catch(() => {});
+                        }}
+                        title={`Copy ${r.id}`}
+                        className="inline-flex items-center gap-1 rounded font-mono text-[11px] text-ink-primary hover:bg-bg-hover hover:text-brand-300"
+                      >
+                        {r.id}
+                        <Clipboard className="h-2.5 w-2.5 opacity-50" />
+                      </button>
                       <div className="text-[11px] text-ink-tertiary">
                         {relativeTime(r.startedAt)}
                         {r.inputCategory && (
