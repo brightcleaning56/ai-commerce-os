@@ -15,7 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { downloadCSV } from "@/lib/csv";
 import { useVoice } from "@/components/voice/VoiceContext";
@@ -1002,6 +1002,25 @@ function QuickDialBar() {
   const [busy, setBusy] = useState(false);
   const [recent, setRecent] = useState<RecentEntry[]>([]);
   const [showRecent, setShowRecent] = useState(false);
+  // Slice 125: focus the dial input on D key press. Used when the
+  // operator wants to dial without reaching for the mouse -- a
+  // common workflow during back-to-back calls. Ignored when the
+  // event target is already an input/textarea/contenteditable so
+  // typing the letter d in any other field still works.
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "d" && e.key !== "D") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = (target?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || target?.isContentEditable) return;
+      e.preventDefault();
+      inputRef.current?.focus();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     setRecent(loadRecent());
@@ -1053,6 +1072,11 @@ function QuickDialBar() {
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <PhoneCall className="h-4 w-4 text-brand-300" /> Quick dial
+          {/* Slice 125: keyboard-shortcut hint. Press D anywhere on
+              the page to jump cursor into the dial input. */}
+          <kbd className="hidden rounded border border-bg-border bg-bg-app px-1 text-[9px] font-mono text-ink-tertiary sm:inline">
+            D
+          </kbd>
         </div>
         <span
           className={`rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
@@ -1077,6 +1101,7 @@ function QuickDialBar() {
         className="relative flex flex-wrap items-center gap-2"
       >
         <input
+          ref={inputRef}
           type="tel"
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
