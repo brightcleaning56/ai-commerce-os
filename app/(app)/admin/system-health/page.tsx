@@ -137,6 +137,79 @@ export default function SystemHealthPage() {
   const [sendingSms, setSendingSms] = useState(false);
   const [lastEmailResult, setLastEmailResult] = useState<TestResult | null>(null);
   const [lastSmsResult, setLastSmsResult] = useState<TestResult | null>(null);
+  // Slice 136: "Test all" runs the three smoke tests in parallel
+  // (email, SMS, freight probe) so the operator can verify everything
+  // with one click during a setup pass. Skips email/SMS gracefully
+  // when no recipient is configured.
+  const [testingAll, setTestingAll] = useState(false);
+
+  async function runAllTests() {
+    setTestingAll(true);
+    const promises: Promise<{ name: string; ok: boolean; msg: string }>[] = [];
+
+    if (testEmailTo.trim()) {
+      promises.push(
+        fetch("/api/admin/test-send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ channel: "email", to: testEmailTo.trim() }),
+        })
+          .then((r) => r.json())
+          .then((d) => ({
+            name: "Email",
+            ok: !!d.ok,
+            msg: d.ok ? `sent to ${d.sentTo ?? testEmailTo}` : (d.errorMessage ?? "failed"),
+          }))
+          .catch((e) => ({ name: "Email", ok: false, msg: e instanceof Error ? e.message : "error" })),
+      );
+    }
+    if (testSmsTo.trim()) {
+      promises.push(
+        fetch("/api/admin/test-send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ channel: "sms", to: testSmsTo.trim() }),
+        })
+          .then((r) => r.json())
+          .then((d) => ({
+            name: "SMS",
+            ok: !!d.ok,
+            msg: d.ok ? `sent to ${d.sentTo ?? testSmsTo}` : (d.errorMessage ?? "failed"),
+          }))
+          .catch((e) => ({ name: "SMS", ok: false, msg: e instanceof Error ? e.message : "error" })),
+      );
+    }
+    promises.push(
+      fetch("/api/admin/freight-probe", { method: "POST", credentials: "include" })
+        .then((r) => r.json())
+        .then((d) => ({
+          name: "Freight",
+          ok: !!d.ok && !d.degraded,
+          msg: d.ok
+            ? d.degraded
+              ? `degraded -- ${d.configuredProvider} -> ${d.effectiveProvider}`
+              : `${d.effectiveProvider} (${d.latencyMs}ms)`
+            : (d.error ?? "failed"),
+        }))
+        .catch((e) => ({ name: "Freight", ok: false, msg: e instanceof Error ? e.message : "error" })),
+    );
+
+    try {
+      const results = await Promise.all(promises);
+      const passed = results.filter((r) => r.ok).length;
+      const tone = passed === results.length ? "success" : "error";
+      toast(
+        `Test all: ${passed}/${results.length} passed — ${results
+          .map((r) => `${r.name}: ${r.ok ? "✓" : "✗"} ${r.msg}`)
+          .join(" · ")}`,
+        tone,
+      );
+    } finally {
+      setTestingAll(false);
+    }
+  }
   const { toast } = useToast();
 
   /**
@@ -318,6 +391,25 @@ export default function SystemHealthPage() {
               <Download className="h-4 w-4" /> Snapshot
             </button>
           )}
+          {/* Slice 136: Test all -- fires email (if recipient set),
+              SMS (if recipient set), and freight probe in parallel.
+              Single summary toast with per-test ✓/✗ + message. The
+              freight probe also auto-fires on mount (slice 86) so
+              this button mostly re-runs it intentionally for a
+              fresh fingerprint. */}
+          <button
+            onClick={runAllTests}
+            disabled={testingAll}
+            title="Run email + SMS + freight probe in parallel"
+            className="flex items-center gap-2 rounded-lg border border-brand-500/40 bg-brand-500/10 px-3 py-2 text-sm font-semibold text-brand-200 hover:bg-brand-500/20 disabled:opacity-60"
+          >
+            {testingAll ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Zap className="h-4 w-4" />
+            )}
+            Test all
+          </button>
           <button
             onClick={load}
             disabled={loading}
