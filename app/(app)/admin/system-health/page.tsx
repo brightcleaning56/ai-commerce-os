@@ -1311,29 +1311,51 @@ function FreightProbeCard() {
   const { toast } = useToast();
   const [result, setResult] = useState<FreightProbeResult | null>(null);
   const [busy, setBusy] = useState(false);
+  // Slice 86: auto-probe on mount. Distinct from the manual click in
+  // that it stays silent on success (no green toast spam every time
+  // the operator opens the page) but still shows the result tiles
+  // and toasts on actual problems. Operator still has the Run probe
+  // button for an explicit re-check.
+  const [autoRan, setAutoRan] = useState(false);
 
-  async function runProbe() {
-    setBusy(true);
-    try {
-      const r = await fetch("/api/admin/freight-probe", {
-        method: "POST",
-        credentials: "include",
-      });
-      const d = (await r.json().catch(() => ({}))) as FreightProbeResult;
-      setResult(d);
-      if (d.ok && !d.degraded) {
-        toast(`Freight probe ok (${d.effectiveProvider}, ${d.latencyMs}ms)`, "success");
-      } else if (d.ok && d.degraded) {
-        toast(`Probe ran but degraded -- Shippo configured, rate-card returned`, "error");
-      } else {
-        toast(`Freight probe failed -- ${d.error ?? "unknown"}`, "error");
+  const runProbe = useCallback(
+    async (auto = false) => {
+      setBusy(true);
+      try {
+        const r = await fetch("/api/admin/freight-probe", {
+          method: "POST",
+          credentials: "include",
+        });
+        const d = (await r.json().catch(() => ({}))) as FreightProbeResult;
+        setResult(d);
+        if (d.ok && !d.degraded) {
+          // Auto-probe success is silent -- the green tone on the
+          // card border is enough confirmation. Manual click still
+          // toasts so the operator sees something happened.
+          if (!auto) toast(`Freight probe ok (${d.effectiveProvider}, ${d.latencyMs}ms)`, "success");
+        } else if (d.ok && d.degraded) {
+          toast(`Probe ran but degraded -- Shippo configured, rate-card returned`, "error");
+        } else {
+          toast(`Freight probe failed -- ${d.error ?? "unknown"}`, "error");
+        }
+      } catch (err) {
+        // Network errors on auto-probe stay silent (operator might
+        // be offline / dev server restarting). Manual click toasts.
+        if (!auto) toast(err instanceof Error ? err.message : "Network error", "error");
+      } finally {
+        setBusy(false);
       }
-    } catch (err) {
-      toast(err instanceof Error ? err.message : "Network error", "error");
-    } finally {
-      setBusy(false);
-    }
-  }
+    },
+    [toast],
+  );
+
+  // Run once on mount. The `autoRan` guard prevents StrictMode's
+  // double-render in dev from firing twice.
+  useEffect(() => {
+    if (autoRan) return;
+    setAutoRan(true);
+    void runProbe(true);
+  }, [autoRan, runProbe]);
 
   const tone = !result
     ? "border-bg-border"
@@ -1351,7 +1373,7 @@ function FreightProbeCard() {
         </div>
         <button
           type="button"
-          onClick={runProbe}
+          onClick={() => runProbe(false)}
           disabled={busy}
           className="inline-flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 py-1.5 text-[11px] font-semibold shadow-glow disabled:opacity-60"
         >
