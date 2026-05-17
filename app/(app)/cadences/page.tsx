@@ -849,9 +849,15 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error ?? `Import failed (${r.status})`);
+      // Slice 64 ships single-template ({ template }); slice 70 adds
+      // bulk-bundle ({ templates: [...] }) for backup restores. Handle
+      // both so the operator can paste either envelope into the same box.
       if (d.template) {
         const draft = serverTemplateToDraft(d.template as ServerTemplate);
         setTemplates((prev) => [...prev, draft]);
+      } else if (Array.isArray(d.templates)) {
+        const drafts = (d.templates as ServerTemplate[]).map(serverTemplateToDraft);
+        setTemplates((prev) => [...prev, ...drafts]);
       }
       setImportOpen(false);
       setImportText("");
@@ -978,17 +984,31 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
             Start from a template
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setImportError(null);
-              setImportOpen((v) => !v);
-            }}
-            className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-app px-2 py-0.5 text-[10px] font-semibold text-ink-secondary hover:bg-bg-hover"
-            title="Import a template from a previously-exported JSON file"
-          >
-            <Upload className="h-3 w-3" /> Import
-          </button>
+          <div className="flex items-center gap-1.5">
+            {/* Slice 70: bulk backup of every custom template -- one
+                file the operator can keep offline and re-import whole. */}
+            {templates.some((t) => t.source === "custom") && (
+              <a
+                href="/api/cadences/templates/export-all"
+                download
+                className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-app px-2 py-0.5 text-[10px] font-semibold text-ink-secondary hover:bg-bg-hover"
+                title="Download a bundle of every custom template"
+              >
+                <Download className="h-3 w-3" /> Export all
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setImportError(null);
+                setImportOpen((v) => !v);
+              }}
+              className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-app px-2 py-0.5 text-[10px] font-semibold text-ink-secondary hover:bg-bg-hover"
+              title="Import a template (single or bundle) from a previously-exported JSON file"
+            >
+              <Upload className="h-3 w-3" /> Import
+            </button>
+          </div>
         </div>
         {importOpen && (
           <div className="mb-2 rounded-md border border-accent-blue/30 bg-accent-blue/5 p-2.5">
