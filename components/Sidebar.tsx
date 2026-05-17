@@ -108,6 +108,11 @@ export default function Sidebar({
   // Powers the /agent-runs badge so a flurry of cron / pipeline
   // failures is visible from anywhere in the app.
   const [recentRunErrors, setRecentRunErrors] = useState<number | null>(null);
+  // Slice 134: count of risk flags (severity Critical|High, not yet
+  // acted on). Surfaces separately so the operator sees risk
+  // pressure on /risk specifically, distinct from the combined
+  // /approvals number.
+  const [pendingRiskFlags, setPendingRiskFlags] = useState<number | null>(null);
   const [owner, setOwner] = useState<{ name: string; email: string; company: string; title: string; initials: string } | null>(null);
 
   useEffect(() => {
@@ -160,6 +165,7 @@ export default function Sidebar({
           (x: any) => (x.severity === "Critical" || x.severity === "High") && !actions[x.id]
         ).length;
         setPendingApprovals(drafts + flags);
+        setPendingRiskFlags(flags);
         if (q?.summary) {
           setQueueUnread(typeof q.summary.unreadInbound === "number" ? q.summary.unreadInbound : 0);
         }
@@ -248,6 +254,14 @@ export default function Sidebar({
       // 0 so a healthy system has no chrome.
       if (recentRunErrors == null || recentRunErrors === 0) return defaultBadge;
       return String(recentRunErrors);
+    }
+    if (href === "/risk") {
+      // Slice 134: count of Critical|High flags not yet acted on.
+      // The same number rolls into /approvals (drafts + flags); this
+      // surfaces it separately so the operator sees risk pressure on
+      // /risk directly.
+      if (pendingRiskFlags == null || pendingRiskFlags === 0) return defaultBadge;
+      return String(pendingRiskFlags);
     }
     return defaultBadge;
   }
