@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { estimateLane, type FreightMode } from "@/lib/freight";
+import { checkRateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { store } from "@/lib/store";
 import { supplierRegistry } from "@/lib/supplierRegistry";
 
@@ -29,6 +30,21 @@ export async function POST(
 ) {
   const { id } = await params;
   const token = req.nextUrl.searchParams.get("t") || "";
+
+  // Slice 73: rate limit before we hit the store. 20 calls/min per
+  // quote -- generous for a buyer flipping through destinations,
+  // tight enough to stop a scraper. Keyed by quote id so one quote's
+  // traffic can't starve another. In-memory; not durable across
+  // redeploys or edge replicas (that's another slice).
+  const rl = checkRateLimit(`freight-preview:${id}`, { limit: 20, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      {
+        error: `Too many freight previews for this quote. Try again in ${rl.retryAfterSec}s.`,
+      },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
+  }
 
   const quote = await store.getQuote(id);
   if (!quote) return NextResponse.json({ error: "Quote not found" }, { status: 404 });
