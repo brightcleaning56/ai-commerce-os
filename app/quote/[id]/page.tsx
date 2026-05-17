@@ -1,5 +1,5 @@
 "use client";
-import { CheckCircle2, Clock, Lock, XCircle } from "lucide-react";
+import { Check, CheckCircle2, Clock, Lock, Share2, XCircle } from "lucide-react";
 import { AvynMark } from "@/components/AvynLogo";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
@@ -85,6 +85,11 @@ export default function QuotePublicPage() {
       }>
     | null
   >(null);
+  // Slice 82: copy-URL state. Buyers regularly forward quotes to a
+  // colleague (procurement / boss / accountant) before deciding.
+  // The current URL includes the share token, so forwarding is just
+  // a clipboard copy. Auto-resets the "copied" tick after 2s.
+  const [linkCopied, setLinkCopied] = useState(false);
 
   async function previewFreight() {
     const country = shipCountry.trim().toUpperCase();
@@ -249,8 +254,41 @@ export default function QuotePublicPage() {
         )}
 
         <div className="rounded-2xl border border-brand-500/30 bg-gradient-to-br from-brand-500/10 to-transparent p-8 shadow-glow">
-          <div className="text-xs font-semibold uppercase tracking-wider text-brand-300">
-            Quote · {quote.id}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-semibold uppercase tracking-wider text-brand-300">
+              Quote · {quote.id}
+            </div>
+            {/* Slice 82: forward-to-colleague share button. The current
+                URL already includes the share token, so a clipboard copy
+                of window.location.href is enough -- no new endpoint.
+                Hidden once the quote is in a final state since forwarding
+                a closed quote is pointless. */}
+            {!finalState && !expired && (
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(window.location.href).then(
+                    () => {
+                      setLinkCopied(true);
+                      setTimeout(() => setLinkCopied(false), 2000);
+                    },
+                    () => setLinkCopied(false),
+                  );
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-card/60 px-2 py-1 text-[11px] font-medium text-ink-secondary transition hover:border-brand-500/40 hover:bg-bg-hover"
+                title="Copy this quote link to share with a colleague"
+              >
+                {linkCopied ? (
+                  <>
+                    <Check className="h-3 w-3 text-accent-green" /> Link copied
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="h-3 w-3" /> Share with colleague
+                  </>
+                )}
+              </button>
+            )}
           </div>
           <h1 className="mt-2 text-2xl font-bold">
             {quote.productName} for {quote.buyerCompany}
