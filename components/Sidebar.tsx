@@ -95,6 +95,11 @@ export default function Sidebar({
   // own templates they've built. Seeds are excluded since they're
   // shipped on every install and the count is constant.
   const [customCadenceTpls, setCustomCadenceTpls] = useState<number | null>(null);
+  // Slice 127: count of drafts still in "draft" status (not yet
+  // approved / sent / rejected). Same source the /approvals badge
+  // already aggregates, surfaced separately so /outreach can show
+  // it too without double-counting.
+  const [pendingDrafts, setPendingDrafts] = useState<number | null>(null);
   const [owner, setOwner] = useState<{ name: string; email: string; company: string; title: string; initials: string } | null>(null);
 
   useEffect(() => {
@@ -129,6 +134,7 @@ export default function Sidebar({
         ]);
         if (cancelled) return;
         const drafts = (d.drafts ?? []).filter((x: any) => x.status === "draft").length;
+        setPendingDrafts(drafts);
         let actions: Record<string, string> = {};
         try {
           const raw = localStorage.getItem("aicos:risk-actions:v1");
@@ -187,6 +193,13 @@ export default function Sidebar({
       // workspace doesn't show "0" as clutter.
       if (customCadenceTpls == null || customCadenceTpls === 0) return defaultBadge;
       return String(customCadenceTpls);
+    }
+    if (href === "/outreach") {
+      // Slice 127: count of pending drafts (status:"draft" -- not yet
+      // approved/sent/rejected). Tells the operator how many drafts
+      // are sitting in the queue waiting for their attention.
+      if (pendingDrafts == null || pendingDrafts === 0) return defaultBadge;
+      return String(pendingDrafts);
     }
     return defaultBadge;
   }
