@@ -397,13 +397,51 @@ export default function QuotePublicPage() {
           <Tile label="Shipping" v={quote.shippingTerms} />
         </div>
 
+        {/* Slice 113: notes section now collapses by default when
+            long (> 240 chars). Operator-written quote notes can
+            balloon to a multi-paragraph contract clause; the buyer
+            doesn't need to scroll past it to find the Accept button.
+            Short notes render inline as before. The print stylesheet
+            (slice 84) forces all details open via the open attr so
+            paper copies don't lose content. */}
         {quote.notes && (
-          <div className="rounded-xl border border-bg-border bg-bg-card p-5 text-sm text-ink-secondary">
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
-              Notes
-            </div>
-            {quote.notes}
-          </div>
+          (() => {
+            const isLong = quote.notes.length > 240;
+            if (!isLong) {
+              return (
+                <div className="rounded-xl border border-bg-border bg-bg-card p-5 text-sm text-ink-secondary">
+                  <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                    Notes
+                  </div>
+                  {quote.notes}
+                </div>
+              );
+            }
+            return (
+              <details
+                open={false}
+                className="group rounded-xl border border-bg-border bg-bg-card open:p-5 [&:not([open])]:p-3"
+              >
+                <summary className="flex cursor-pointer items-center justify-between gap-2 list-none">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                    Notes
+                    <span className="ml-1.5 normal-case text-ink-tertiary">
+                      ({quote.notes.length} characters)
+                    </span>
+                  </span>
+                  <span className="text-[11px] text-brand-300 group-open:hidden">
+                    Show
+                  </span>
+                  <span className="hidden text-[11px] text-brand-300 group-open:inline">
+                    Hide
+                  </span>
+                </summary>
+                <div className="mt-3 whitespace-pre-wrap text-sm text-ink-secondary">
+                  {quote.notes}
+                </div>
+              </details>
+            );
+          })()
         )}
 
         {!finalState && !expired && (
