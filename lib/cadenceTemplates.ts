@@ -23,6 +23,9 @@ const TEMPLATES_FILE = "cadence-templates.json";
 // mutate the SEED_TEMPLATES const (seeds need to stay pinnable too).
 // Contents: { ids: string[] } -- presence in the array means pinned.
 const PINS_FILE = "cadence-template-pins.json";
+// Slice 87: last-used timestamps. Same separation-from-seeds reasoning
+// as PINS_FILE. Contents: { byId: Record<string, isoString> }.
+const LAST_USED_FILE = "cadence-template-last-used.json";
 const MAX_RETAINED = 200;
 
 export type TemplateBranch = { ifOutcome: string; gotoIndex: number };
@@ -57,6 +60,14 @@ export type CadenceTemplate = {
    * const; see pinned-templates.json in the store).
    */
   pinned?: boolean;
+  /**
+   * Slice 87: last time this template was applied to a new cadence
+   * (via the gallery's applyTemplate or save-as flow). Hydrated by
+   * list() from cadence-template-last-used.json. Used for sort +
+   * gallery freshness signal ("used 3 days ago"). Undefined when
+   * the template has never been applied.
+   */
+  lastUsedAt?: string;
 };
 
 // ─── Seed templates (mirror the slice 36 client-side gallery) ─────
@@ -182,6 +193,22 @@ async function loadPinnedIds(): Promise<Set<string>> {
   return new Set(raw.ids.filter((v): v is string => typeof v === "string"));
 }
 
+/** Slice 87: load the last-used map. Tolerant of missing/corrupt file. */
+async function loadLastUsed(): Promise<Record<string, string>> {
+  const raw = await getBackend().read<{ byId?: Record<string, string> }>(LAST_USED_FILE, {
+    byId: {},
+  });
+  if (!raw || typeof raw.byId !== "object" || raw.byId === null) return {};
+  // Filter to valid ISO-looking values to defend against manual edits
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw.byId)) {
+    if (typeof k === "string" && typeof v === "string" && v.length > 0) {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 export const cadenceTemplatesStore = {
   /**
    * Returns seed + custom templates merged.
@@ -195,14 +222,31 @@ export const cadenceTemplatesStore = {
     const customs = (await getBackend().read<CadenceTemplate[]>(TEMPLATES_FILE, []))
       .filter(isTemplate)
       .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
-    const pinned = await loadPinnedIds();
+    const [pinned, lastUsed] = await Promise.all([loadPinnedIds(), loadLastUsed()]);
     const merged = [...SEED_TEMPLATES, ...customs].map((t) => ({
       ...t,
       pinned: pinned.has(t.id),
+      lastUsedAt: lastUsed[t.id],
     }));
     // Stable sort: pinned ahead of non-pinned, preserving the seed-then-
-    // customs-newest-first order within each group.
+    // customs-newest-first order within each group. Last-used does NOT
+    // affect default sort -- the operator opts in to "sort by recent"
+    // client-side. Default stays predictable.
     return merged.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
+  },
+
+  /**
+   * Slice 87: stamp lastUsedAt = now for the given template id.
+   * Called by the cadence create flow when applyTemplate is the
+   * source of the new cadence's steps. Best-effort -- a write
+   * failure must NOT block cadence creation, so callers wrap in
+   * try/catch. Silently no-ops for unknown ids (consistent with
+   * setPinned validating existence).
+   */
+  async markUsed(id: string): Promise<void> {
+    const map = await loadLastUsed();
+    map[id] = new Date().toISOString();
+    await getBackend().write(LAST_USED_FILE, { byId: map });
   },
 
   /**

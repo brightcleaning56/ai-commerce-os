@@ -626,6 +626,8 @@ type CadenceTemplate = {
   source?: "seed" | "custom";
   /** Slice 85: pinned-to-top flag from the server pin store. */
   pinned?: boolean;
+  /** Slice 87: last time this template was applied. */
+  lastUsedAt?: string;
 };
 
 /**
@@ -643,6 +645,7 @@ type ServerTemplate = {
   createdAt?: string;
   createdBy?: string;
   pinned?: boolean;
+  lastUsedAt?: string;
   steps: Array<{
     channel: Channel;
     delayHours: number;
@@ -697,6 +700,7 @@ function serverTemplateToDraft(t: ServerTemplate): CadenceTemplate {
     cadenceDescription: t.cadenceDescription,
     source: t.source,
     pinned: t.pinned,
+    lastUsedAt: t.lastUsedAt,
     steps: t.steps.map((s) => ({
       channel: s.channel,
       delayHours: String(s.delayHours),
@@ -943,6 +947,17 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
     setDescription(t.cadenceDescription);
     // Deep-clone the steps so the template stays immutable across applies
     setSteps(t.steps.map((s) => ({ ...s, branches: s.branches.map((b) => ({ ...b })) })));
+    // Slice 87: fire-and-forget mark-used. Failure is silent -- the
+    // form still proceeds. Also update the local timestamp optimistically
+    // so the "used Xs ago" label reflects immediately.
+    const now = new Date().toISOString();
+    setTemplates((prev) =>
+      prev.map((x) => (x.id === t.id ? { ...x, lastUsedAt: now } : x)),
+    );
+    void fetch(`/api/cadences/templates/${t.id}/mark-used`, {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => {});
   }
 
   function updateStep(i: number, patch: Partial<DraftStep>) {
@@ -1208,7 +1223,10 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                 {/* Slice 81: step count + channel mix badge. Lets the
                     operator scan the gallery for "the 3-touch email-
                     heavy one" without opening each template. Uppercase
-                    channel codes (E/C/S) keep it compact. */}
+                    channel codes (E/C/S) keep it compact.
+                    Slice 87: lastUsedAt freshness signal -- "used 2d ago"
+                    sits to the right so the operator can tell at a glance
+                    which templates they actually reach for. */}
                 <div className="mt-1 flex items-center gap-1 text-[9px] text-ink-tertiary">
                   <span className="rounded bg-bg-hover px-1 py-0.5 font-semibold tabular-nums">
                     {t.steps.length}-step
@@ -1226,6 +1244,9 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                       )
                       .join("·")}
                   </span>
+                  {t.lastUsedAt && (
+                    <span className="ml-auto italic">used {relTime(t.lastUsedAt)}</span>
+                  )}
                 </div>
               </button>
               {/* Slice 77: duplicate button -- works for both seed +
