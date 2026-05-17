@@ -100,6 +100,10 @@ export default function Sidebar({
   // already aggregates, surfaced separately so /outreach can show
   // it too without double-counting.
   const [pendingDrafts, setPendingDrafts] = useState<number | null>(null);
+  // Slice 129: count of tasks not yet marked done. Powers the
+  // /tasks badge so operators see open work without context-
+  // switching to the page.
+  const [openTasks, setOpenTasks] = useState<number | null>(null);
   const [owner, setOwner] = useState<{ name: string; email: string; company: string; title: string; initials: string } | null>(null);
 
   useEffect(() => {
@@ -115,7 +119,7 @@ export default function Sidebar({
         // Slice 108: leads count joins the existing parallel batch.
         // Endpoint is best-effort -- silently no-ops the badge on
         // failure (e.g. role without leads:read capability).
-        const [d, f, q, l, tpls] = await Promise.all([
+        const [d, f, q, l, tpls, tks] = await Promise.all([
           fetch("/api/drafts").then((r) => r.json()),
           fetch("/api/risk-flags").then((r) => r.json()),
           // Queue summary is best-effort -- swallow failures so the
@@ -129,6 +133,10 @@ export default function Sidebar({
           // Slice 120: cadence templates list -- best-effort, returns
           // both seeds + customs. We count customs only.
           fetch("/api/cadences/templates", { credentials: "include" })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          // Slice 129: open task count for the /tasks badge.
+          fetch("/api/tasks", { credentials: "include" })
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
         ]);
@@ -153,6 +161,11 @@ export default function Sidebar({
         if (tpls?.templates) {
           setCustomCadenceTpls(
             (tpls.templates as Array<{ source?: string }>).filter((x) => x.source === "custom").length,
+          );
+        }
+        if (tks?.tasks) {
+          setOpenTasks(
+            (tks.tasks as Array<{ done?: boolean }>).filter((x) => !x.done).length,
           );
         }
       } catch {}
@@ -200,6 +213,13 @@ export default function Sidebar({
       // are sitting in the queue waiting for their attention.
       if (pendingDrafts == null || pendingDrafts === 0) return defaultBadge;
       return String(pendingDrafts);
+    }
+    if (href === "/tasks") {
+      // Slice 129: count of tasks not yet done -- the operator's
+      // remaining work list. Includes phone tasks and sequence
+      // tasks alike.
+      if (openTasks == null || openTasks === 0) return defaultBadge;
+      return String(openTasks);
     }
     return defaultBadge;
   }
