@@ -23,8 +23,12 @@ const TEMPLATES_FILE = "cadence-templates.json";
 // mutate the SEED_TEMPLATES const (seeds need to stay pinnable too).
 // Contents: { ids: string[] } -- presence in the array means pinned.
 const PINS_FILE = "cadence-template-pins.json";
-// Slice 87: last-used timestamps. Same separation-from-seeds reasoning
-// as PINS_FILE. Contents: { byId: Record<string, isoString> }.
+// Slice 87 + 94: last-used timestamps + cumulative applied count.
+// Same separation-from-seeds reasoning as PINS_FILE. Contents:
+//   { byId: Record<string, { at?: isoString, count?: number }> }
+// Backward compat: an older shape { byId: Record<string, isoString> }
+// (slice 87) is read tolerantly -- the string becomes { at: string,
+// count: 1 } so existing data keeps working.
 const LAST_USED_FILE = "cadence-template-last-used.json";
 const MAX_RETAINED = 200;
 
@@ -68,6 +72,14 @@ export type CadenceTemplate = {
    * the template has never been applied.
    */
   lastUsedAt?: string;
+  /**
+   * Slice 94: cumulative applied count -- how many times this
+   * template has been clicked into a new cadence via the gallery.
+   * Bumped on every markUsed() alongside lastUsedAt. Surfaces on
+   * the gallery card as "used 4x" so operators can see which
+   * templates carry real workload.
+   */
+  appliedCount?: number;
 };
 
 // ─── Seed templates (mirror the slice 36 client-side gallery) ─────
@@ -193,17 +205,29 @@ async function loadPinnedIds(): Promise<Set<string>> {
   return new Set(raw.ids.filter((v): v is string => typeof v === "string"));
 }
 
-/** Slice 87: load the last-used map. Tolerant of missing/corrupt file. */
-async function loadLastUsed(): Promise<Record<string, string>> {
-  const raw = await getBackend().read<{ byId?: Record<string, string> }>(LAST_USED_FILE, {
+type UsageEntry = { at?: string; count?: number };
+
+/**
+ * Slice 87 + 94: load the usage map. Tolerant of missing/corrupt
+ * file AND of the slice 87 shape (raw string -> { at, count: 1 }).
+ */
+async function loadUsage(): Promise<Record<string, UsageEntry>> {
+  const raw = await getBackend().read<{ byId?: Record<string, unknown> }>(LAST_USED_FILE, {
     byId: {},
   });
   if (!raw || typeof raw.byId !== "object" || raw.byId === null) return {};
-  // Filter to valid ISO-looking values to defend against manual edits
-  const out: Record<string, string> = {};
+  const out: Record<string, UsageEntry> = {};
   for (const [k, v] of Object.entries(raw.byId)) {
-    if (typeof k === "string" && typeof v === "string" && v.length > 0) {
-      out[k] = v;
+    if (typeof k !== "string") continue;
+    if (typeof v === "string" && v.length > 0) {
+      // Legacy slice-87 shape -- treat as one prior use.
+      out[k] = { at: v, count: 1 };
+    } else if (v && typeof v === "object") {
+      const e = v as { at?: unknown; count?: unknown };
+      const at = typeof e.at === "string" ? e.at : undefined;
+      const count =
+        typeof e.count === "number" && e.count >= 0 ? Math.floor(e.count) : undefined;
+      if (at || count !== undefined) out[k] = { at, count };
     }
   }
   return out;
@@ -222,11 +246,12 @@ export const cadenceTemplatesStore = {
     const customs = (await getBackend().read<CadenceTemplate[]>(TEMPLATES_FILE, []))
       .filter(isTemplate)
       .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
-    const [pinned, lastUsed] = await Promise.all([loadPinnedIds(), loadLastUsed()]);
+    const [pinned, usage] = await Promise.all([loadPinnedIds(), loadUsage()]);
     const merged = [...SEED_TEMPLATES, ...customs].map((t) => ({
       ...t,
       pinned: pinned.has(t.id),
-      lastUsedAt: lastUsed[t.id],
+      lastUsedAt: usage[t.id]?.at,
+      appliedCount: usage[t.id]?.count,
     }));
     // Stable sort: pinned ahead of non-pinned, preserving the seed-then-
     // customs-newest-first order within each group. Last-used does NOT
@@ -236,16 +261,18 @@ export const cadenceTemplatesStore = {
   },
 
   /**
-   * Slice 87: stamp lastUsedAt = now for the given template id.
-   * Called by the cadence create flow when applyTemplate is the
-   * source of the new cadence's steps. Best-effort -- a write
-   * failure must NOT block cadence creation, so callers wrap in
-   * try/catch. Silently no-ops for unknown ids (consistent with
-   * setPinned validating existence).
+   * Slice 87 + 94: stamp lastUsedAt = now for the given template id
+   * AND bump appliedCount. Called by the cadence create flow when
+   * applyTemplate is the source of the new cadence's steps.
+   * Best-effort -- callers wrap in try/catch.
    */
   async markUsed(id: string): Promise<void> {
-    const map = await loadLastUsed();
-    map[id] = new Date().toISOString();
+    const map = await loadUsage();
+    const prev = map[id] ?? { count: 0 };
+    map[id] = {
+      at: new Date().toISOString(),
+      count: (prev.count ?? 0) + 1,
+    };
     await getBackend().write(LAST_USED_FILE, { byId: map });
   },
 

@@ -628,6 +628,8 @@ type CadenceTemplate = {
   pinned?: boolean;
   /** Slice 87: last time this template was applied. */
   lastUsedAt?: string;
+  /** Slice 94: cumulative apply count. */
+  appliedCount?: number;
 };
 
 /**
@@ -646,6 +648,7 @@ type ServerTemplate = {
   createdBy?: string;
   pinned?: boolean;
   lastUsedAt?: string;
+  appliedCount?: number;
   steps: Array<{
     channel: Channel;
     delayHours: number;
@@ -701,6 +704,7 @@ function serverTemplateToDraft(t: ServerTemplate): CadenceTemplate {
     source: t.source,
     pinned: t.pinned,
     lastUsedAt: t.lastUsedAt,
+    appliedCount: t.appliedCount,
     steps: t.steps.map((s) => ({
       channel: s.channel,
       delayHours: String(s.delayHours),
@@ -947,12 +951,20 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
     setDescription(t.cadenceDescription);
     // Deep-clone the steps so the template stays immutable across applies
     setSteps(t.steps.map((s) => ({ ...s, branches: s.branches.map((b) => ({ ...b })) })));
-    // Slice 87: fire-and-forget mark-used. Failure is silent -- the
-    // form still proceeds. Also update the local timestamp optimistically
-    // so the "used Xs ago" label reflects immediately.
+    // Slice 87 + 94: fire-and-forget mark-used. Bumps lastUsedAt and
+    // appliedCount on the server; we also update both locally so the
+    // "used Xs ago · 5x" label reflects immediately.
     const now = new Date().toISOString();
     setTemplates((prev) =>
-      prev.map((x) => (x.id === t.id ? { ...x, lastUsedAt: now } : x)),
+      prev.map((x) =>
+        x.id === t.id
+          ? {
+              ...x,
+              lastUsedAt: now,
+              appliedCount: (x.appliedCount ?? 0) + 1,
+            }
+          : x,
+      ),
     );
     void fetch(`/api/cadences/templates/${t.id}/mark-used`, {
       method: "POST",
@@ -1244,8 +1256,14 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                       )
                       .join("·")}
                   </span>
-                  {t.lastUsedAt && (
-                    <span className="ml-auto italic">used {relTime(t.lastUsedAt)}</span>
+                  {(t.lastUsedAt || t.appliedCount) && (
+                    <span className="ml-auto italic">
+                      {t.appliedCount && t.appliedCount > 0 && (
+                        <span className="not-italic font-semibold">{t.appliedCount}×</span>
+                      )}
+                      {t.appliedCount && t.appliedCount > 0 && t.lastUsedAt && " · "}
+                      {t.lastUsedAt && `used ${relTime(t.lastUsedAt)}`}
+                    </span>
                   )}
                 </div>
               </button>
