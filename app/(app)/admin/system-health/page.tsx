@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Bot,
   CheckCircle2,
+  Clipboard,
   Clock,
   Headphones,
   Loader2,
@@ -723,14 +724,38 @@ function CheckRow({
 
       {Object.keys(check.detail).length > 0 && (
         <div className="mt-3 grid gap-1.5 rounded-md border border-bg-border bg-bg-hover/30 p-3 text-[11px]">
-          {Object.entries(check.detail).map(([k, v]) => (
-            <div key={k} className="flex flex-wrap items-start justify-between gap-2">
-              <span className="text-ink-tertiary">{humanKey(k)}</span>
-              <span className={`font-mono text-right ${k === "fixHint" ? "text-accent-amber" : "text-ink-secondary"}`}>
-                {renderValue(v)}
-              </span>
-            </div>
-          ))}
+          {Object.entries(check.detail).map(([k, v]) => {
+            // Slice 111: fixHint rows get a copy button so the
+            // operator can paste the env-var instruction into their
+            // shell / .env file / Netlify dashboard without manually
+            // selecting the wrapped text. Only renders for fixHint
+            // and testRecipientHint keys so other rows stay tidy.
+            const isFix = k === "fixHint" || k === "testRecipientHint" || k === "setupHint";
+            const text = typeof v === "string" ? v : "";
+            return (
+              <div key={k} className="flex flex-wrap items-start justify-between gap-2">
+                <span className="text-ink-tertiary">{humanKey(k)}</span>
+                <span className="flex min-w-0 items-start gap-1">
+                  <span className={`font-mono text-right ${isFix ? "text-accent-amber" : "text-ink-secondary"}`}>
+                    {renderValue(v)}
+                  </span>
+                  {isFix && text && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(text).catch(() => {});
+                      }}
+                      className="shrink-0 rounded p-0.5 text-ink-tertiary hover:bg-bg-hover hover:text-accent-amber"
+                      title="Copy fix-hint to clipboard"
+                      aria-label="Copy fix-hint"
+                    >
+                      <Clipboard className="h-3 w-3" />
+                    </button>
+                  )}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
