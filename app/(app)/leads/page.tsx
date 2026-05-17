@@ -1067,16 +1067,37 @@ export default function LeadsPage() {
                     {(selected.callTranscripts ?? [])
                       .slice()
                       .sort((a, b) => +new Date(b.at) - +new Date(a.at))
-                      .map((c) => (
+                      .map((c) => {
+                        // Slice 99: slice 93 manual entries get a
+                        // synthetic callSid prefixed "manual_". Render
+                        // them with a different border + "manual" pill
+                        // so the operator can tell at a glance which
+                        // transcripts came from Twilio (verified) vs
+                        // the operator's own notes (unverified).
+                        const isManual = c.callSid.startsWith("manual_");
+                        return (
                         <div
                           key={c.callSid}
-                          className="rounded-md border border-accent-blue/30 bg-accent-blue/5 p-3 text-xs"
+                          className={`rounded-md border p-3 text-xs ${
+                            isManual
+                              ? "border-bg-border bg-bg-hover/30"
+                              : "border-accent-blue/30 bg-accent-blue/5"
+                          }`}
                         >
                           <div className="flex items-center gap-2 text-[11px] text-ink-tertiary">
-                            <PhoneCall className="h-3 w-3 text-accent-blue" />
+                            <PhoneCall
+                              className={`h-3 w-3 ${
+                                isManual ? "text-ink-tertiary" : "text-accent-blue"
+                              }`}
+                            />
                             <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] font-semibold uppercase">
                               {c.direction}
                             </span>
+                            {isManual && (
+                              <span className="rounded bg-bg-app px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                                manual
+                              </span>
+                            )}
                             {c.durationSec > 0 && (
                               <>
                                 <span>·</span>
@@ -1110,7 +1131,8 @@ export default function LeadsPage() {
                           </div>
                           <div className="mt-1.5 whitespace-pre-wrap text-ink-primary">{c.text}</div>
                         </div>
-                      ))}
+                        );
+                      })}
                   </div>
                 </div>
               )}
