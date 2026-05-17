@@ -449,6 +449,13 @@ export default function SystemHealthPage() {
               card is obvious. */}
           <FreightProbeCard />
 
+          {/* Slice 91: Twilio webhook URL helper -- collects the four
+              URLs you need to paste into Twilio Console (TwiML App,
+              phone number Voice + Messaging webhooks) with one-click
+              copy buttons. Saves the operator from constructing them
+              by hand from NEXT_PUBLIC_APP_ORIGIN + memorized paths. */}
+          <TwilioWebhookHelper />
+
           {/* Recent cron activity — shows what actually fired vs the
               schedule. All 6 crons now record CronRun objects, so each
               kind appears here as soon as it fires (or skips). */}
@@ -1443,6 +1450,110 @@ function FreightProbeCard() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Twilio webhook helper (slice 91) ────────────────────────────────
+//
+// Operators setting up Twilio (voice OR SMS) need to paste four URLs
+// into Twilio Console:
+//   1. TwiML App > Voice Configuration > Request URL  (outbound calls)
+//   2. Phone Numbers > <num> > Voice Configuration > Webhook  (inbound)
+//   3. recordingStatusCallback (set in the TwiML response, but useful)
+//   4. Phone Numbers > <num> > Messaging Configuration > Webhook  (SMS in)
+//
+// Each URL has a tiny Copy button. Origin is NEXT_PUBLIC_APP_ORIGIN
+// when set (production deploys), else window.location.origin (dev),
+// else a clearly-marked placeholder so the operator notices.
+
+function TwilioWebhookHelper() {
+  const { toast } = useToast();
+  const [origin, setOrigin] = useState("https://YOUR-DOMAIN");
+  useEffect(() => {
+    const env = process.env.NEXT_PUBLIC_APP_ORIGIN;
+    if (env) setOrigin(env);
+    else if (typeof window !== "undefined") setOrigin(window.location.origin);
+  }, []);
+
+  const urls = [
+    {
+      label: "Outbound TwiML",
+      path: "/api/voice/twiml",
+      where: "Twilio Console > Voice > TwiML > Apps > <your app> > Voice Configuration > Request URL (POST)",
+    },
+    {
+      label: "Inbound Voice",
+      path: "/api/voice/inbound",
+      where: "Twilio Console > Phone Numbers > <your number> > Voice Configuration > A call comes in: Webhook (POST)",
+    },
+    {
+      label: "Recording status",
+      path: "/api/voice/recording-status",
+      where: "Automatic (set in TwiML response). Listed for debugging webhook reachability.",
+    },
+    {
+      label: "Inbound SMS",
+      path: "/api/webhooks/twilio/sms",
+      where: "Twilio Console > Phone Numbers > <your number> > Messaging Configuration > A message comes in: Webhook (POST)",
+    },
+  ];
+
+  function copy(url: string, label: string) {
+    navigator.clipboard.writeText(url).then(
+      () => toast(`${label} URL copied`, "success"),
+      () => toast("Clipboard blocked", "error"),
+    );
+  }
+
+  const usingPlaceholder = origin.includes("YOUR-DOMAIN");
+
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-5">
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        <Webhook className="h-4 w-4 text-brand-300" /> Twilio webhook URLs
+      </div>
+      <p className="mt-1 text-[11px] text-ink-tertiary">
+        Copy these into Twilio Console to wire your number into AVYN. Origin resolves from{" "}
+        <code className="rounded bg-bg-hover px-1 text-[10px]">NEXT_PUBLIC_APP_ORIGIN</code>{" "}
+        when set, else the current browser URL.
+      </p>
+      {usingPlaceholder && (
+        <div className="mt-2 rounded-md border border-accent-amber/40 bg-accent-amber/10 px-2 py-1.5 text-[10px] text-accent-amber">
+          Origin not detected -- set NEXT_PUBLIC_APP_ORIGIN to your deployed URL before copying.
+        </div>
+      )}
+      <ul className="mt-3 space-y-2">
+        {urls.map((u) => {
+          const full = `${origin}${u.path}`;
+          return (
+            <li
+              key={u.path}
+              className="rounded-md border border-bg-border bg-bg-hover/30 p-2.5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                    {u.label}
+                  </div>
+                  <div className="mt-0.5 truncate font-mono text-[11px] text-ink-secondary">
+                    {full}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => copy(full, u.label)}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[10px] font-semibold text-ink-secondary hover:bg-bg-hover"
+                  title="Copy URL"
+                >
+                  Copy
+                </button>
+              </div>
+              <div className="mt-1.5 text-[10px] text-ink-tertiary">{u.where}</div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
