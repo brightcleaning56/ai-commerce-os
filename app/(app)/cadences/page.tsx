@@ -882,10 +882,11 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
   // (case-insensitive), so "supplier" finds both "Supplier revival"
   // and a custom titled "Bring back supplier".
   const [templateFilter, setTemplateFilter] = useState("");
-  // Slice 97: sort mode. Default pinned-first (slice 85 ordering);
-  // "popular" overrides with appliedCount desc, falling back to
-  // lastUsedAt so untouched templates sink to the bottom.
-  const [templateSort, setTemplateSort] = useState<"default" | "popular">("default");
+  // Slice 97 + 100: sort modes.
+  //   default = pinned-first (slice 85 ordering)
+  //   popular = appliedCount desc (heaviest rotation surfaces)
+  //   recent  = lastUsedAt desc  (last-touched surfaces)
+  const [templateSort, setTemplateSort] = useState<"default" | "popular" | "recent">("default");
   const filteredTemplates = (() => {
     const q = templateFilter.trim().toLowerCase();
     const base = q
@@ -903,6 +904,11 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
         // Tiebreak: most recently used first
         return (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? "");
       });
+    }
+    if (templateSort === "recent") {
+      return [...base].sort((a, b) =>
+        (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? ""),
+      );
     }
     return base;
   })();
@@ -1162,12 +1168,12 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
               placeholder={`Filter ${templates.length} templates…`}
               className="h-7 flex-1 rounded-md border border-bg-border bg-bg-app px-2 text-[11px] placeholder:text-ink-tertiary focus:border-accent-blue focus:outline-none"
             />
-            {/* Slice 97: sort toggle. Default keeps pinned-first
-                ordering (slice 85); Popular sorts by appliedCount
-                desc so the heavy-rotation templates surface. Only
-                renders when at least one template has been applied
-                -- otherwise the toggle has no data to act on. */}
-            {templates.some((t) => (t.appliedCount ?? 0) > 0) && (
+            {/* Slice 97 + 100: sort segmented toggle. Three modes:
+                Pinned (default, slice 85 order), Popular (appliedCount
+                desc, slice 94), Recent (lastUsedAt desc, slice 87).
+                Renders only when at least one template has usage data
+                to act on. */}
+            {templates.some((t) => (t.appliedCount ?? 0) > 0 || t.lastUsedAt) && (
               <div className="flex rounded-md border border-bg-border bg-bg-app text-[10px]">
                 <button
                   type="button"
@@ -1191,6 +1197,18 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                   title="Sort by how often each template has been applied"
                 >
                   Popular
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTemplateSort("recent")}
+                  className={`px-2 py-1 ${
+                    templateSort === "recent"
+                      ? "bg-accent-blue/20 font-semibold text-accent-blue"
+                      : "text-ink-tertiary"
+                  }`}
+                  title="Sort by last-touched timestamp"
+                >
+                  Recent
                 </button>
               </div>
             )}
