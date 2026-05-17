@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Clipboard,
   Clock,
   DollarSign,
   Eye,
@@ -831,9 +832,32 @@ function DraftCard({
           <div className="mt-3 rounded-md border border-bg-border bg-bg-panel p-3">
             {tab === "email" && (
               <div className="space-y-2 text-xs">
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Subject</div>
-                  <div className="font-semibold">{d.email.subject}</div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">Subject</div>
+                    <div className="font-semibold">{d.email.subject}</div>
+                  </div>
+                  {/* Slice 126: copy subject + body as one block so
+                      operators sending manually (Outlook / Gmail web /
+                      etc.) can paste in one shot. Format mirrors what
+                      a real email client expects:
+                        Subject: ...
+                        (blank line)
+                        ...body... */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = `Subject: ${d.email.subject}\n\n${d.email.body}`;
+                      navigator.clipboard.writeText(text).then(
+                        () => toast("Email copied"),
+                        () => toast("Clipboard blocked", "error"),
+                      );
+                    }}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[10px] font-semibold text-ink-secondary hover:bg-bg-hover"
+                    title="Copy subject + body"
+                  >
+                    <Clipboard className="h-3 w-3" /> Copy
+                  </button>
                 </div>
                 <div className="border-t border-bg-border pt-2">
                   <pre className="whitespace-pre-wrap font-sans text-ink-secondary">{d.email.body}</pre>
