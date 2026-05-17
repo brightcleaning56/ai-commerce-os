@@ -3,7 +3,45 @@ import { requireCapability } from "@/lib/auth";
 import { describeSchedule, PIPELINE_CRON_SCHEDULE, nextCronFire } from "@/lib/cron";
 import { getFreightProvider } from "@/lib/freight";
 import { getKillSwitch } from "@/lib/killSwitch";
-import { getVoiceProvider } from "@/lib/voice";
+import { getVoiceProvider, type VoiceProviderInfo } from "@/lib/voice";
+
+/**
+ * Slice 83: per-provider voice fix hint. Same partial-config
+ * diagnostic pattern as slice 80 SMS/email -- when VOICE_PROVIDER
+ * is set but some required vars are missing, name the specific
+ * missing ones instead of "see .env.local.example."
+ */
+function voiceFixHint(info: VoiceProviderInfo): string {
+  const d = info.detail as Record<string, unknown>;
+  if (info.provider === "twilio") {
+    const missing: string[] = [];
+    if (!d.accountSidSet) missing.push("TWILIO_ACCOUNT_SID");
+    if (!d.apiKeySet) missing.push("TWILIO_API_KEY");
+    if (!d.apiSecretSet) missing.push("TWILIO_API_SECRET");
+    if (!d.twimlAppSidSet) missing.push("TWILIO_TWIML_APP_SID");
+    if (missing.length === 0) return "All Twilio voice vars are set.";
+    if (missing.length === 4) {
+      return "VOICE_PROVIDER=twilio but no Twilio vars set. Need ACCOUNT_SID + API_KEY + API_SECRET + TWIML_APP_SID. Create API key under Account > API keys; create TwiML App under Voice > TwiML > Apps.";
+    }
+    return `Twilio voice partially configured -- missing: ${missing.join(", ")}.`;
+  }
+  if (info.provider === "vapi") {
+    const missing: string[] = [];
+    if (!d.privateKeySet) missing.push("VAPI_PRIVATE_KEY");
+    if (!d.phoneNumberIdSet) missing.push("VAPI_PHONE_NUMBER_ID");
+    if (missing.length === 0) return "All required Vapi vars set.";
+    if (missing.length === 2) {
+      return "VOICE_PROVIDER=vapi but no Vapi vars set. Need VAPI_PRIVATE_KEY + VAPI_PHONE_NUMBER_ID at minimum (VAPI_PUBLIC_KEY enables browser calls).";
+    }
+    return `Vapi partially configured -- missing: ${missing.join(", ")}.`;
+  }
+  if (info.provider === "bland") {
+    return d.apiKeySet
+      ? "Bland configured."
+      : "VOICE_PROVIDER=bland but BLAND_API_KEY is missing.";
+  }
+  return `Set the matching env vars for ${info.provider} -- see .env.local.example.`;
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -298,7 +336,12 @@ export async function GET(req: NextRequest) {
         : {
             provider: voiceInfo.provider,
             ...voiceInfo.detail,
-            fixHint: `Set the matching env vars for ${voiceInfo.provider} -- see .env.local.example.`,
+            // Slice 83: partial-config diagnostics, same pattern as
+            // slice 80 SMS/email. Distinguishes "fully unconfigured"
+            // from "VOICE_PROVIDER set but some required vars missing"
+            // -- the latter is the case that bites operators who get
+            // half-way through setup and assume it's wired.
+            fixHint: voiceFixHint(voiceInfo),
           },
   };
 
