@@ -324,10 +324,17 @@ export default function LeadsPage() {
   const [notesDraft, setNotesDraft] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
   const [notesDirty, setNotesDirty] = useState(false);
+  // Slice 122: timestamp the most recent save so the editor footer
+  // can show "Saved 3m ago" -- gives the operator confidence that
+  // the on-blur save actually persisted without making them re-open
+  // the lead. Client-only timestamp since the server doesn't return
+  // a notesUpdatedAt yet.
+  const [notesSavedAt, setNotesSavedAt] = useState<string | null>(null);
   // Reset the draft when the operator picks a different lead.
   useEffect(() => {
     setNotesDraft(selected?.notes ?? "");
     setNotesDirty(false);
+    setNotesSavedAt(null);
   }, [selected?.id, selected?.notes]);
 
   async function saveNotes() {
@@ -348,6 +355,7 @@ export default function LeadsPage() {
       setLeads((all) => (all ?? []).map((l) => (l.id === selected.id ? d.lead : l)));
       setSelected(d.lead);
       setNotesDirty(false);
+      setNotesSavedAt(new Date().toISOString());
       toast("Notes saved");
     } catch (err) {
       toast(err instanceof Error ? err.message : "Save failed", "error");
@@ -1432,7 +1440,16 @@ export default function LeadsPage() {
                   className="w-full resize-y rounded-md border border-bg-border bg-bg-card p-2 text-xs placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
                 />
                 <div className="mt-1 flex items-center justify-between text-[10px] text-ink-tertiary">
-                  <span>Saves on blur · ⌘S to save now</span>
+                  <span className="flex items-center gap-1.5">
+                    Saves on blur · ⌘S to save now
+                    {/* Slice 122: "Saved Xs ago" confirmation. Client-only
+                        timestamp from the last successful save -- gives
+                        the operator confidence the on-blur path landed
+                        without making them re-open the lead. */}
+                    {notesSavedAt && !notesDirty && !notesSaving && (
+                      <span className="text-accent-green">· saved {relativeTime(notesSavedAt)}</span>
+                    )}
+                  </span>
                   <span>{notesDraft.length}/5000</span>
                 </div>
               </div>
