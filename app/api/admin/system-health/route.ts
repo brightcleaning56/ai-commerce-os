@@ -64,6 +64,17 @@ export async function GET(req: NextRequest) {
   const emailLive = process.env.EMAIL_LIVE === "true";
   const testRecipient = process.env.EMAIL_TEST_RECIPIENT || null;
   const provider = postmarkToken ? "postmark" : resendToken ? "resend" : null;
+  // Slice 80: partial-config diagnostics, same pattern as SMS below.
+  function emailFixHint(): string {
+    if (!provider && !fromAddress) {
+      return "Set POSTMARK_TOKEN (or RESEND_TOKEN) AND either EMAIL_FROM or OPERATOR_EMAIL. Without a provider every send is a no-op.";
+    }
+    if (!provider) {
+      return "Provider missing -- EMAIL_FROM/OPERATOR_EMAIL is set but no POSTMARK_TOKEN or RESEND_TOKEN. Sends will no-op until a token lands.";
+    }
+    return `Provider ${provider} configured but no from-address. Set EMAIL_FROM or OPERATOR_EMAIL.`;
+  }
+
   const email = {
     ok: !!provider && !!fromAddress,
     severity: "blocking" as const,
@@ -81,19 +92,42 @@ export async function GET(req: NextRequest) {
             note: emailLive
               ? "Live mode is ON â€” every recipient gets the real email."
               : "Live mode is OFF â€” every send is routed to the test recipient (or skipped). Flip EMAIL_LIVE=true to ship.",
+            // Slice 80: catch the test-mode-without-recipient case
+            // (test-send button will silently skip).
+            testRecipientHint:
+              !testRecipient && !emailLive
+                ? "EMAIL_LIVE=false and EMAIL_TEST_RECIPIENT is empty -- test sends will route to nothing. Set EMAIL_TEST_RECIPIENT or flip EMAIL_LIVE=true."
+                : undefined,
           }
-        : {
-            fixHint:
-              "Set POSTMARK_TOKEN (or RESEND_TOKEN) AND either EMAIL_FROM or OPERATOR_EMAIL. Without a provider every send is a no-op.",
-          },
+        : { fixHint: emailFixHint() },
   };
 
   // â”€â”€ Twilio / outbound SMS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const twilioSid = process.env.TWILIO_ACCOUNT_SID;
   const twilioToken = process.env.TWILIO_AUTH_TOKEN;
-  const twilioFrom = process.env.TWILIO_FROM;
+  // Slice 80: honor TWILIO_FROM_NUMBER (canonical, matches Twilio
+  // docs + lib/sms.ts) AND TWILIO_FROM (legacy alias). Previously
+  // only TWILIO_FROM was checked, so a deploy using the canonical
+  // name was wrongly reported as broken.
+  const twilioFrom = process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_FROM;
   const smsLive = process.env.SMS_LIVE === "true";
   const smsTestRecipient = process.env.SMS_TEST_RECIPIENT || null;
+
+  // Slice 80: partial-config diagnostics. When SID is set but FROM is
+  // missing, the operator wants to know exactly which var to add,
+  // not be told "set all three" (the case I hit live testing today).
+  function smsFixHint(): string {
+    const missing: string[] = [];
+    if (!twilioSid) missing.push("TWILIO_ACCOUNT_SID");
+    if (!twilioToken) missing.push("TWILIO_AUTH_TOKEN");
+    if (!twilioFrom) missing.push("TWILIO_FROM_NUMBER (or legacy TWILIO_FROM)");
+    if (missing.length === 0) return "All set.";
+    if (missing.length === 3) {
+      return "Set TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM_NUMBER. Without these, SMS is silently skipped and only email goes out.";
+    }
+    return `Missing: ${missing.join(", ")}. The other Twilio vars are set, so this is a partial config that will fail at send time.`;
+  }
+
   const sms = {
     ok: !!(twilioSid && twilioToken && twilioFrom),
     severity: "warning" as const,
@@ -105,8 +139,16 @@ export async function GET(req: NextRequest) {
             fromNumber: twilioFrom,
             liveMode: smsLive,
             testRecipient: smsTestRecipient,
+            // Slice 80: surface trial-account constraint when relevant.
+            // Trial Twilio accounts can only send to verified Caller IDs,
+            // and without SMS_TEST_RECIPIENT set, the test-send button
+            // (SMS_LIVE=false path) has nowhere to route.
+            testRecipientHint:
+              !smsTestRecipient && !smsLive
+                ? "SMS_LIVE=false and SMS_TEST_RECIPIENT is empty -- the test-send button will have no recipient. Set SMS_TEST_RECIPIENT to a verified number."
+                : undefined,
           }
-        : { fixHint: "Set TWILIO_ACCOUNT_SID + TWILIO_AUTH_TOKEN + TWILIO_FROM. Without these, SMS is silently skipped and only email goes out." },
+        : { fixHint: smsFixHint() },
   };
 
   // â”€â”€ CAN-SPAM compliance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
