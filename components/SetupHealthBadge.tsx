@@ -73,14 +73,25 @@ export default function SetupHealthBadge() {
   const count = isRed ? data.blockingFailures : data.warningFailures;
   const Icon = isRed ? XCircle : AlertTriangle;
 
+  // Slice 98: collect the first few failing check names (matching the
+  // severity we're badging) so the tooltip tells the operator WHICH
+  // checks are red/amber, not just "1 blocking issue." The check key
+  // (e.g. "email", "voice") matches what /admin/system-health renders,
+  // so the operator can find it instantly when they click through.
+  const targetSeverity: CheckSeverity = isRed ? "blocking" : "warning";
+  const failing = Object.entries(data.checks)
+    .filter(([, c]) => !c.ok && c.severity === targetSeverity)
+    .map(([k]) => k);
+  const lead = failing.slice(0, 3).join(", ");
+  const tail = failing.length > 3 ? ` (+${failing.length - 3} more)` : "";
+  const titleText = isRed
+    ? `${count} blocking config issue${count === 1 ? "" : "s"}: ${lead}${tail}`
+    : `${count} warning${count === 1 ? "" : "s"}: ${lead}${tail}`;
+
   return (
     <Link
       href="/admin/system-health"
-      title={
-        isRed
-          ? `${count} blocking config issue${count === 1 ? "" : "s"} -- features won't run`
-          : `${count} warning${count === 1 ? "" : "s"} -- degraded mode`
-      }
+      title={titleText}
       className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-lg border bg-bg-card transition hover:bg-bg-hover ${
         isRed ? "border-accent-red/40" : "border-accent-amber/40"
       }`}
