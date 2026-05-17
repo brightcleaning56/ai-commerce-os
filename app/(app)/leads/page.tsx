@@ -214,6 +214,11 @@ export default function LeadsPage() {
   const [filter, setFilter] = useState<"all" | LeadStatus>("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Lead | null>(null);
+  // Slice 119: filter input on the transcripts panel when 5+ entries.
+  // Operator with a long conversation history can find a specific call
+  // by keyword without scrolling. Case-insensitive match against the
+  // transcript text body.
+  const [transcriptFilter, setTranscriptFilter] = useState("");
   const { toast } = useToast();
   // Slice 69: call-back action on the transcripts panel. Prefer the
   // in-browser dialer when Twilio Device is ready; fall back to tel:
@@ -1216,11 +1221,36 @@ export default function LeadsPage() {
                       toast("Call logged", "success");
                     }}
                   />
+                  {/* Slice 119: filter input -- only renders when the
+                      operator has 5+ transcripts (otherwise scanning
+                      visually is faster than typing). Plain substring
+                      match against the transcript body. */}
+                  {(selected.callTranscripts?.length ?? 0) >= 5 && (
+                    <input
+                      type="text"
+                      value={transcriptFilter}
+                      onChange={(e) => setTranscriptFilter(e.target.value)}
+                      placeholder={`Filter ${selected.callTranscripts?.length} transcripts…`}
+                      className="mb-2 h-7 w-full rounded-md border border-bg-border bg-bg-app px-2 text-[11px] placeholder:text-ink-tertiary focus:border-accent-blue focus:outline-none"
+                    />
+                  )}
                   <div className="space-y-2">
-                    {(selected.callTranscripts ?? [])
-                      .slice()
-                      .sort((a, b) => +new Date(b.at) - +new Date(a.at))
-                      .map((c) => {
+                    {(() => {
+                      const all = (selected.callTranscripts ?? [])
+                        .slice()
+                        .sort((a, b) => +new Date(b.at) - +new Date(a.at));
+                      const q = transcriptFilter.trim().toLowerCase();
+                      const filtered = q
+                        ? all.filter((c) => c.text.toLowerCase().includes(q))
+                        : all;
+                      if (q && filtered.length === 0) {
+                        return (
+                          <div className="rounded-md border border-dashed border-bg-border px-2 py-3 text-center text-[11px] text-ink-tertiary">
+                            No transcripts match &ldquo;{transcriptFilter}&rdquo;
+                          </div>
+                        );
+                      }
+                      return filtered.map((c) => {
                         // Slice 99: slice 93 manual entries get a
                         // synthetic callSid prefixed "manual_". Render
                         // them with a different border + "manual" pill
@@ -1319,7 +1349,8 @@ export default function LeadsPage() {
                           <div className="mt-1.5 whitespace-pre-wrap text-ink-primary">{c.text}</div>
                         </div>
                         );
-                      })}
+                      });
+                    })()}
                   </div>
                 </div>
               )}
