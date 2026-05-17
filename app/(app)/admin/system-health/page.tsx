@@ -127,6 +127,10 @@ export default function SystemHealthPage() {
   const [cronStatus, setCronStatus] = useState<CronStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Slice 123: filter mode for the per-check list. "all" is the
+  // default; "issues" hides green checks so the operator can focus
+  // on what needs fixing during a setup pass.
+  const [checkFilter, setCheckFilter] = useState<"all" | "issues">("all");
   const [testEmailTo, setTestEmailTo] = useState("");
   const [testSmsTo, setTestSmsTo] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
@@ -395,12 +399,64 @@ export default function SystemHealthPage() {
           </div>
 
           {/* Per-check rows */}
+          {/* Slice 123: filter toggle. During a setup pass the
+              operator wants to focus on the broken ones; "issues"
+              hides green checks. Default "all" still renders every
+              row so a healthy install isn't visually empty. */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[11px] text-ink-tertiary">
+              {(() => {
+                const rows = Object.values(data.checks);
+                const issues = rows.filter((c) => !c.ok).length;
+                return issues === 0
+                  ? `All ${rows.length} checks passing`
+                  : `${issues} of ${rows.length} checks have issues`;
+              })()}
+            </div>
+            <div className="flex rounded-md border border-bg-border bg-bg-app text-[10px]">
+              <button
+                type="button"
+                onClick={() => setCheckFilter("all")}
+                className={`px-2 py-1 ${
+                  checkFilter === "all"
+                    ? "bg-brand-500/20 font-semibold text-brand-200"
+                    : "text-ink-tertiary"
+                }`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setCheckFilter("issues")}
+                className={`px-2 py-1 ${
+                  checkFilter === "issues"
+                    ? "bg-accent-amber/20 font-semibold text-accent-amber"
+                    : "text-ink-tertiary"
+                }`}
+                title="Hide checks that are passing"
+              >
+                Issues only
+              </button>
+            </div>
+          </div>
           <div className="space-y-3">
-            {(Object.keys(data.checks) as (keyof HealthResponse["checks"])[]).map((k) => {
-              const c = data.checks[k];
-              const meta = ROW_META[k];
-              return <CheckRow key={k} label={meta.label} Icon={meta.Icon} check={c} />;
-            })}
+            {(() => {
+              const keys = (Object.keys(data.checks) as (keyof HealthResponse["checks"])[]).filter(
+                (k) => (checkFilter === "all" ? true : !data.checks[k].ok),
+              );
+              if (keys.length === 0) {
+                return (
+                  <div className="rounded-md border border-dashed border-accent-green/30 bg-accent-green/5 px-3 py-4 text-center text-[11px] text-accent-green">
+                    No issues to show. Everything green!
+                  </div>
+                );
+              }
+              return keys.map((k) => {
+                const c = data.checks[k];
+                const meta = ROW_META[k];
+                return <CheckRow key={k} label={meta.label} Icon={meta.Icon} check={c} />;
+              });
+            })()}
           </div>
 
           {/* Test-send actions — verify transport actually works before any
