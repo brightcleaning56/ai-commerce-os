@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Anchor,
   CheckCircle2,
+  Clipboard,
   Factory,
   Plane,
   Search,
@@ -64,6 +65,19 @@ function SupplierDetail({
           <div className="text-xs text-ink-tertiary">
             {s.type} · {s.city}, {s.country}
           </div>
+          {/* Slice 133: copy supplier ID -- mirror of slices
+              112/117/128/130/131 clipboard pattern. */}
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.writeText(s.id).catch(() => {});
+            }}
+            className="mt-1 inline-flex items-center gap-1 rounded bg-bg-hover px-1.5 py-0.5 font-mono text-[10px] text-ink-tertiary transition hover:bg-bg-app hover:text-brand-300"
+            title={`Copy ${s.id}`}
+          >
+            {s.id}
+            <Clipboard className="h-2.5 w-2.5" />
+          </button>
           <div className="mt-2 flex items-center gap-2">
             <span className="flex items-center gap-1 text-xs">
               <Star className="h-3 w-3 fill-accent-amber text-accent-amber" />
