@@ -4,6 +4,7 @@ import {
   CircleDot,
   Clock,
   Download,
+  Loader2,
   PhoneCall,
   PhoneIncoming,
   PhoneOff,
@@ -415,6 +416,16 @@ export default function CallsPage() {
           <Download className="h-4 w-4" /> Export CSV
         </button>
       </div>
+
+      {/* Slice 89: Quick Dial bar. The Call Log without a "make a call"
+          button is confusing -- operators land here expecting to dial.
+          The path:
+            - twilioReady? -> placeOutboundCall (browser dialer), call
+              gets recorded into this very log automatically.
+            - else -> tel: handoff to system dialer (works on mobile;
+              Phone Link or similar on Windows).
+          Hidden when the operator lacks voice:write capability. */}
+      {canCall && <QuickDialBar />}
 
       {/* Roll-up tiles */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -900,5 +911,114 @@ function TranscriptSearch() {
         )}
       </div>
     </details>
+  );
+}
+
+// ─── QuickDialBar (slice 89) ─────────────────────────────────────────
+//
+// Tiny inline dialer at the top of /calls. Two paths:
+//   - twilioReady: placeOutboundCall via the browser device. The call
+//     gets recorded into this very log automatically via the existing
+//     VoiceContext + slice 52 recording pipeline.
+//   - else: tel: handoff to the system dialer. Mobile gets a real
+//     phone call; Windows gets Phone Link (good enough -- the operator
+//     can also paste into a separate phone client).
+//
+// Strips non-digits before E.164-prefixing so "(469) 267-8472" works
+// the same as "+14692678472". Defaults to + on bare 10-digit US
+// numbers; passes through anything already starting with +.
+function QuickDialBar() {
+  const { toast } = useToast();
+  const { placeOutboundCall, twilioReady } = useVoice();
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  function normalize(input: string): string | null {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith("+")) {
+      const digits = trimmed.slice(1).replace(/\D/g, "");
+      return digits.length >= 7 ? `+${digits}` : null;
+    }
+    const digits = trimmed.replace(/\D/g, "");
+    if (digits.length === 10) return `+1${digits}`; // bare US 10-digit
+    if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+    return null;
+  }
+
+  async function dial() {
+    const num = normalize(phone);
+    if (!num) {
+      toast("Enter a 10-digit US number or +E.164", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      if (twilioReady) {
+        await placeOutboundCall(num);
+        toast(`Calling ${num}…`, "success");
+      } else {
+        // Fallback -- system dialer / Phone Link on Windows
+        window.location.href = `tel:${num}`;
+        toast(`Opening system dialer for ${num}`, "success");
+      }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Dial failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-bg-border bg-bg-card p-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <PhoneCall className="h-4 w-4 text-brand-300" /> Quick dial
+        </div>
+        <span
+          className={`rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
+            twilioReady
+              ? "bg-accent-green/15 text-accent-green"
+              : "bg-bg-hover text-ink-tertiary"
+          }`}
+          title={
+            twilioReady
+              ? "Browser dialer ready -- call uses Twilio Voice JS SDK"
+              : "Browser dialer not configured -- will hand off to the system dialer (tel:)"
+          }
+        >
+          {twilioReady ? "browser" : "tel: fallback"}
+        </span>
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void dial();
+        }}
+        className="flex flex-wrap items-center gap-2"
+      >
+        <input
+          type="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="(469) 267-8472 or +14692678472"
+          className="h-9 flex-1 min-w-[200px] rounded-md border border-bg-border bg-bg-app px-3 text-sm placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
+        />
+        <button
+          type="submit"
+          disabled={busy || !phone.trim()}
+          className="inline-flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 py-2 text-sm font-semibold shadow-glow disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />}
+          Call
+        </button>
+      </form>
+      {!twilioReady && (
+        <p className="mt-2 text-[10px] text-ink-tertiary">
+          Browser dialer needs TWILIO_API_KEY + TWILIO_API_SECRET + TWILIO_TWIML_APP_SID in env. Until
+          then, tap above and your device&apos;s default phone app opens with the number pre-filled.
+        </p>
+      )}
+    </div>
   );
 }
