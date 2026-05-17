@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Smartphone,
   Stethoscope,
+  Truck,
   Webhook,
   XCircle,
 } from "lucide-react";
@@ -97,6 +98,7 @@ type HealthResponse = {
     killSwitch: CheckResult;
     auth: CheckResult;
     booking: CheckResult;
+    freight: CheckResult;
   };
 };
 
@@ -114,6 +116,7 @@ const ROW_META: Record<
   killSwitch: { label: "Global agent kill-switch", Icon: Power },
   auth: { label: "Admin auth", Icon: ShieldCheck },
   booking: { label: "Booking link (BOOKING_URL)", Icon: Activity },
+  freight: { label: "Freight estimates (Shippo / rate-card)", Icon: Truck },
 };
 
 export default function SystemHealthPage() {

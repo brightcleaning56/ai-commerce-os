@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth";
 import { describeSchedule, PIPELINE_CRON_SCHEDULE, nextCronFire } from "@/lib/cron";
+import { getFreightProvider } from "@/lib/freight";
 import { getKillSwitch } from "@/lib/killSwitch";
 import { getVoiceProvider } from "@/lib/voice";
 
@@ -273,6 +274,40 @@ export async function GET(req: NextRequest) {
       : { fixHint: "Optional. Set BOOKING_URL to your Calendly / Cal.com / SavvyCal link. Lead-followup agent will weave it into the body." },
   };
 
+  // ── Freight provider (slice 62) ────────────────────────────────────
+  // Surface whether buyer-facing freight estimates use live Shippo
+  // quotes or the deterministic rate-card fallback. Info-level: the
+  // rate card always works, but Shippo is the supplier-of-truth for
+  // real bookings. The /quote/[id] preview + /cadences merge tags
+  // both read through estimateLane() which honors this provider.
+  const freightProvider = getFreightProvider();
+  const freightShippoConfigured = freightProvider === "shippo";
+  const freightShippoKeyPrefix = process.env.SHIPPO_API_KEY?.slice(0, 8);
+  const freight = {
+    ok: freightShippoConfigured,
+    severity: "info" as const,
+    affects: [
+      "Buyer-facing freight preview on /quote/[id] (pre-accept)",
+      "Cadence composer freight_* merge tags ({{freight_cheapest}}, {{freight_mode}}, {{freight_transit}})",
+      "Quote freight auto-attach on destination capture (slice 56-ish)",
+      "/admin/lanes economic-viability table",
+    ],
+    detail: freightShippoConfigured
+      ? {
+          provider: "shippo",
+          mode: "live",
+          shippoKeyPrefix: freightShippoKeyPrefix ? `${freightShippoKeyPrefix}…` : "(set)",
+          note: "Estimates hit Shippo /v2/freight/rates. Any error falls back to the rate card so buyers always get a number.",
+        }
+      : {
+          provider: "fallback",
+          mode: "rate-card",
+          note: "Using the deterministic rate card (industry-standard order-of-magnitude USD/kg). Good enough for plausibility checks; not real carrier quotes.",
+          fixHint:
+            "Optional. Set SHIPPO_API_KEY to swap in live carrier rates. Sign up at goshippo.com — they offer a free tier for testing.",
+        },
+  };
+
   // â”€â”€ Kill switch â€” surfaces the global pause so the operator sees it
   // at the top of every health snapshot, not buried in /admin.
   const killSwitchState = await getKillSwitch();
@@ -307,6 +342,7 @@ export async function GET(req: NextRequest) {
     killSwitch,
     auth: authConfig,
     booking,
+    freight,
   };
 
   const blockingFailures = Object.entries(checks).filter(
