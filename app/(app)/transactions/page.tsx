@@ -107,6 +107,20 @@ type Transaction = {
     }>;
     computedAt: string;
   };
+  // Slice 66+67: snapshot of what the buyer previewed via
+  // /api/quotes/[id]/freight-preview before accepting. Tells the
+  // operator which destinations buyer was considering.
+  freightPreview?: {
+    previewedAt: string;
+    destCountry: string;
+    destState?: string;
+    provider: "shippo" | "fallback";
+    cheapestMode: string;
+    cheapestUsd: number;
+    transitDaysMin: number;
+    transitDaysMax: number;
+    rateCount: number;
+  };
 };
 
 type RevenueStats = {
@@ -572,6 +586,35 @@ function TxnRow({
               cheapest mode + cost + transit days + provider source. */}
           {txn.freightEstimate && txn.freightEstimate.rates.length > 0 && (
             <FreightPanel estimate={txn.freightEstimate} />
+          )}
+
+          {/* Slice 66+67: buyer-side preview snapshot. Distinct from
+              the panel above (operator-side estimate at acceptance) --
+              this shows what the BUYER saw on /quote/[id] while still
+              evaluating. Compact one-line row, intentionally low-key. */}
+          {txn.freightPreview && (
+            <div className="rounded-lg border border-bg-border bg-bg-hover/30 px-3 py-2 text-[11px] text-ink-secondary">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                Buyer preview
+              </span>
+              <span className="ml-2">
+                {txn.freightPreview.destCountry}
+                {txn.freightPreview.destState ? `-${txn.freightPreview.destState}` : ""}
+                {" · cheapest "}
+                <span className="font-mono">{txn.freightPreview.cheapestMode}</span>
+                {" · "}
+                <span className="font-semibold text-ink-primary">
+                  ${txn.freightPreview.cheapestUsd.toLocaleString()}
+                </span>
+                {" · "}
+                {txn.freightPreview.transitDaysMin}-{txn.freightPreview.transitDaysMax}d transit
+                {" · "}
+                <span className="text-ink-tertiary">
+                  {txn.freightPreview.rateCount} mode{txn.freightPreview.rateCount === 1 ? "" : "s"} ·{" "}
+                  {txn.freightPreview.provider}
+                </span>
+              </span>
+            </div>
           )}
 
           {/* Stripe Connect supplier onboarding */}

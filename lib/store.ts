@@ -201,6 +201,26 @@ export type Quote = {
     }>;
     computedAt: string;
   };
+  // ── Freight preview snapshot (slice 66) ───────────────────────────
+  // Captures the most-recent rate the BUYER was shown via the
+  // /api/quotes/[id]/freight-preview endpoint (slice 58). Distinct
+  // from freightEstimate above, which is the canonical estimate
+  // stamped at acceptance. This is "what did the buyer see while
+  // browsing options" — operator uses it to understand which
+  // destinations buyer was evaluating and whether the cheapest
+  // mode they saw still holds. Overwritten on every successful
+  // preview call (we only care about the latest).
+  freightPreview?: {
+    previewedAt: string;
+    destCountry: string;
+    destState?: string;
+    provider: "shippo" | "fallback";
+    cheapestMode: string;
+    cheapestUsd: number;
+    transitDaysMin: number;
+    transitDaysMax: number;
+    rateCount: number; // how many modes were quoted
+  };
 };
 
 // ─── Transactions: full deal-to-cash orchestration (slice 39) ───────────────
@@ -365,6 +385,21 @@ export type Transaction = {
       notes?: string;
     }>;
     computedAt: string;
+  };
+  // Slice 67: buyer-preview snapshot propagated from Quote at
+  // transaction creation. Operator sees "buyer last previewed CN -> US-CA
+  // cheapest ocean-fcl $4,200" on the /transactions detail panel without
+  // re-querying the Quote. Same shape as Quote.freightPreview.
+  freightPreview?: {
+    previewedAt: string;
+    destCountry: string;
+    destState?: string;
+    provider: "shippo" | "fallback";
+    cheapestMode: string;
+    cheapestUsd: number;
+    transitDaysMin: number;
+    transitDaysMax: number;
+    rateCount: number;
   };
 
   // Dispute / refund

@@ -147,6 +147,9 @@ export async function createTransactionFromQuote(quote: Quote, options: {
     // Slice 47: propagate freight estimate from Quote -> Transaction
     // so /transactions panels can show cost without re-fetching.
     freightEstimate: quote.freightEstimate,
+    // Slice 67: propagate the buyer-preview snapshot too. Shows the
+    // operator what the buyer was evaluating before they accepted.
+    freightPreview: quote.freightPreview,
 
     unitPriceCents: Math.round(quote.unitPrice * 100),
     quantity: quote.quantity,

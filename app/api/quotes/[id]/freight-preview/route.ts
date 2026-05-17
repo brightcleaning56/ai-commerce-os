@@ -96,6 +96,36 @@ export async function POST(
       weightKg,
       mode,
     });
+
+    // Slice 66: stamp the snapshot onto the quote so the operator-side
+    // /quotes detail surfaces "buyer last previewed CN -> US-CA, cheapest
+    // ocean-fcl $4,200". Overwrites any prior preview -- we only care
+    // about the most recent. Best-effort: a write failure must NOT block
+    // the buyer from seeing their estimate, so wrap in try/catch.
+    if (quoteResult.rates.length > 0) {
+      const cheapest = quoteResult.rates[0]; // estimateLane sorts ascending
+      try {
+        await store.patchQuote(id, {
+          freightPreview: {
+            previewedAt: quoteResult.computedAt,
+            destCountry,
+            destState,
+            provider: quoteResult.provider,
+            cheapestMode: cheapest.mode,
+            cheapestUsd: cheapest.estimateUsd,
+            transitDaysMin: cheapest.transitDaysMin,
+            transitDaysMax: cheapest.transitDaysMax,
+            rateCount: quoteResult.rates.length,
+          },
+        });
+      } catch (e) {
+        console.warn(
+          `[quotes/freight-preview] snapshot persist failed for ${id}:`,
+          e instanceof Error ? e.message : e,
+        );
+      }
+    }
+
     return NextResponse.json(quoteResult);
   } catch (e) {
     return NextResponse.json(
