@@ -378,7 +378,22 @@ export default function QuotePublicPage() {
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Tile label="Payment terms" v={quote.paymentTerms} />
-          <Tile label="Lead time" v={`${quote.leadTimeDays} days`} />
+          {/* Slice 109: lead time tile now also computes an estimated
+              delivery date so the buyer doesn't have to do calendar
+              math from "21 days." Format is "21 days" + "by Jun 14"
+              underneath, where the date is now + leadTimeDays. The
+              estimate is intentionally vague (no day-of-week, no
+              exact promise) since lead time is upper bound, not
+              guaranteed. */}
+          <Tile
+            label="Lead time"
+            v={`${quote.leadTimeDays} days`}
+            sub={
+              quote.leadTimeDays > 0
+                ? `by ${new Date(Date.now() + quote.leadTimeDays * 86_400_000).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+                : undefined
+            }
+          />
           <Tile label="Shipping" v={quote.shippingTerms} />
         </div>
 
@@ -653,11 +668,23 @@ export default function QuotePublicPage() {
   );
 }
 
-function Tile({ label, v, highlight }: { label: string; v: string; highlight?: boolean }) {
+function Tile({
+  label,
+  v,
+  highlight,
+  sub,
+}: {
+  label: string;
+  v: string;
+  highlight?: boolean;
+  sub?: string;
+}) {
   return (
     <div className="rounded-xl border border-bg-border bg-bg-card p-3">
       <div className="text-[10px] uppercase tracking-wider text-ink-tertiary">{label}</div>
       <div className={`mt-1 text-lg font-semibold ${highlight ? "text-brand-200" : ""}`}>{v}</div>
+      {/* Slice 109: optional sub-line (e.g. "by Jun 14" under lead time) */}
+      {sub && <div className="mt-0.5 text-[10px] text-ink-tertiary">{sub}</div>}
     </div>
   );
 }
