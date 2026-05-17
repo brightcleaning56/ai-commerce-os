@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
+import { useVoice } from "@/components/voice/VoiceContext";
 import { scoreLead, type LeadTier } from "@/lib/leadScore";
 
 type LeadStatus = "new" | "contacted" | "qualified" | "won" | "lost";
@@ -124,6 +125,10 @@ export default function LeadsPage() {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Lead | null>(null);
   const { toast } = useToast();
+  // Slice 69: call-back action on the transcripts panel. Prefer the
+  // in-browser dialer when Twilio Device is ready; fall back to tel:
+  // (system dialer) so this still works on a stale or offline browser.
+  const voice = useVoice();
 
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -984,6 +989,30 @@ export default function LeadsPage() {
                     <span className="rounded-md bg-accent-blue/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-blue">
                       {selected.callTranscripts.length}
                     </span>
+                    {selected.phone && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const phone = selected.phone?.trim();
+                          if (!phone) return;
+                          if (voice.twilioReady) {
+                            const r = await voice.placeOutboundCall(phone);
+                            if (r) toast(`Calling ${phone}…`, "success");
+                          } else {
+                            // No browser dialer -- hand off to the system.
+                            window.location.href = `tel:${phone}`;
+                          }
+                        }}
+                        className="ml-auto inline-flex items-center gap-1 rounded-md border border-accent-blue/40 bg-accent-blue/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-accent-blue hover:bg-accent-blue/20"
+                        title={
+                          voice.twilioReady
+                            ? `Call ${selected.phone} from the browser`
+                            : `Open device dialer for ${selected.phone}`
+                        }
+                      >
+                        <PhoneCall className="h-3 w-3" /> Call back
+                      </button>
+                    )}
                   </div>
                   <div className="space-y-2">
                     {selected.callTranscripts
