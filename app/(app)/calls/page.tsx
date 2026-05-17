@@ -927,6 +927,19 @@ function TranscriptSearch() {
 // Strips non-digits before E.164-prefixing so "(469) 267-8472" works
 // the same as "+14692678472". Defaults to + on bare 10-digit US
 // numbers; passes through anything already starting with +.
+/**
+ * Slice 96: humanize an E.164 number for display. Operators read
+ * "(469) 267-8472" faster than "+14692678472" -- especially in a
+ * dropdown of 8 numbers where the visual rhythm matters. Only
+ * formats US numbers (+1 followed by 10 digits); other countries
+ * fall through to the raw E.164 since their grouping rules vary.
+ */
+function humanPhone(e164: string): string {
+  const m = e164.match(/^\+1(\d{3})(\d{3})(\d{4})$/);
+  if (m) return `(${m[1]}) ${m[2]}-${m[3]}`;
+  return e164;
+}
+
 /** Slice 90: short "5m ago" style for the recent-dial dropdown. */
 function relativeAge(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -1117,8 +1130,12 @@ function QuickDialBar() {
                       void dial(e.num);
                     }}
                     className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-bg-hover"
+                    title={e.num}
                   >
-                    <span className="font-mono">{e.num}</span>
+                    {/* Slice 96: human-readable for US, mono for E.164
+                        fallback so non-US digits stay aligned. The
+                        raw E.164 stays in the title for copy-paste. */}
+                    <span className="font-mono">{humanPhone(e.num)}</span>
                     <span className="text-[10px] text-ink-tertiary">{relativeAge(e.at)}</span>
                   </button>
                 </li>
