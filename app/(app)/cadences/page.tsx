@@ -1308,6 +1308,25 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                   <span className="rounded bg-bg-hover px-1 py-0.5 font-semibold tabular-nums">
                     {t.steps.length}-step
                   </span>
+                  {/* Slice 114: total span -- sum of every step's
+                      delayHours (the "wait" between steps), rendered
+                      as days for any span >= 48h, otherwise hours.
+                      Lets the operator see "3-step over 5 days" at a
+                      glance, complementing the channel mix. Hidden
+                      when the span is zero (single-step or all
+                      delay=0 templates). */}
+                  {(() => {
+                    const totalHours = t.steps.reduce(
+                      (a, s) => a + (Number.parseFloat(s.delayHours || "0") || 0),
+                      0,
+                    );
+                    if (totalHours <= 0) return null;
+                    const span =
+                      totalHours >= 48
+                        ? `${Math.round(totalHours / 24)}d`
+                        : `${Math.round(totalHours)}h`;
+                    return <span className="text-ink-tertiary">· {span}</span>;
+                  })()}
                   <span className="font-mono uppercase tracking-wider">
                     {t.steps
                       .map((s) =>
