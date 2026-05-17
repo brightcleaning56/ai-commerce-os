@@ -349,6 +349,14 @@ export default function SystemHealthPage() {
         </div>
       )}
 
+      {/* Slice 121: at-a-glance provider chip row -- which third-
+          party services are actually wired right now. Shows below
+          the explainer banner so the operator gets the headline
+          ("email: postmark, sms: missing, voice: tel:") before
+          drilling into the per-check rows. Only renders when data
+          has loaded so the layout doesn't shift. */}
+      {data && <ProviderChips data={data} />}
+
       {/* Slice 26: onboarding metrics card -- self-fetches, hides
           quietly on a fresh workspace with zero sessions. */}
       <OnboardingMetricsCard />
@@ -625,6 +633,77 @@ export default function SystemHealthPage() {
 // of sitting on the page, the label still said "just now" until the
 // operator clicked Re-check. This ticks every 10s so the displayed
 // age stays honest without spamming the API.
+
+// ─── ProviderChips (slice 121) ───────────────────────────────────────
+//
+// Compact chip row showing each major third-party at a glance:
+// email provider, SMS, voice, freight. Each chip is colored by the
+// underlying check's ok status. Click navigates to the per-row
+// detail below via fragment.
+//
+// Extracts a one-word "what" from each check's detail so the chip
+// reads like "Email · postmark" rather than "Email · ok".
+
+function ProviderChips({ data }: { data: HealthResponse }) {
+  type Chip = {
+    key: keyof HealthResponse["checks"];
+    label: string;
+    value: string;
+    tone: "green" | "amber" | "red" | "neutral";
+  };
+
+  function chipFor(
+    key: keyof HealthResponse["checks"],
+    label: string,
+  ): Chip {
+    const c = data.checks[key];
+    const d = c.detail as Record<string, unknown>;
+    let value = "—";
+    if (key === "email") value = (d.provider as string) || (c.ok ? "ok" : "missing");
+    else if (key === "sms") value = c.ok ? "twilio" : "missing";
+    else if (key === "voice") value = (d.provider as string) || (d.currentMode as string) || (c.ok ? "ok" : "tel:");
+    else if (key === "freight") value = (d.provider as string) || (d.mode as string) || (c.ok ? "ok" : "fallback");
+    const tone = c.ok
+      ? "green"
+      : c.severity === "blocking"
+        ? "red"
+        : c.severity === "warning"
+          ? "amber"
+          : "neutral";
+    return { key, label, value, tone };
+  }
+
+  const chips: Chip[] = [
+    chipFor("email", "Email"),
+    chipFor("sms", "SMS"),
+    chipFor("voice", "Voice"),
+    chipFor("freight", "Freight"),
+  ];
+
+  const toneCls: Record<Chip["tone"], string> = {
+    green: "border-accent-green/40 bg-accent-green/10 text-accent-green",
+    amber: "border-accent-amber/40 bg-accent-amber/10 text-accent-amber",
+    red: "border-accent-red/40 bg-accent-red/10 text-accent-red",
+    neutral: "border-bg-border bg-bg-card text-ink-tertiary",
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {chips.map((c) => (
+        <span
+          key={c.key}
+          className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] ${toneCls[c.tone]}`}
+          title={`${c.label} provider: ${c.value}`}
+        >
+          <span className="text-[9px] font-semibold uppercase tracking-wider opacity-70">
+            {c.label}
+          </span>
+          <span className="font-mono">{c.value}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function LastCheckedAge({ iso }: { iso: string }) {
   const [, setTick] = useState(0);
