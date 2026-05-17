@@ -583,9 +583,17 @@ function TxnRow({
 
           {/* Slice 49: freight estimate panel -- shown when slice 47
               auto-attached an estimate at quote-accept time. Renders
-              cheapest mode + cost + transit days + provider source. */}
+              cheapest mode + cost + transit days + provider source.
+              Slice 75: Recompute button -- re-hits estimateLane()
+              against the current supplier+destination so an estimate
+              that's been sitting stale for days can be refreshed. */}
           {txn.freightEstimate && txn.freightEstimate.rates.length > 0 && (
-            <FreightPanel estimate={txn.freightEstimate} />
+            <FreightPanel
+              estimate={txn.freightEstimate}
+              txnId={txn.id}
+              onRecompute={onAction}
+              busyKey={busyKey}
+            />
           )}
 
           {/* Slice 66+67: buyer-side preview snapshot. Distinct from
@@ -1307,21 +1315,68 @@ function OperatorNotes({ txn }: { txn: Transaction }) {
 
 function FreightPanel({
   estimate,
+  txnId,
+  onRecompute,
+  busyKey,
 }: {
   estimate: NonNullable<Transaction["freightEstimate"]>;
+  txnId?: string;
+  // Slice 75: optional -- when present, exposes a Recompute button
+  // that re-runs estimateLane() against current state. Wired via
+  // the parent's action() helper so it gets the same load/toast
+  // behavior as ship/release/etc.
+  onRecompute?: (
+    txnId: string,
+    path: string,
+    body?: unknown,
+    label?: string,
+  ) => Promise<void> | void;
+  busyKey?: string | null;
 }) {
   const cheapest = estimate.rates[0];
   const fmtUsd = (n: number) =>
     `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  const ageMs = Date.now() - new Date(estimate.computedAt).getTime();
+  const isStale = ageMs > 7 * 24 * 60 * 60 * 1000; // >7 days
+  const recomputing =
+    !!txnId && busyKey === `${txnId}-freight-recompute`;
   return (
     <div className="rounded-lg border border-accent-blue/30 bg-accent-blue/5 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-accent-blue">
           Freight estimate · {estimate.laneKey}
         </div>
-        <span className="rounded-md bg-bg-card px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-tertiary">
-          {estimate.provider}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="rounded-md bg-bg-card px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-ink-tertiary">
+            {estimate.provider}
+          </span>
+          {onRecompute && txnId && (
+            <button
+              type="button"
+              onClick={() =>
+                onRecompute(txnId, "freight-recompute", undefined, "Freight recomputed")
+              }
+              disabled={recomputing}
+              className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold transition disabled:opacity-60 ${
+                isStale
+                  ? "border-accent-amber/50 bg-accent-amber/15 text-accent-amber hover:bg-accent-amber/25"
+                  : "border-bg-border bg-bg-card text-ink-secondary hover:bg-bg-hover"
+              }`}
+              title={
+                isStale
+                  ? "Estimate is over 7 days old -- recompute against current rates"
+                  : "Recompute against current supplier + destination"
+              }
+            >
+              {recomputing ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-2.5 w-2.5" />
+              )}
+              Recompute
+            </button>
+          )}
+        </div>
       </div>
       {cheapest && (
         <div className="mb-2 flex flex-wrap items-baseline gap-2 text-[12px]">
