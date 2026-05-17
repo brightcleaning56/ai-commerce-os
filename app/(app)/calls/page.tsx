@@ -18,7 +18,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/Toast";
 import { downloadCSV } from "@/lib/csv";
-import OutboundCallModal from "@/components/OutboundCallModal";
 import { useVoice } from "@/components/voice/VoiceContext";
 import { useCapability } from "@/components/CapabilityContext";
 
@@ -188,10 +187,6 @@ export default function CallsPage() {
   // etc) -- never falls back to tel: because Windows users get
   // Phone Link instead of a real dial.
   const canCall = useCapability("voice:write");
-  // Slice 111: rich Outbound Call modal (AI agent + campaign + script).
-  // Distinct from slice 89's inline Quick Dial bar -- this is the
-  // scripted-bot path, not the operator-on-the-line path.
-  const [outboundOpen, setOutboundOpen] = useState(false);
   const { placeOutboundCall, twilioReady, twilioInFlight } = useVoice();
   const dialing = twilioInFlight !== "idle";
   async function dial(phone: string | undefined, label: string) {
@@ -415,33 +410,14 @@ export default function CallsPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {/* Slice 111: launch the rich Outbound Call modal (campaign,
-              script, caller ID, AI agent). Slice 89's Quick Dial bar
-              stays for ad-hoc tel: dials -- this is the AI-driven
-              outbound path. */}
-          {canCall && (
-            <button
-              onClick={() => setOutboundOpen(true)}
-              className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow"
-              title="Start a scripted AI-driven outbound call"
-            >
-              <PhoneCall className="h-4 w-4" /> Outbound Call
-            </button>
-          )}
-          <button
-            onClick={handleExport}
-            disabled={rows.length === 0}
-            className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm font-medium hover:bg-bg-hover disabled:opacity-60"
-          >
-            <Download className="h-4 w-4" /> Export CSV
-          </button>
-        </div>
+        <button
+          onClick={handleExport}
+          disabled={rows.length === 0}
+          className="flex items-center gap-2 rounded-lg bg-gradient-brand px-3 py-2 text-sm font-medium shadow-glow disabled:opacity-60"
+        >
+          <Download className="h-4 w-4" /> Export CSV
+        </button>
       </div>
-      <OutboundCallModal
-        open={outboundOpen}
-        onClose={() => setOutboundOpen(false)}
-      />
 
       {/* Slice 89: Quick Dial bar. The Call Log without a "make a call"
           button is confusing -- operators land here expecting to dial.
