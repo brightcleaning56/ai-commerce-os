@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkRateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { fireFirstViewWebhook } from "@/lib/webhooks";
 import {
   store,
@@ -48,6 +49,19 @@ function publicShape(
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const id = params.id;
   const token = req.nextUrl.searchParams.get("t") || "";
+
+  // Slice 79: rate limit BEFORE store read so a 429 doesn't burn a
+  // pipeline-run fetch. 60/min per run -- matches the slice 76 quote
+  // GET limit. Legit recipient refreshes a few times; a scraper
+  // hammering for valid share tokens gets capped fast. Per-run key
+  // means one share's traffic can't starve another.
+  const rl = checkRateLimit(`share-get:${id}`, { limit: 60, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: `Too many requests for this share. Try again in ${rl.retryAfterSec}s.` },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
+  }
 
   const run = await store.getPipelineRun(id);
   if (!run) {
