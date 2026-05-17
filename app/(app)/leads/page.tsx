@@ -1020,6 +1020,33 @@ export default function LeadsPage() {
                     <span className="rounded-md bg-accent-blue/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-blue">
                       {selected.callTranscripts?.length ?? 0}
                     </span>
+                    {/* Slice 103: total talk time roll-up. Only renders
+                        when at least one transcript has a non-zero
+                        duration (manual entries default to 0 unless the
+                        operator filled in the minutes field). */}
+                    {(() => {
+                      const total = (selected.callTranscripts ?? []).reduce(
+                        (a, c) => a + (c.durationSec ?? 0),
+                        0,
+                      );
+                      if (total === 0) return null;
+                      const m = Math.floor(total / 60);
+                      const s = total % 60;
+                      const human =
+                        m >= 60
+                          ? `${Math.floor(m / 60)}h ${m % 60}m`
+                          : m > 0
+                            ? `${m}m ${s}s`
+                            : `${s}s`;
+                      return (
+                        <span
+                          className="rounded-md bg-bg-hover px-1.5 py-0.5 text-[10px] font-semibold text-ink-secondary"
+                          title={`${total} total seconds across ${selected.callTranscripts?.length ?? 0} call${(selected.callTranscripts?.length ?? 0) === 1 ? "" : "s"}`}
+                        >
+                          {human} total
+                        </span>
+                      );
+                    })()}
                     {selected.phone && (
                       <button
                         type="button"
