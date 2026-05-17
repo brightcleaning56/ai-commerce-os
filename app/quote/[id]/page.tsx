@@ -186,6 +186,16 @@ export default function QuotePublicPage() {
   const expired = Date.now() > new Date(quote.shareExpiresAt).getTime();
   const finalState =
     quote.status === "accepted" || quote.status === "rejected" || quote.status === "expired";
+  // Slice 68: surface expiry urgency to the buyer. The link is
+  // already server-side-enforced (the route returns 410 once
+  // shareExpiresAt passes), but a buyer mid-decision shouldn't have
+  // to compute "how many hours do I have left?" from a timestamp.
+  // Three thresholds: <24h = red urgent, <72h = amber heads-up, >=72h
+  // = quiet (already shown in the footer). Only renders while
+  // actionable: hidden once accepted/rejected/expired.
+  const msToExpiry = new Date(quote.shareExpiresAt).getTime() - Date.now();
+  const hoursToExpiry = Math.floor(msToExpiry / 3_600_000);
+  const showExpiryBanner = !finalState && !expired && hoursToExpiry < 72;
 
   return (
     <div className="dark min-h-screen bg-bg-base text-ink-primary">
@@ -214,6 +224,30 @@ export default function QuotePublicPage() {
       </header>
 
       <main className="mx-auto max-w-3xl space-y-5 px-6 py-10">
+        {showExpiryBanner && (
+          <div
+            className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
+              hoursToExpiry < 24
+                ? "border-accent-red/40 bg-accent-red/10 text-accent-red"
+                : "border-accent-amber/40 bg-accent-amber/10 text-accent-amber"
+            }`}
+          >
+            <Clock className="h-4 w-4 shrink-0" />
+            <div className="flex-1">
+              <div className="font-semibold">
+                {hoursToExpiry < 1
+                  ? "This quote expires in under an hour"
+                  : hoursToExpiry < 24
+                    ? `This quote expires in ${hoursToExpiry} hour${hoursToExpiry === 1 ? "" : "s"}`
+                    : `This quote expires in ${Math.ceil(hoursToExpiry / 24)} day${Math.ceil(hoursToExpiry / 24) === 1 ? "" : "s"}`}
+              </div>
+              <div className="text-[11px] opacity-80">
+                Accept or reject below before {new Date(quote.shareExpiresAt).toLocaleString()} — after that the link stops working and you&apos;ll need a fresh one from the team.
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-2xl border border-brand-500/30 bg-gradient-to-br from-brand-500/10 to-transparent p-8 shadow-glow">
           <div className="text-xs font-semibold uppercase tracking-wider text-brand-300">
             Quote · {quote.id}
