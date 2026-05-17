@@ -21,6 +21,7 @@ import {
   Truck,
   Webhook,
   XCircle,
+  Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/Toast";
@@ -439,6 +440,14 @@ export default function SystemHealthPage() {
               transport-test card since it serves the same purpose:
               prove things work without waiting for a real event. */}
           <VoiceDiagnosticsCard />
+
+          {/* Freight live probe (slice 72) — hits estimateLane() with
+              a CN->US-CA / 100kg payload so the operator can verify
+              Shippo actually responds before any /quote/[id] freight
+              preview fails on them. Reports configured vs effective
+              provider so a Shippo error that fell back to the rate
+              card is obvious. */}
+          <FreightProbeCard />
 
           {/* Recent cron activity — shows what actually fired vs the
               schedule. All 6 crons now record CronRun objects, so each
@@ -1264,6 +1273,181 @@ function VoiceDiagnosticsCard() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Freight live-probe card (slice 72) ──────────────────────────────
+//
+// Runs estimateLane() against a deterministic tiny payload so the
+// operator can see "is freight ACTUALLY going to quote when a buyer
+// previews?" without waiting for a real /quote/[id] preview to fail.
+// Particularly useful when Shippo is configured -- a key with no
+// freight-rates entitlement falls back to the rate card silently,
+// which the env-var-only health check can't detect.
+
+type FreightProbeResult = {
+  ok: boolean;
+  configuredProvider?: "shippo" | "fallback";
+  effectiveProvider?: "shippo" | "fallback";
+  liveProbe?: boolean;
+  degraded?: boolean;
+  latencyMs?: number;
+  laneKey?: string;
+  rateCount?: number;
+  cheapest?: {
+    mode: string;
+    estimateUsd: number;
+    transitDaysMin: number;
+    transitDaysMax: number;
+    notes?: string;
+  } | null;
+  error?: string;
+  fixHint?: string;
+  checkedAt?: string;
+};
+
+function FreightProbeCard() {
+  const { toast } = useToast();
+  const [result, setResult] = useState<FreightProbeResult | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function runProbe() {
+    setBusy(true);
+    try {
+      const r = await fetch("/api/admin/freight-probe", {
+        method: "POST",
+        credentials: "include",
+      });
+      const d = (await r.json().catch(() => ({}))) as FreightProbeResult;
+      setResult(d);
+      if (d.ok && !d.degraded) {
+        toast(`Freight probe ok (${d.effectiveProvider}, ${d.latencyMs}ms)`, "success");
+      } else if (d.ok && d.degraded) {
+        toast(`Probe ran but degraded -- Shippo configured, rate-card returned`, "error");
+      } else {
+        toast(`Freight probe failed -- ${d.error ?? "unknown"}`, "error");
+      }
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Network error", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const tone = !result
+    ? "border-bg-border"
+    : !result.ok
+      ? "border-accent-red/40"
+      : result.degraded
+        ? "border-accent-amber/40"
+        : "border-accent-green/40";
+
+  return (
+    <div className={`rounded-xl border bg-bg-card p-5 ${tone}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Truck className="h-4 w-4 text-brand-300" /> Freight live probe
+        </div>
+        <button
+          type="button"
+          onClick={runProbe}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-md bg-gradient-brand px-3 py-1.5 text-[11px] font-semibold shadow-glow disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Zap className="h-3 w-3" />}
+          Run probe
+        </button>
+      </div>
+      <p className="mt-1 text-[11px] text-ink-tertiary">
+        Quotes a CN → US-CA / 100kg shipment via estimateLane(). Verifies the
+        configured provider actually responds. Catches the &ldquo;Shippo key has no
+        freight entitlement so we silently rate-card&rdquo; case the env check can&apos;t see.
+      </p>
+
+      {result && (
+        <div className="mt-3 space-y-2">
+          {result.degraded && (
+            <div className="rounded-md border border-accent-amber/40 bg-accent-amber/10 px-3 py-2 text-[11px] text-accent-amber">
+              <strong className="font-semibold">Degraded:</strong> Shippo configured but the
+              rate-card answered. Either the API key lacks freight entitlement, the request
+              timed out, or Shippo returned no matching rates. Check server logs for the
+              specific error.
+            </div>
+          )}
+          {!result.ok && (
+            <div className="rounded-md border border-accent-red/40 bg-accent-red/10 px-3 py-2 text-[11px] text-accent-red">
+              <strong className="font-semibold">Failed:</strong> {result.error}
+              {result.fixHint && (
+                <div className="mt-1 text-accent-amber">{result.fixHint}</div>
+              )}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-4">
+            <ProbeStat label="Configured" value={result.configuredProvider ?? "—"} />
+            <ProbeStat
+              label="Effective"
+              value={result.effectiveProvider ?? "—"}
+              tone={
+                result.effectiveProvider === "shippo"
+                  ? "green"
+                  : result.configuredProvider === "shippo"
+                    ? "amber"
+                    : "neutral"
+              }
+            />
+            <ProbeStat label="Latency" value={result.latencyMs ? `${result.latencyMs}ms` : "—"} />
+            <ProbeStat label="Rates" value={result.rateCount != null ? String(result.rateCount) : "—"} />
+          </div>
+          {result.cheapest && (
+            <div className="rounded-md border border-bg-border bg-bg-hover/30 p-2 text-[11px]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+                Cheapest:
+              </span>
+              <span className="ml-2 font-mono">{result.cheapest.mode}</span>
+              {" · "}
+              <span className="font-semibold text-ink-primary">
+                ${result.cheapest.estimateUsd.toLocaleString()}
+              </span>
+              {" · "}
+              {result.cheapest.transitDaysMin}-{result.cheapest.transitDaysMax}d
+              {result.cheapest.notes && (
+                <div className="mt-0.5 text-ink-tertiary">{result.cheapest.notes}</div>
+              )}
+            </div>
+          )}
+          {result.checkedAt && (
+            <div className="text-[10px] text-ink-tertiary">checked {relTime(result.checkedAt)}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProbeStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "green" | "amber" | "red" | "neutral";
+}) {
+  const t =
+    tone === "green"
+      ? "text-accent-green"
+      : tone === "amber"
+        ? "text-accent-amber"
+        : tone === "red"
+          ? "text-accent-red"
+          : "text-ink-primary";
+  return (
+    <div className="rounded-md border border-bg-border bg-bg-base px-2 py-1.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+        {label}
+      </div>
+      <div className={`mt-0.5 text-sm font-semibold ${t}`}>{value}</div>
     </div>
   );
 }
