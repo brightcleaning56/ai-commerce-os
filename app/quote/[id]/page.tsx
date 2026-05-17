@@ -331,7 +331,20 @@ export default function QuotePublicPage() {
             {quote.productName} for {quote.buyerCompany}
           </h1>
           <p className="mt-1 text-xs text-ink-tertiary">
-            Prepared {new Date(quote.createdAt).toLocaleString()} · Valid {quote.validForDays} days
+            Prepared {new Date(quote.createdAt).toLocaleString()}
+            {/* Slice 135: human-readable "N days ago" age inline so
+                the buyer doesn't have to do calendar math from the
+                absolute timestamp. Hidden for <1h since the absolute
+                time is already obvious then. */}
+            {(() => {
+              const ms = Date.now() - new Date(quote.createdAt).getTime();
+              const hrs = Math.floor(ms / 3_600_000);
+              if (hrs < 1) return null;
+              const human =
+                hrs < 24 ? `${hrs}h` : `${Math.floor(hrs / 24)}d`;
+              return <span className="ml-1 text-ink-secondary">({human} ago)</span>;
+            })()}
+            {" · "}Valid {quote.validForDays} days
           </p>
 
           <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
