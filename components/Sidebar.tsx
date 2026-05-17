@@ -90,6 +90,11 @@ export default function Sidebar({
   // to /leads so untouched leads surface in the sidebar without
   // requiring the operator to open the page.
   const [newLeads, setNewLeads] = useState<number | null>(null);
+  // Slice 120: count of CUSTOM cadence templates -- powers the
+  // /cadences badge so operators see at a glance how many of their
+  // own templates they've built. Seeds are excluded since they're
+  // shipped on every install and the count is constant.
+  const [customCadenceTpls, setCustomCadenceTpls] = useState<number | null>(null);
   const [owner, setOwner] = useState<{ name: string; email: string; company: string; title: string; initials: string } | null>(null);
 
   useEffect(() => {
@@ -105,7 +110,7 @@ export default function Sidebar({
         // Slice 108: leads count joins the existing parallel batch.
         // Endpoint is best-effort -- silently no-ops the badge on
         // failure (e.g. role without leads:read capability).
-        const [d, f, q, l] = await Promise.all([
+        const [d, f, q, l, tpls] = await Promise.all([
           fetch("/api/drafts").then((r) => r.json()),
           fetch("/api/risk-flags").then((r) => r.json()),
           // Queue summary is best-effort -- swallow failures so the
@@ -114,6 +119,11 @@ export default function Sidebar({
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
           fetch("/api/leads", { credentials: "include" })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          // Slice 120: cadence templates list -- best-effort, returns
+          // both seeds + customs. We count customs only.
+          fetch("/api/cadences/templates", { credentials: "include" })
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
         ]);
@@ -133,6 +143,11 @@ export default function Sidebar({
         }
         if (l?.leads) {
           setNewLeads((l.leads as Array<{ status?: string }>).filter((x) => x.status === "new").length);
+        }
+        if (tpls?.templates) {
+          setCustomCadenceTpls(
+            (tpls.templates as Array<{ source?: string }>).filter((x) => x.source === "custom").length,
+          );
         }
       } catch {}
     }
@@ -164,6 +179,14 @@ export default function Sidebar({
       // so the row stays clean when the inbox is at zero.
       if (newLeads == null || newLeads === 0) return defaultBadge;
       return String(newLeads);
+    }
+    if (href === "/cadences") {
+      // Slice 120: count of CUSTOM cadence templates (seeds excluded).
+      // Tells the operator "you've built N of your own templates"
+      // without opening the page. 0 falls back to default so a fresh
+      // workspace doesn't show "0" as clutter.
+      if (customCadenceTpls == null || customCadenceTpls === 0) return defaultBadge;
+      return String(customCadenceTpls);
     }
     return defaultBadge;
   }
