@@ -668,6 +668,22 @@ export default function QuotePublicPage() {
           <Clock className="h-3 w-3" /> Quote valid until {new Date(quote.shareExpiresAt).toLocaleString()}
         </div>
 
+        {/* Slice 124: Powered-by footer. Tiny, low-contrast, sits at
+            the very bottom of the buyer view. Subtle branding so the
+            buyer knows what platform sent the quote without competing
+            with the operator's company identity. Hidden in print
+            (slice 84) since paper copies are the operator's branded
+            artifact. */}
+        <div className="flex justify-center pt-4 text-[10px] text-ink-tertiary print:hidden">
+          <Link
+            href="/welcome"
+            className="inline-flex items-center gap-1 opacity-60 transition hover:opacity-100 hover:text-brand-300"
+          >
+            Powered by
+            <span className="font-semibold">AVYN Commerce</span>
+          </Link>
+        </div>
+
         {/* Slice 88: sticky mobile CTA. On phones the decision card
             sits well below the line items + freight preview, so a
             buyer who's reached the Total has to scroll back down to
