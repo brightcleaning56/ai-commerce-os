@@ -10,6 +10,7 @@ import {
   Loader2,
   Mail,
   Phone,
+  PhoneCall,
   Plus,
   RefreshCw,
   Search,
@@ -61,6 +62,13 @@ type InboundSms = {
   body: string;
   messageSid?: string;
 };
+type CallTranscript = {
+  at: string;
+  callSid: string;
+  durationSec: number;
+  text: string;
+  direction: "outbound" | "inbound";
+};
 type Lead = {
   id: string;
   createdAt: string;
@@ -82,6 +90,7 @@ type Lead = {
   aiFollowups?: AiFollowup[];
   resubmissions?: Resubmission[];
   inboundSms?: InboundSms[];
+  callTranscripts?: CallTranscript[];
   lastSubmittedAt?: string;
   promotedToBuyerId?: string;
   promotedAt?: string;
@@ -957,6 +966,56 @@ export default function LeadsPage() {
                         <div className="mt-1 whitespace-pre-wrap text-ink-primary">{m.body}</div>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Call transcripts (slice 60 + 63) — Twilio voice
+                  transcribeCallback writes here when the call's
+                  toNumber matches this lead's phone (suffix-match).
+                  Both inbound and outbound legs surface here so the
+                  operator sees the full conversation history alongside
+                  SMS + AI followups. Text is capped at 4000 chars
+                  upstream. */}
+              {selected.callTranscripts && selected.callTranscripts.length > 0 && (
+                <div>
+                  <div className="mb-1.5 flex items-center gap-2 text-[10px] uppercase tracking-wider text-ink-tertiary">
+                    Call transcripts
+                    <span className="rounded-md bg-accent-blue/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-blue">
+                      {selected.callTranscripts.length}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {selected.callTranscripts
+                      .slice()
+                      .sort((a, b) => +new Date(b.at) - +new Date(a.at))
+                      .map((c) => (
+                        <div
+                          key={c.callSid}
+                          className="rounded-md border border-accent-blue/30 bg-accent-blue/5 p-3 text-xs"
+                        >
+                          <div className="flex items-center gap-2 text-[11px] text-ink-tertiary">
+                            <PhoneCall className="h-3 w-3 text-accent-blue" />
+                            <span className="rounded bg-bg-hover px-1.5 py-0.5 text-[10px] font-semibold uppercase">
+                              {c.direction}
+                            </span>
+                            {c.durationSec > 0 && (
+                              <>
+                                <span>·</span>
+                                <span>
+                                  {Math.floor(c.durationSec / 60)}m {c.durationSec % 60}s
+                                </span>
+                              </>
+                            )}
+                            <span>·</span>
+                            <span>{relativeTime(c.at)}</span>
+                            <span className="ml-auto font-mono text-[10px]">
+                              {c.callSid.slice(-8)}
+                            </span>
+                          </div>
+                          <div className="mt-1.5 whitespace-pre-wrap text-ink-primary">{c.text}</div>
+                        </div>
+                      ))}
                   </div>
                 </div>
               )}
