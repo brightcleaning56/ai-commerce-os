@@ -1009,13 +1009,16 @@ export default function LeadsPage() {
                   Both inbound and outbound legs surface here so the
                   operator sees the full conversation history alongside
                   SMS + AI followups. Text is capped at 4000 chars
-                  upstream. */}
-              {selected.callTranscripts && selected.callTranscripts.length > 0 && (
+                  upstream.
+                  Slice 93: panel now always renders when the lead has
+                  a phone so the "Log call manually" entry point is
+                  always reachable, even before any transcripts exist. */}
+              {selected.phone && (
                 <div>
                   <div className="mb-1.5 flex items-center gap-2 text-[10px] uppercase tracking-wider text-ink-tertiary">
                     Call transcripts
                     <span className="rounded-md bg-accent-blue/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent-blue">
-                      {selected.callTranscripts.length}
+                      {selected.callTranscripts?.length ?? 0}
                     </span>
                     {selected.phone && (
                       <button
@@ -1042,8 +1045,26 @@ export default function LeadsPage() {
                       </button>
                     )}
                   </div>
+                  {/* Slice 93: manual call log form. The tel: fallback
+                      (no Twilio Voice configured) doesn't fire the
+                      slice 60 transcribeCallback, so calls placed from
+                      the operator's actual phone need a manual entry. */}
+                  <LogCallForm
+                    leadId={selected.id}
+                    onLogged={(entry) => {
+                      setSelected((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              callTranscripts: [...(prev.callTranscripts ?? []), entry],
+                            }
+                          : prev,
+                      );
+                      toast("Call logged", "success");
+                    }}
+                  />
                   <div className="space-y-2">
-                    {selected.callTranscripts
+                    {(selected.callTranscripts ?? [])
                       .slice()
                       .sort((a, b) => +new Date(b.at) - +new Date(a.at))
                       .map((c) => (
@@ -1332,5 +1353,141 @@ function AddField({
         className="mt-1 h-9 w-full rounded-md border border-bg-border bg-bg-card px-2 text-xs placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
       />
     </label>
+  );
+}
+
+// ─── LogCallForm (slice 93) ─────────────────────────────────────────
+//
+// Collapsed by default to keep the transcripts panel tight; expands
+// to a textarea + direction toggle + optional duration. Posts to
+// /api/leads/[id]/log-call which appends a synthetic entry to
+// callTranscripts so it shows alongside Twilio-driven entries.
+
+function LogCallForm({
+  leadId,
+  onLogged,
+}: {
+  leadId: string;
+  onLogged: (entry: CallTranscript) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [direction, setDirection] = useState<"outbound" | "inbound">("outbound");
+  const [minutes, setMinutes] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!notes.trim()) return;
+    setBusy(true);
+    try {
+      const m = Number.parseInt(minutes, 10);
+      const durationSec = Number.isFinite(m) && m > 0 ? m * 60 : 0;
+      const r = await fetch(`/api/leads/${leadId}/log-call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ notes: notes.trim(), direction, durationSec }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? `Log failed (${r.status})`);
+      onLogged(d.entry as CallTranscript);
+      setNotes("");
+      setMinutes("");
+      setOpen(false);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Log failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mb-2 inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-card px-2 py-1 text-[10px] font-semibold text-ink-secondary hover:bg-bg-hover"
+        title="Log a call you placed from your phone"
+      >
+        <Plus className="h-3 w-3" /> Log call manually
+      </button>
+    );
+  }
+
+  return (
+    <div className="mb-2 rounded-md border border-accent-blue/30 bg-accent-blue/5 p-2.5">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-accent-blue">
+          New call log
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setNotes("");
+            setMinutes("");
+          }}
+          className="text-ink-tertiary hover:text-ink-primary"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+      <textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="What did you discuss? (becomes the transcript text)"
+        rows={3}
+        maxLength={4000}
+        className="w-full rounded-md border border-bg-border bg-bg-app p-2 text-xs placeholder:text-ink-tertiary focus:border-accent-blue focus:outline-none"
+      />
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="flex rounded-md border border-bg-border bg-bg-app text-[10px]">
+          <button
+            type="button"
+            onClick={() => setDirection("outbound")}
+            className={`px-2 py-1 ${
+              direction === "outbound"
+                ? "bg-accent-blue/20 font-semibold text-accent-blue"
+                : "text-ink-tertiary"
+            }`}
+          >
+            outbound
+          </button>
+          <button
+            type="button"
+            onClick={() => setDirection("inbound")}
+            className={`px-2 py-1 ${
+              direction === "inbound"
+                ? "bg-accent-blue/20 font-semibold text-accent-blue"
+                : "text-ink-tertiary"
+            }`}
+          >
+            inbound
+          </button>
+        </div>
+        <label className="inline-flex items-center gap-1 text-[10px] text-ink-tertiary">
+          duration
+          <input
+            type="number"
+            min={0}
+            max={120}
+            value={minutes}
+            onChange={(e) => setMinutes(e.target.value)}
+            placeholder="0"
+            className="h-6 w-14 rounded border border-bg-border bg-bg-app px-1.5 text-right text-[11px] tabular-nums"
+          />
+          min
+        </label>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={busy || !notes.trim()}
+          className="ml-auto inline-flex items-center gap-1 rounded-md bg-accent-blue px-2 py-1 text-[10px] font-semibold text-white hover:bg-accent-blue/90 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+          Save log
+        </button>
+      </div>
+    </div>
   );
 }
