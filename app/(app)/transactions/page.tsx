@@ -489,6 +489,7 @@ function TxnRow({
   onCopyLink: () => void;
   busyKey: string | null;
 }) {
+  const { toast } = useToast();
   const cfg = STATE_CONFIG[txn.state];
   const tone = TONE_CLASS[cfg.tone];
   const stageIdx = STAGE_ORDER.indexOf(txn.state);
@@ -519,7 +520,25 @@ function TxnRow({
           </div>
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[11px] text-ink-tertiary">{txn.id.slice(0, 14)}…</span>
+              {/* Slice 117: click-to-copy transaction ID. Was static
+                  truncated text; now a button that copies the FULL
+                  id (Stripe/Connect tickets, support refs, log
+                  greps). Tooltip shows the untruncated value. */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(txn.id).then(
+                    () => toast("Transaction ID copied"),
+                    () => toast("Clipboard blocked"),
+                  );
+                }}
+                title={`Copy ${txn.id}`}
+                className="inline-flex items-center gap-1 rounded font-mono text-[11px] text-ink-tertiary hover:bg-bg-hover hover:text-brand-300"
+              >
+                {txn.id.slice(0, 14)}…
+                <Clipboard className="h-2.5 w-2.5" />
+              </button>
               <span className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold ${tone.bg} ${tone.text}`}>
                 <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
                 {cfg.label}
