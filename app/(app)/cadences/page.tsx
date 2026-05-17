@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Download,
   Loader2,
   Mail,
   MessageSquare,
@@ -14,6 +15,7 @@ import {
   RefreshCw,
   Square,
   Trash2,
+  Upload,
   Workflow,
   X,
 } from "lucide-react";
@@ -819,6 +821,46 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
   // Falls back to the local CADENCE_TEMPLATES const on fetch failure
   // so the gallery never goes blank.
   const [templates, setTemplates] = useState<CadenceTemplate[]>(CADENCE_TEMPLATES);
+  // Slice 64: paste-to-import. Opens an inline panel with a textarea
+  // for the JSON envelope produced by /api/cadences/templates/[id]/export.
+  // Server-side validation is the source of truth -- this UI only
+  // surfaces the error string and (on success) the new template id.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importBusy, setImportBusy] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  async function submitImport() {
+    setImportError(null);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(importText);
+    } catch {
+      setImportError("Not valid JSON. Paste the contents of a .cadence-template.json file.");
+      return;
+    }
+    setImportBusy(true);
+    try {
+      const r = await fetch("/api/cadences/templates/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(parsed),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? `Import failed (${r.status})`);
+      if (d.template) {
+        const draft = serverTemplateToDraft(d.template as ServerTemplate);
+        setTemplates((prev) => [...prev, draft]);
+      }
+      setImportOpen(false);
+      setImportText("");
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImportBusy(false);
+    }
+  }
   useEffect(() => {
     let cancelled = false;
     fetch("/api/cadences/templates", { cache: "no-store", credentials: "include" })
@@ -928,11 +970,70 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
       </div>
 
       {/* Slice 36: template gallery -- one-click pre-fill of name +
-          description + steps. Operator can edit anything afterwards. */}
+          description + steps. Operator can edit anything afterwards.
+          Slice 64: Import button opens a paste-JSON panel that hits
+          /api/cadences/templates/import (envelope from slice 61). */}
       <div className="mb-3 rounded-md border border-bg-border bg-bg-card/40 p-2.5">
-        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
-          Start from a template
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+            Start from a template
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setImportError(null);
+              setImportOpen((v) => !v);
+            }}
+            className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-app px-2 py-0.5 text-[10px] font-semibold text-ink-secondary hover:bg-bg-hover"
+            title="Import a template from a previously-exported JSON file"
+          >
+            <Upload className="h-3 w-3" /> Import
+          </button>
         </div>
+        {importOpen && (
+          <div className="mb-2 rounded-md border border-accent-blue/30 bg-accent-blue/5 p-2.5">
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-accent-blue">
+              Paste exported template JSON
+            </div>
+            <textarea
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder={`{\n  "format": "avyn-cadence-template/v1",\n  "exportedAt": "...",\n  "template": { "name": "...", "steps": [...] }\n}`}
+              rows={6}
+              className="w-full rounded-md border border-bg-border bg-bg-app p-2 font-mono text-[10px] text-ink-primary placeholder:text-ink-tertiary focus:border-accent-blue focus:outline-none"
+            />
+            {importError && (
+              <div className="mt-1 rounded-md border border-accent-red/30 bg-accent-red/5 px-2 py-1 text-[10px] text-accent-red">
+                {importError}
+              </div>
+            )}
+            <div className="mt-2 flex items-center justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setImportOpen(false);
+                  setImportText("");
+                  setImportError(null);
+                }}
+                className="rounded-md border border-bg-border bg-bg-app px-2 py-1 text-[10px] text-ink-secondary hover:bg-bg-hover"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitImport}
+                disabled={importBusy || !importText.trim()}
+                className="inline-flex items-center gap-1 rounded-md bg-accent-blue px-2 py-1 text-[10px] font-semibold text-white hover:bg-accent-blue/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {importBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                Import as new
+              </button>
+            </div>
+            <p className="mt-1.5 text-[10px] text-ink-tertiary">
+              A fresh id is assigned -- imports never overwrite existing templates.
+            </p>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
           {templates.map((t) => (
             <div
@@ -954,6 +1055,21 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                 </div>
                 <div className="mt-0.5 text-[10px] text-ink-tertiary">{t.description}</div>
               </button>
+              {/* Slice 65: export download. Works for both seed +
+                  custom templates -- operator can use a seed as a
+                  starting point and share their tweaks. The export
+                  endpoint enforces outreach:read which the gallery
+                  already requires to render. */}
+              <a
+                href={`/api/cadences/templates/${t.id}/export`}
+                onClick={(e) => e.stopPropagation()}
+                className={`absolute top-1 ${t.source === "custom" ? "right-6" : "right-1"} rounded p-0.5 text-ink-tertiary opacity-0 transition-opacity hover:bg-accent-blue/15 hover:text-accent-blue group-hover:opacity-100`}
+                title="Download template JSON"
+                aria-label="Export template"
+                download
+              >
+                <Download className="h-3 w-3" />
+              </a>
               {/* Slice 56: delete button for custom templates only.
                   Seed templates can't be removed (the API rejects). */}
               {t.source === "custom" && (
