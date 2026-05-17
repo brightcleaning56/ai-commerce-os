@@ -830,6 +830,20 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
   const [importText, setImportText] = useState("");
   const [importBusy, setImportBusy] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  // Slice 74: gallery filter -- once you have 8+ customs the grid
+  // gets unwieldy. Matches against name + description + cadenceName
+  // (case-insensitive), so "supplier" finds both "Supplier revival"
+  // and a custom titled "Bring back supplier".
+  const [templateFilter, setTemplateFilter] = useState("");
+  const filteredTemplates = (() => {
+    const q = templateFilter.trim().toLowerCase();
+    if (!q) return templates;
+    return templates.filter((t) =>
+      [t.name, t.description, t.cadenceName].some((f) =>
+        f?.toLowerCase().includes(q),
+      ),
+    );
+  })();
 
   async function submitImport() {
     setImportError(null);
@@ -1055,8 +1069,32 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
             </p>
           </div>
         )}
+        {/* Slice 74: filter input -- only shows once the library is
+            big enough to need it (>= 6 templates), so a fresh
+            workspace with 3 seeds doesn't see clutter. */}
+        {templates.length >= 6 && (
+          <div className="mb-1.5 flex items-center gap-2">
+            <input
+              type="text"
+              value={templateFilter}
+              onChange={(e) => setTemplateFilter(e.target.value)}
+              placeholder={`Filter ${templates.length} templates…`}
+              className="h-7 flex-1 rounded-md border border-bg-border bg-bg-app px-2 text-[11px] placeholder:text-ink-tertiary focus:border-accent-blue focus:outline-none"
+            />
+            {templateFilter && (
+              <span className="text-[10px] text-ink-tertiary">
+                {filteredTemplates.length} match{filteredTemplates.length === 1 ? "" : "es"}
+              </span>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-3">
-          {templates.map((t) => (
+          {filteredTemplates.length === 0 && templateFilter && (
+            <div className="col-span-full rounded-md border border-dashed border-bg-border px-2 py-3 text-center text-[11px] text-ink-tertiary">
+              No templates match &ldquo;{templateFilter}&rdquo;
+            </div>
+          )}
+          {filteredTemplates.map((t) => (
             <div
               key={t.id}
               className="group relative rounded-md border border-bg-border bg-bg-app text-left text-[11px] transition-colors hover:border-accent-blue/50 hover:bg-bg-hover"
