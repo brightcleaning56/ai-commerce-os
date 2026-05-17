@@ -1,5 +1,5 @@
 "use client";
-import { Check, CheckCircle2, Clock, Lock, Share2, XCircle } from "lucide-react";
+import { Check, CheckCircle2, Clock, Lock, Printer, Share2, XCircle } from "lucide-react";
 import { AvynMark } from "@/components/AvynLogo";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
@@ -204,6 +204,27 @@ export default function QuotePublicPage() {
 
   return (
     <div className="dark min-h-screen bg-bg-base text-ink-primary">
+      {/* Slice 84: print stylesheet -- forces light background + black
+          text so the dark theme doesn't waste ink, hides interactive
+          chrome (buttons, banners, dropdowns) via the print:hidden
+          modifiers, and tightens spacing so a single page fits. The
+          @page rule keeps the margins sane across browsers. */}
+      <style>{`
+        @media print {
+          @page { margin: 0.5in; }
+          html, body { background: white !important; color: black !important; }
+          .dark, .dark * {
+            background: white !important;
+            color: black !important;
+            border-color: #e5e7eb !important;
+            box-shadow: none !important;
+            text-shadow: none !important;
+          }
+          header, .print\\:hidden { display: none !important; }
+          main { padding: 0 !important; }
+          a { color: black !important; text-decoration: none !important; }
+        }
+      `}</style>
       <header className="border-b border-bg-border bg-bg-panel/80 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-4">
           <Link href="/welcome" className="flex items-center gap-2.5">
@@ -263,32 +284,48 @@ export default function QuotePublicPage() {
                 of window.location.href is enough -- no new endpoint.
                 Hidden once the quote is in a final state since forwarding
                 a closed quote is pointless. */}
-            {!finalState && !expired && (
+            <div className="flex items-center gap-1.5 print:hidden">
+              {/* Slice 84: print button -- buyers regularly want a
+                  physical copy for procurement files / signature.
+                  window.print() + the @media print stylesheet below
+                  produce a clean black-on-white version with the
+                  interactive elements hidden. Available in any state
+                  (an accepted quote is still useful to file). */}
               <button
                 type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(window.location.href).then(
-                    () => {
-                      setLinkCopied(true);
-                      setTimeout(() => setLinkCopied(false), 2000);
-                    },
-                    () => setLinkCopied(false),
-                  );
-                }}
+                onClick={() => window.print()}
                 className="inline-flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-card/60 px-2 py-1 text-[11px] font-medium text-ink-secondary transition hover:border-brand-500/40 hover:bg-bg-hover"
-                title="Copy this quote link to share with a colleague"
+                title="Print or save as PDF"
               >
-                {linkCopied ? (
-                  <>
-                    <Check className="h-3 w-3 text-accent-green" /> Link copied
-                  </>
-                ) : (
-                  <>
-                    <Share2 className="h-3 w-3" /> Share with colleague
-                  </>
-                )}
+                <Printer className="h-3 w-3" /> Print
               </button>
-            )}
+              {!finalState && !expired && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(window.location.href).then(
+                      () => {
+                        setLinkCopied(true);
+                        setTimeout(() => setLinkCopied(false), 2000);
+                      },
+                      () => setLinkCopied(false),
+                    );
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-bg-border bg-bg-card/60 px-2 py-1 text-[11px] font-medium text-ink-secondary transition hover:border-brand-500/40 hover:bg-bg-hover"
+                  title="Copy this quote link to share with a colleague"
+                >
+                  {linkCopied ? (
+                    <>
+                      <Check className="h-3 w-3 text-accent-green" /> Link copied
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="h-3 w-3" /> Share with colleague
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
           <h1 className="mt-2 text-2xl font-bold">
             {quote.productName} for {quote.buyerCompany}
@@ -355,7 +392,7 @@ export default function QuotePublicPage() {
         )}
 
         {!finalState && !expired && (
-          <div className="rounded-xl border border-bg-border bg-bg-card p-5">
+          <div className="rounded-xl border border-bg-border bg-bg-card p-5 print:hidden">
             <div className="mb-3 text-sm font-semibold">Decision</div>
             {!showShipForm ? (
               <>
