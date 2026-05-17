@@ -86,6 +86,10 @@ export default function Sidebar({
   // calls / inbound SMS / new leads without operator hopping between
   // /tasks and /calls and /leads to find them.
   const [queueUnread, setQueueUnread] = useState<number | null>(null);
+  // Slice 108: count of leads in "new" status -- powers the badge next
+  // to /leads so untouched leads surface in the sidebar without
+  // requiring the operator to open the page.
+  const [newLeads, setNewLeads] = useState<number | null>(null);
   const [owner, setOwner] = useState<{ name: string; email: string; company: string; title: string; initials: string } | null>(null);
 
   useEffect(() => {
@@ -98,12 +102,18 @@ export default function Sidebar({
     let cancelled = false;
     async function load() {
       try {
-        const [d, f, q] = await Promise.all([
+        // Slice 108: leads count joins the existing parallel batch.
+        // Endpoint is best-effort -- silently no-ops the badge on
+        // failure (e.g. role without leads:read capability).
+        const [d, f, q, l] = await Promise.all([
           fetch("/api/drafts").then((r) => r.json()),
           fetch("/api/risk-flags").then((r) => r.json()),
           // Queue summary is best-effort -- swallow failures so the
           // sidebar still renders if the queue endpoint is degraded.
           fetch("/api/queue/summary", { credentials: "include" })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          fetch("/api/leads", { credentials: "include" })
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
         ]);
@@ -120,6 +130,9 @@ export default function Sidebar({
         setPendingApprovals(drafts + flags);
         if (q?.summary) {
           setQueueUnread(typeof q.summary.unreadInbound === "number" ? q.summary.unreadInbound : 0);
+        }
+        if (l?.leads) {
+          setNewLeads((l.leads as Array<{ status?: string }>).filter((x) => x.status === "new").length);
         }
       } catch {}
     }
@@ -144,6 +157,13 @@ export default function Sidebar({
       if (queueUnread == null) return defaultBadge;
       if (queueUnread === 0) return defaultBadge;
       return String(queueUnread);
+    }
+    if (href === "/leads") {
+      // Slice 108: badge shows the count of leads still in "new" status
+      // (untouched). 0 falls back to the configured default (or none)
+      // so the row stays clean when the inbox is at zero.
+      if (newLeads == null || newLeads === 0) return defaultBadge;
+      return String(newLeads);
     }
     return defaultBadge;
   }
