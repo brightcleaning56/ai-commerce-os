@@ -3,6 +3,7 @@ import { Bell, Bot, ChevronDown, Mail, Menu, Package, Search, Send, Users, X } f
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useCommandPalette } from "./CommandPalette";
+import SetupHealthBadge from "./SetupHealthBadge";
 import ThemeToggle from "./ThemeToggle";
 import VoiceStatusBadge from "./voice/VoiceStatusBadge";
 import AgentRoster from "./voice/AgentRoster";
@@ -230,6 +231,12 @@ export default function TopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           <ChevronDown className="h-3.5 w-3.5 text-ink-tertiary" />
         </div>
       </Link>
+
+      {/* Slice 95: setup health indicator -- only renders when red
+          or amber, so a healthy install has no extra chrome. Polls
+          /api/admin/system-health every 60s; clicking jumps to the
+          full /admin/system-health detail. Gated on system:read. */}
+      <SetupHealthBadge />
 
       {/* Voice status pill — green when Twilio Device is registered, red
           when mic is denied / not configured, blue while a call is in
