@@ -9,6 +9,7 @@ import {
   PhoneIncoming,
   PhoneOff,
   Search,
+  Star,
   Voicemail,
   XCircle,
 } from "lucide-react";
@@ -958,7 +959,7 @@ function relativeAge(iso: string): string {
 const RECENT_KEY = "calls.quickDial.recent";
 const RECENT_MAX = 8;
 
-type RecentEntry = { num: string; at: string };
+type RecentEntry = { num: string; at: string; pinned?: boolean };
 
 function loadRecent(): RecentEntry[] {
   if (typeof window === "undefined") return [];
@@ -978,8 +979,13 @@ function loadRecent(): RecentEntry[] {
 function pushRecent(num: string): RecentEntry[] {
   if (typeof window === "undefined") return [];
   const now = new Date().toISOString();
-  const existing = loadRecent().filter((e) => e.num !== num);
-  const next = [{ num, at: now }, ...existing].slice(0, RECENT_MAX);
+  const all = loadRecent();
+  // Slice 101: preserve pinned state when re-dialing a number that's
+  // already in history -- the dial bumps recency but shouldn't clear
+  // a deliberate pin.
+  const prior = all.find((e) => e.num === num);
+  const others = all.filter((e) => e.num !== num);
+  const next = [{ num, at: now, pinned: prior?.pinned }, ...others].slice(0, RECENT_MAX);
   try {
     window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
   } catch {
@@ -1121,22 +1127,55 @@ function QuickDialBar() {
               </button>
             </div>
             <ul className="max-h-56 overflow-y-auto">
-              {recent.map((e) => (
-                <li key={e.num}>
+              {/* Slice 101: pinned entries sort to the top regardless
+                  of recency. Star icon left of each row toggles pin
+                  state -- click the star, the LRU re-orders without
+                  dialing. Click the number itself to dial. */}
+              {[...recent]
+                .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned))
+                .map((e) => (
+                <li key={e.num} className="flex items-center hover:bg-bg-hover">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextPinned = !e.pinned;
+                      const updated = recent.map((x) =>
+                        x.num === e.num ? { ...x, pinned: nextPinned } : x,
+                      );
+                      try {
+                        window.localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+                      } catch {
+                        /* ignore */
+                      }
+                      setRecent(updated);
+                    }}
+                    className="grid h-7 w-7 shrink-0 place-items-center"
+                    title={e.pinned ? "Unpin from top" : "Pin to top"}
+                    aria-label={e.pinned ? "Unpin number" : "Pin number"}
+                    aria-pressed={!!e.pinned}
+                  >
+                    <Star
+                      className={`h-3 w-3 ${
+                        e.pinned
+                          ? "fill-accent-amber text-accent-amber"
+                          : "text-ink-tertiary"
+                      }`}
+                    />
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
                       setPhone(e.num);
                       void dial(e.num);
                     }}
-                    className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-bg-hover"
+                    className="flex flex-1 items-center justify-between gap-2 px-1 py-1.5 text-left text-[12px]"
                     title={e.num}
                   >
                     {/* Slice 96: human-readable for US, mono for E.164
                         fallback so non-US digits stay aligned. The
                         raw E.164 stays in the title for copy-paste. */}
                     <span className="font-mono">{humanPhone(e.num)}</span>
-                    <span className="text-[10px] text-ink-tertiary">{relativeAge(e.at)}</span>
+                    <span className="pr-2 text-[10px] text-ink-tertiary">{relativeAge(e.at)}</span>
                   </button>
                 </li>
               ))}
