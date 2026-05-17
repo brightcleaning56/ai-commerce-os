@@ -38,6 +38,13 @@ export default function SetupHealthBadge() {
   const { me } = useCapabilities();
   const canSee = me?.capabilities?.includes("system:read") ?? me?.isOwner ?? false;
   const [data, setData] = useState<HealthShape | null>(null);
+  // Slice 104: pulse animation when the issue count rises (i.e. a
+  // service that was working a minute ago just broke). Auto-clears
+  // after 3s so the badge settles. Doesn't pulse on initial load --
+  // that'd fire every page navigation; we only want the operator's
+  // attention when something CHANGED.
+  const [pulsing, setPulsing] = useState(false);
+  const [prevIssueCount, setPrevIssueCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (!canSee) return;
@@ -62,6 +69,22 @@ export default function SetupHealthBadge() {
       window.clearInterval(iv);
     };
   }, [canSee]);
+
+  // Slice 104: detect issue-count increase across polls. Compares the
+  // sum of blocking + warning failures; pulses if it went up. Pulses
+  // settle after 3s. Initial load is silent (prevIssueCount starts
+  // null and just records).
+  useEffect(() => {
+    if (!data) return;
+    const total = data.blockingFailures + data.warningFailures;
+    if (prevIssueCount !== null && total > prevIssueCount) {
+      setPulsing(true);
+      const t = window.setTimeout(() => setPulsing(false), 3000);
+      setPrevIssueCount(total);
+      return () => window.clearTimeout(t);
+    }
+    setPrevIssueCount(total);
+  }, [data, prevIssueCount]);
 
   if (!canSee || !data) return null;
   // All green -- don't clutter the topbar with a checkmark. The
@@ -94,7 +117,7 @@ export default function SetupHealthBadge() {
       title={titleText}
       className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-lg border bg-bg-card transition hover:bg-bg-hover ${
         isRed ? "border-accent-red/40" : "border-accent-amber/40"
-      }`}
+      } ${pulsing ? "animate-pulse" : ""}`}
       aria-label="Setup health"
     >
       <Icon
