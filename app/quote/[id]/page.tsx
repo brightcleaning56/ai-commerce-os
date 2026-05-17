@@ -413,7 +413,7 @@ export default function QuotePublicPage() {
                   <div className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
                     Notes
                   </div>
-                  {quote.notes}
+                  <LinkifiedText text={quote.notes} />
                 </div>
               );
             }
@@ -437,7 +437,7 @@ export default function QuotePublicPage() {
                   </span>
                 </summary>
                 <div className="mt-3 whitespace-pre-wrap text-sm text-ink-secondary">
-                  {quote.notes}
+                  <LinkifiedText text={quote.notes} />
                 </div>
               </details>
             );
@@ -703,6 +703,57 @@ export default function QuotePublicPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Slice 116: render free-text content with auto-detected URLs +
+ * email addresses turned into clickable links. Conservative pattern:
+ *
+ *   - URLs: http(s)://... up to whitespace
+ *   - Emails: word@word.tld
+ *
+ * Anything matching renders as a brand-tinted underline link; the
+ * rest is plain text. No HTML in the input is parsed (we render
+ * text nodes), so this is safe against the buyer pasting <script>
+ * tags in a quote note.
+ *
+ * Newlines preserved via whitespace-pre-wrap on the parent.
+ */
+function LinkifiedText({ text }: { text: string }) {
+  // Combined regex: http(s) URL OR bare-domain email. The non-capturing
+  // alternation feeds split() which returns [text, match, text, match, ...].
+  const pattern = /(https?:\/\/[^\s<>"']+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
+  const parts = text.split(pattern);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (i % 2 === 0) return part;
+        if (part.startsWith("http")) {
+          return (
+            <a
+              key={i}
+              href={part}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brand-300 underline hover:text-brand-200"
+            >
+              {part}
+            </a>
+          );
+        }
+        // email
+        return (
+          <a
+            key={i}
+            href={`mailto:${part}`}
+            className="text-brand-300 underline hover:text-brand-200"
+          >
+            {part}
+          </a>
+        );
+      })}
+    </>
   );
 }
 
