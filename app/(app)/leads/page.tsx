@@ -10,6 +10,7 @@ import {
   Inbox,
   Loader2,
   Mail,
+  Pencil,
   Phone,
   PhoneCall,
   Plus,
@@ -19,6 +20,7 @@ import {
   Snowflake,
   Sparkles,
   ThermometerSun,
+  Trash2,
   UserPlus,
   X,
   XCircle,
@@ -1155,6 +1157,40 @@ export default function LeadsPage() {
                             >
                               <Copy className="h-3 w-3" />
                             </button>
+                            {/* Slice 106: edit/delete on manual entries
+                                only -- Twilio transcripts are immutable
+                                source of truth. Server enforces the same
+                                guard (callSid prefix "manual_"). */}
+                            {isManual && (
+                              <ManualTranscriptActions
+                                leadId={selected.id}
+                                entry={c}
+                                onUpdated={(updated) => {
+                                  setSelected((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          callTranscripts: (prev.callTranscripts ?? []).map((x) =>
+                                            x.callSid === c.callSid ? updated : x,
+                                          ),
+                                        }
+                                      : prev,
+                                  );
+                                }}
+                                onDeleted={() => {
+                                  setSelected((prev) =>
+                                    prev
+                                      ? {
+                                          ...prev,
+                                          callTranscripts: (prev.callTranscripts ?? []).filter(
+                                            (x) => x.callSid !== c.callSid,
+                                          ),
+                                        }
+                                      : prev,
+                                  );
+                                }}
+                              />
+                            )}
                           </div>
                           <div className="mt-1.5 whitespace-pre-wrap text-ink-primary">{c.text}</div>
                         </div>
@@ -1538,5 +1574,96 @@ function LogCallForm({
         </button>
       </div>
     </div>
+  );
+}
+
+// ─── ManualTranscriptActions (slice 106) ─────────────────────────────
+//
+// Edit + delete on slice 93 manual entries only. Toggles between
+// display mode (Pencil + Trash icons) and edit mode (textarea +
+// Save/Cancel). Twilio entries never render this component (the
+// caller guards on isManual).
+
+function ManualTranscriptActions({
+  leadId,
+  entry,
+  onUpdated,
+  onDeleted,
+}: {
+  leadId: string;
+  entry: CallTranscript;
+  onUpdated: (next: CallTranscript) => void;
+  onDeleted: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  // Slice 106: window.prompt for edit -- matches the prompt-based
+  // rename pattern from slice 71 (cadence templates). Trades visual
+  // polish for surface-area simplicity; works on every browser
+  // without restructuring the transcript card's text node.
+  async function edit() {
+    const next = window.prompt("Edit transcript text:", entry.text);
+    if (next === null) return;
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === entry.text) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/leads/${leadId}/log-call/${entry.callSid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ notes: trimmed }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? `Save failed (${r.status})`);
+      onUpdated(d.entry as CallTranscript);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!window.confirm("Delete this manual call entry?")) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/leads/${leadId}/log-call/${entry.callSid}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error ?? `Delete failed (${r.status})`);
+      onDeleted();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={edit}
+        disabled={busy}
+        className="rounded p-0.5 text-ink-tertiary hover:bg-bg-hover hover:text-accent-amber disabled:opacity-60"
+        title="Edit transcript"
+        aria-label="Edit transcript"
+      >
+        <Pencil className="h-3 w-3" />
+      </button>
+      <button
+        type="button"
+        onClick={remove}
+        disabled={busy}
+        className="rounded p-0.5 text-ink-tertiary hover:bg-bg-hover hover:text-accent-red disabled:opacity-60"
+        title="Delete transcript"
+        aria-label="Delete transcript"
+      >
+        <Trash2 className="h-3 w-3" />
+      </button>
+    </>
   );
 }
