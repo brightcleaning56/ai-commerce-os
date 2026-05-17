@@ -111,6 +111,93 @@ const STATUS_TONE: Record<LeadStatus, { bg: string; text: string }> = {
 
 const STATUS_ORDER: LeadStatus[] = ["new", "contacted", "qualified", "won", "lost"];
 
+/**
+ * Slice 115: build a plaintext export of a lead's full conversation
+ * history -- the AI reply, every followup, every inbound SMS, every
+ * call transcript (Twilio + manual). Sorted chronologically so the
+ * resulting file reads like a transcript from first contact onward.
+ * Downloaded as `lead-<id>-conversation.txt`.
+ */
+function exportLeadConversation(l: Lead): void {
+  const lines: string[] = [];
+  lines.push(`AVYN Lead Conversation Export`);
+  lines.push(`============================`);
+  lines.push(`Lead:     ${l.name}`);
+  lines.push(`Company:  ${l.company}`);
+  lines.push(`Email:    ${l.email}`);
+  if (l.phone) lines.push(`Phone:    ${l.phone}`);
+  lines.push(`Lead ID:  ${l.id}`);
+  lines.push(`Received: ${new Date(l.createdAt).toLocaleString()}`);
+  lines.push(`Status:   ${l.status}`);
+  lines.push(``);
+  if (l.message) {
+    lines.push(`--- Original message ---`);
+    lines.push(l.message);
+    lines.push(``);
+  }
+  if (l.notes) {
+    lines.push(`--- Operator notes ---`);
+    lines.push(l.notes);
+    lines.push(``);
+  }
+
+  // Collect timestamped events into one chronological stream
+  type Evt = { at: string; header: string; body: string };
+  const events: Evt[] = [];
+  if (l.aiReply && l.aiReply.at) {
+    events.push({
+      at: l.aiReply.at,
+      header: `[AI reply · ${l.aiReply.status}]${l.aiReply.subject ? ` Subject: ${l.aiReply.subject}` : ""}`,
+      body: l.aiReply.body ?? l.aiReply.smsBody ?? "(no body)",
+    });
+  }
+  (l.aiFollowups ?? []).forEach((f) => {
+    events.push({
+      at: f.at,
+      header: `[AI followup · day ${f.daysSinceCreated} · ${f.status}]${f.subject ? ` Subject: ${f.subject}` : ""}`,
+      body: f.body ?? "(no body)",
+    });
+  });
+  (l.inboundSms ?? []).forEach((s) => {
+    events.push({
+      at: s.at,
+      header: `[Inbound SMS from ${s.from}]`,
+      body: s.body,
+    });
+  });
+  (l.callTranscripts ?? []).forEach((c) => {
+    const isManual = c.callSid.startsWith("manual_");
+    const dur = c.durationSec > 0 ? ` · ${Math.floor(c.durationSec / 60)}m ${c.durationSec % 60}s` : "";
+    events.push({
+      at: c.at,
+      header: `[${isManual ? "Manual call log" : "Call transcript"} · ${c.direction}${dur}]`,
+      body: c.text,
+    });
+  });
+
+  events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  for (const e of events) {
+    lines.push(`--- ${new Date(e.at).toLocaleString()} ---`);
+    lines.push(e.header);
+    lines.push(e.body);
+    lines.push(``);
+  }
+
+  if (events.length === 0) {
+    lines.push(`(no conversation events yet)`);
+  }
+
+  const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `lead-${l.id}-conversation.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   if (ms < 60_000) return "just now";
@@ -786,21 +873,39 @@ export default function LeadsPage() {
                     cross-references, or sharing in chat. Small mono
                     chip with a copy icon -- doesn't crowd the name
                     headline but is always reachable. */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(selected.id).then(
-                      () => toast("Lead ID copied", "success"),
-                      () => toast("Clipboard blocked", "error"),
-                    );
-                  }}
-                  className="mt-1 inline-flex items-center gap-1 rounded bg-bg-hover px-1.5 py-0.5 font-mono text-[10px] text-ink-tertiary transition hover:bg-bg-app hover:text-brand-300"
-                  title="Copy lead ID"
-                  aria-label="Copy lead ID"
-                >
-                  {selected.id}
-                  <Copy className="h-2.5 w-2.5" />
-                </button>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(selected.id).then(
+                        () => toast("Lead ID copied", "success"),
+                        () => toast("Clipboard blocked", "error"),
+                      );
+                    }}
+                    className="inline-flex items-center gap-1 rounded bg-bg-hover px-1.5 py-0.5 font-mono text-[10px] text-ink-tertiary transition hover:bg-bg-app hover:text-brand-300"
+                    title="Copy lead ID"
+                    aria-label="Copy lead ID"
+                  >
+                    {selected.id}
+                    <Copy className="h-2.5 w-2.5" />
+                  </button>
+                  {/* Slice 115: export full conversation history as
+                      a single .txt file. Includes everything we know
+                      about the lead conversation -- AI replies,
+                      followups, inbound SMS, call transcripts (both
+                      Twilio + manual). Useful for handoff to another
+                      operator or for an account-level escalation. */}
+                  <button
+                    type="button"
+                    onClick={() => exportLeadConversation(selected)}
+                    className="inline-flex items-center gap-1 rounded bg-bg-hover px-1.5 py-0.5 text-[10px] text-ink-tertiary transition hover:bg-bg-app hover:text-brand-300"
+                    title="Download full conversation as text"
+                    aria-label="Download conversation"
+                  >
+                    <FileText className="h-2.5 w-2.5" />
+                    Export
+                  </button>
+                </div>
               </div>
 
               <div className="relative space-y-1.5 rounded-lg border border-bg-border bg-bg-hover/30 p-3 text-xs">
