@@ -782,6 +782,25 @@ export default function LeadsPage() {
                   {selected.industry && <span className="text-ink-tertiary"> · {selected.industry}</span>}
                   {selected.companySize && <span className="text-ink-tertiary"> · {selected.companySize}</span>}
                 </div>
+                {/* Slice 112: copy lead ID for support tickets, log
+                    cross-references, or sharing in chat. Small mono
+                    chip with a copy icon -- doesn't crowd the name
+                    headline but is always reachable. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(selected.id).then(
+                      () => toast("Lead ID copied", "success"),
+                      () => toast("Clipboard blocked", "error"),
+                    );
+                  }}
+                  className="mt-1 inline-flex items-center gap-1 rounded bg-bg-hover px-1.5 py-0.5 font-mono text-[10px] text-ink-tertiary transition hover:bg-bg-app hover:text-brand-300"
+                  title="Copy lead ID"
+                  aria-label="Copy lead ID"
+                >
+                  {selected.id}
+                  <Copy className="h-2.5 w-2.5" />
+                </button>
               </div>
 
               <div className="relative space-y-1.5 rounded-lg border border-bg-border bg-bg-hover/30 p-3 text-xs">
