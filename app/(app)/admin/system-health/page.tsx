@@ -14,6 +14,7 @@ import {
   PhoneOff,
   Power,
   RefreshCw,
+  Download,
   Send,
   ShieldCheck,
   Smartphone,
@@ -283,13 +284,43 @@ export default function SystemHealthPage() {
             </p>
           </div>
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover disabled:opacity-60"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Re-check
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Slice 107: download the full health snapshot as JSON.
+              Useful for sharing with support, archiving "what was
+              broken at 3am" alongside an incident note, or diffing
+              before/after a config change. Server data only -- no
+              secrets, just the same shape /api/admin/system-health
+              already returns to this page. */}
+          {data && (
+            <button
+              onClick={() => {
+                const date = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+                const blob = new Blob([JSON.stringify(data, null, 2)], {
+                  type: "application/json",
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `avyn-system-health-${date}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              }}
+              className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover"
+              title="Download the current snapshot as JSON"
+            >
+              <Download className="h-4 w-4" /> Snapshot
+            </button>
+          )}
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-2 rounded-lg border border-bg-border bg-bg-card px-3 py-2 text-sm hover:bg-bg-hover disabled:opacity-60"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Re-check
+          </button>
+        </div>
       </div>
 
       {/* Explainer banner — what this page is for and how to use it */}
