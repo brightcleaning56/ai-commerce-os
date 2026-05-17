@@ -392,7 +392,10 @@ export default function QuotePublicPage() {
         )}
 
         {!finalState && !expired && (
-          <div className="rounded-xl border border-bg-border bg-bg-card p-5 print:hidden">
+          <div
+            data-decision-card
+            className="rounded-xl border border-bg-border bg-bg-card p-5 print:hidden"
+          >
             <div className="mb-3 text-sm font-semibold">Decision</div>
             {!showShipForm ? (
               <>
@@ -611,7 +614,41 @@ export default function QuotePublicPage() {
         <div className="flex items-center gap-2 text-[10px] text-ink-tertiary">
           <Clock className="h-3 w-3" /> Quote valid until {new Date(quote.shareExpiresAt).toLocaleString()}
         </div>
+
+        {/* Slice 88: sticky mobile CTA. On phones the decision card
+            sits well below the line items + freight preview, so a
+            buyer who's reached the Total has to scroll back down to
+            act. The fixed-bottom bar surfaces a single tap path.
+            Hidden:
+              - on sm: breakpoint and up (decision card is in view)
+              - when the quote is in a final state (action is moot)
+              - when expired
+              - when the ship-form is already open (don't conflict)
+              - in print (print:hidden)
+            Adds bottom padding to <main> via the sm:pb-0 mb-32 trick
+            so the bar doesn't cover the last bit of content. */}
+        {!finalState && !expired && !showShipForm && (
+          <div className="h-24 sm:hidden print:hidden" aria-hidden="true" />
+        )}
       </main>
+      {!finalState && !expired && !showShipForm && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-bg-border bg-bg-panel/95 px-4 py-3 backdrop-blur sm:hidden print:hidden">
+          <button
+            onClick={() => {
+              // Scroll to the decision card so the ship-form expansion
+              // (which happens on click) doesn't disorient the user.
+              document
+                .querySelector("[data-decision-card]")
+                ?.scrollIntoView({ behavior: "smooth", block: "center" });
+              setShowShipForm(true);
+            }}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-brand px-4 py-3 text-sm font-semibold shadow-glow"
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            Accept {fmt(quote.total, quote.currency)} quote
+          </button>
+        </div>
+      )}
     </div>
   );
 }
