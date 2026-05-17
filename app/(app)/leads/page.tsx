@@ -902,6 +902,27 @@ export default function LeadsPage() {
                     {selected.id}
                     <Copy className="h-2.5 w-2.5" />
                   </button>
+                  {/* Slice 137: total events chip -- sums AI reply (1
+                      if present), AI followups, inbound SMS, call
+                      transcripts. Quick "how active is this lead"
+                      signal. Hidden when 0 to keep fresh leads tidy. */}
+                  {(() => {
+                    const n =
+                      (selected.aiReply ? 1 : 0) +
+                      (selected.aiFollowups?.length ?? 0) +
+                      (selected.inboundSms?.length ?? 0) +
+                      (selected.callTranscripts?.length ?? 0);
+                    if (n === 0) return null;
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 rounded bg-bg-hover px-1.5 py-0.5 text-[10px] text-ink-tertiary"
+                        title={`${n} event${n === 1 ? "" : "s"} across AI reply, followups, inbound SMS, and call transcripts`}
+                      >
+                        <span className="font-semibold text-ink-secondary">{n}</span>
+                        event{n === 1 ? "" : "s"}
+                      </span>
+                    );
+                  })()}
                   {/* Slice 115: export full conversation history as
                       a single .txt file. Includes everything we know
                       about the lead conversation -- AI replies,
