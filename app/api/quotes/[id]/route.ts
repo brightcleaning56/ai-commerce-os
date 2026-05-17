@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { estimateLane } from "@/lib/freight";
+import { checkRateLimit, rateLimitHeaders } from "@/lib/rateLimit";
 import { store } from "@/lib/store";
 import { supplierRegistry } from "@/lib/supplierRegistry";
 
@@ -12,6 +13,18 @@ export const dynamic = "force-dynamic";
  * requires the token. Pattern matches /api/share/[id].
  */
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  // Slice 76: rate limit BEFORE the store hit so a 429 doesn't even
+  // consume a quote read. 60/min per quote -- generous for legit
+  // buyer refreshes (open page, scroll, refresh, click back, etc),
+  // tight enough to stop a scraper hammering for share tokens.
+  const rl = checkRateLimit(`quote-get:${params.id}`, { limit: 60, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: `Too many requests for this quote. Try again in ${rl.retryAfterSec}s.` },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
+  }
+
   const quote = await store.getQuote(params.id);
   if (!quote) {
     return NextResponse.json({ error: "Quote not found" }, { status: 404 });
@@ -48,6 +61,18 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
  * Layer 6 distribution-lanes dashboard.
  */
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  // Slice 76: tighter limit on PATCH -- a buyer accepts ONCE, then
+  // the status guard rejects further state changes anyway. 5/min is
+  // plenty for "user clicked Accept twice while the spinner ran" and
+  // tight enough to stop accept-spam (which also triggers slice 47
+  // freight estimation -- not free).
+  const rl = checkRateLimit(`quote-patch:${params.id}`, { limit: 5, windowMs: 60_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: `Too many accept/reject attempts. Try again in ${rl.retryAfterSec}s.` },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
+  }
   let body: {
     status?: "draft" | "sent" | "accepted" | "rejected" | "expired";
     destination?: {
