@@ -1147,6 +1147,28 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                   )}
                 </div>
                 <div className="mt-0.5 text-[10px] text-ink-tertiary">{t.description}</div>
+                {/* Slice 81: step count + channel mix badge. Lets the
+                    operator scan the gallery for "the 3-touch email-
+                    heavy one" without opening each template. Uppercase
+                    channel codes (E/C/S) keep it compact. */}
+                <div className="mt-1 flex items-center gap-1 text-[9px] text-ink-tertiary">
+                  <span className="rounded bg-bg-hover px-1 py-0.5 font-semibold tabular-nums">
+                    {t.steps.length}-step
+                  </span>
+                  <span className="font-mono uppercase tracking-wider">
+                    {t.steps
+                      .map((s) =>
+                        s.channel === "email"
+                          ? "E"
+                          : s.channel === "call"
+                            ? "C"
+                            : s.channel === "sms"
+                              ? "S"
+                              : "?",
+                      )
+                      .join("·")}
+                  </span>
+                </div>
               </button>
               {/* Slice 77: duplicate button -- works for both seed +
                   custom templates. Clones the recipe to a new "Copy
