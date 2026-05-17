@@ -927,11 +927,65 @@ function TranscriptSearch() {
 // Strips non-digits before E.164-prefixing so "(469) 267-8472" works
 // the same as "+14692678472". Defaults to + on bare 10-digit US
 // numbers; passes through anything already starting with +.
+/** Slice 90: short "5m ago" style for the recent-dial dropdown. */
+function relativeAge(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return "just now";
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+// Slice 90: client-only recent-dial history. Uses localStorage so it
+// survives reloads but doesn't need a backend round-trip. Bounded at
+// 8 entries (more than that = dropdown clutter, less = forgets your
+// top contacts). Dedupes on E.164 + maintains MRU order.
+const RECENT_KEY = "calls.quickDial.recent";
+const RECENT_MAX = 8;
+
+type RecentEntry = { num: string; at: string };
+
+function loadRecent(): RecentEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(RECENT_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((e): e is RecentEntry => !!e && typeof e.num === "string" && typeof e.at === "string")
+      .slice(0, RECENT_MAX);
+  } catch {
+    return [];
+  }
+}
+
+function pushRecent(num: string): RecentEntry[] {
+  if (typeof window === "undefined") return [];
+  const now = new Date().toISOString();
+  const existing = loadRecent().filter((e) => e.num !== num);
+  const next = [{ num, at: now }, ...existing].slice(0, RECENT_MAX);
+  try {
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    /* quota / blocked -- ignore */
+  }
+  return next;
+}
+
 function QuickDialBar() {
   const { toast } = useToast();
   const { placeOutboundCall, twilioReady } = useVoice();
   const [phone, setPhone] = useState("");
   const [busy, setBusy] = useState(false);
+  const [recent, setRecent] = useState<RecentEntry[]>([]);
+  const [showRecent, setShowRecent] = useState(false);
+
+  useEffect(() => {
+    setRecent(loadRecent());
+  }, []);
 
   function normalize(input: string): string | null {
     const trimmed = input.trim();
@@ -946,8 +1000,8 @@ function QuickDialBar() {
     return null;
   }
 
-  async function dial() {
-    const num = normalize(phone);
+  async function dial(rawNum?: string) {
+    const num = normalize(rawNum ?? phone);
     if (!num) {
       toast("Enter a 10-digit US number or +E.164", "error");
       return;
@@ -962,6 +1016,11 @@ function QuickDialBar() {
         window.location.href = `tel:${num}`;
         toast(`Opening system dialer for ${num}`, "success");
       }
+      // Slice 90: record in recent history on success (whether browser
+      // dial or tel: handoff -- both count as "the operator wanted
+      // to call this number").
+      setRecent(pushRecent(num));
+      setShowRecent(false);
     } catch (e) {
       toast(e instanceof Error ? e.message : "Dial failed", "error");
     } finally {
@@ -995,7 +1054,7 @@ function QuickDialBar() {
           e.preventDefault();
           void dial();
         }}
-        className="flex flex-wrap items-center gap-2"
+        className="relative flex flex-wrap items-center gap-2"
       >
         <input
           type="tel"
@@ -1004,6 +1063,21 @@ function QuickDialBar() {
           placeholder="(469) 267-8472 or +14692678472"
           className="h-9 flex-1 min-w-[200px] rounded-md border border-bg-border bg-bg-app px-3 text-sm placeholder:text-ink-tertiary focus:border-brand-500 focus:outline-none"
         />
+        {/* Slice 90: recent dial history -- only renders when there's
+            something to show. Clock icon toggles a popover; clicking
+            an entry redials immediately. */}
+        {recent.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowRecent((v) => !v)}
+            className="inline-flex items-center gap-1 rounded-md border border-bg-border bg-bg-app px-2 py-2 text-[11px] font-medium text-ink-secondary hover:bg-bg-hover"
+            title="Recent numbers"
+            aria-expanded={showRecent}
+          >
+            <Clock className="h-3.5 w-3.5" />
+            {recent.length}
+          </button>
+        )}
         <button
           type="submit"
           disabled={busy || !phone.trim()}
@@ -1012,6 +1086,46 @@ function QuickDialBar() {
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <PhoneCall className="h-4 w-4" />}
           Call
         </button>
+
+        {showRecent && recent.length > 0 && (
+          <div className="absolute left-0 right-0 top-full z-10 mt-1 rounded-md border border-bg-border bg-bg-card shadow-lg">
+            <div className="flex items-center justify-between border-b border-bg-border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-tertiary">
+              <span>Recent dials</span>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    window.localStorage.removeItem(RECENT_KEY);
+                  } catch {
+                    /* ignore */
+                  }
+                  setRecent([]);
+                  setShowRecent(false);
+                }}
+                className="text-[10px] normal-case text-ink-tertiary hover:text-accent-red"
+              >
+                Clear
+              </button>
+            </div>
+            <ul className="max-h-56 overflow-y-auto">
+              {recent.map((e) => (
+                <li key={e.num}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhone(e.num);
+                      void dial(e.num);
+                    }}
+                    className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-bg-hover"
+                  >
+                    <span className="font-mono">{e.num}</span>
+                    <span className="text-[10px] text-ink-tertiary">{relativeAge(e.at)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </form>
       {!twilioReady && (
         <p className="mt-2 text-[10px] text-ink-tertiary">
