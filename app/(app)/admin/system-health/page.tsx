@@ -279,7 +279,7 @@ export default function SystemHealthPage() {
           <div>
             <h1 className="text-2xl font-bold">System Health</h1>
             <p className="text-xs text-ink-secondary">
-              {data ? `Last checked ${relTime(data.generatedAt)}` : "—"}
+              {data ? <LastCheckedAge iso={data.generatedAt} /> : "—"}
               {data && <> · <span className={overallTone(data.overall)}>{overallLabel(data.overall)}</span></>}
             </p>
           </div>
@@ -615,6 +615,23 @@ export default function SystemHealthPage() {
       )}
     </div>
   );
+}
+
+// ─── LastCheckedAge (slice 110) ──────────────────────────────────────
+//
+// The "Last checked Xs ago" label was static -- it only re-rendered
+// when `data` itself changed (i.e. on a re-fetch). So after a minute
+// of sitting on the page, the label still said "just now" until the
+// operator clicked Re-check. This ticks every 10s so the displayed
+// age stays honest without spamming the API.
+
+function LastCheckedAge({ iso }: { iso: string }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setTick((n) => n + 1), 10_000);
+    return () => window.clearInterval(t);
+  }, []);
+  return <>Last checked {relTime(iso)}</>;
 }
 
 function TestResultLine({ result }: { result: TestResult }) {
