@@ -7,6 +7,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * GET    /api/cadences/templates/[id] — fetch one template
+ * PATCH  /api/cadences/templates/[id] — rename / edit description of a
+ *                                       CUSTOM template (slice 71).
+ *                                       Seeds reject as immutable.
  * DELETE /api/cadences/templates/[id] — remove a custom template
  *                                       (seed templates can't be removed)
  */
@@ -20,6 +23,50 @@ export async function GET(
   const template = await cadenceTemplatesStore.get(id);
   if (!template) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ template });
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const auth = await requireCapability(req, "outreach:write");
+  if (!auth.ok) return NextResponse.json({ error: auth.reason }, { status: auth.status });
+  const { id } = await params;
+
+  let body: {
+    name?: string;
+    description?: string;
+    cadenceName?: string;
+    cadenceDescription?: string;
+  } = {};
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  // Reject empty patches early -- saves a disk write and gives the
+  // operator a clear "you didn't change anything" message instead of
+  // a silent no-op.
+  if (
+    body.name === undefined &&
+    body.description === undefined &&
+    body.cadenceName === undefined &&
+    body.cadenceDescription === undefined
+  ) {
+    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+  }
+
+  try {
+    const updated = await cadenceTemplatesStore.update(id, body);
+    if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json({ ok: true, template: updated });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "Update failed" },
+      { status: 400 },
+    );
+  }
 }
 
 export async function DELETE(

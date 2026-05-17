@@ -208,6 +208,54 @@ export const cadenceTemplatesStore = {
     return template;
   },
 
+  /**
+   * Slice 71: patch a custom template's display metadata. Only
+   * `name`, `description`, `cadenceName`, and `cadenceDescription`
+   * are mutable -- steps are intentionally immutable here (operators
+   * who want different steps should clone via "Save as template"
+   * from a configured cadence, which preserves the lineage clearly).
+   * Seeds reject for the same reason as remove(): they're shipped
+   * with the install, not workspace state.
+   */
+  async update(
+    id: string,
+    patch: {
+      name?: string;
+      description?: string;
+      cadenceName?: string;
+      cadenceDescription?: string;
+    },
+  ): Promise<CadenceTemplate | null> {
+    if (SEED_TEMPLATES.some((t) => t.id === id)) {
+      throw new Error("Built-in seed templates can't be renamed");
+    }
+    const customs = (await getBackend().read<CadenceTemplate[]>(TEMPLATES_FILE, [])).filter(isTemplate);
+    const idx = customs.findIndex((t) => t.id === id);
+    if (idx === -1) return null;
+    const existing = customs[idx];
+    const trimmedName = patch.name?.trim();
+    const next: CadenceTemplate = {
+      ...existing,
+      name: trimmedName ? trimmedName.slice(0, 120) : existing.name,
+      description:
+        patch.description !== undefined
+          ? patch.description.trim().slice(0, 200)
+          : existing.description,
+      cadenceName:
+        patch.cadenceName !== undefined
+          ? patch.cadenceName.trim().slice(0, 120) || existing.cadenceName
+          : existing.cadenceName,
+      cadenceDescription:
+        patch.cadenceDescription !== undefined
+          ? patch.cadenceDescription.trim().slice(0, 500)
+          : existing.cadenceDescription,
+    };
+    if (!next.name) throw new Error("name required");
+    customs[idx] = next;
+    await getBackend().write(TEMPLATES_FILE, customs);
+    return next;
+  },
+
   async remove(id: string): Promise<boolean> {
     // Seeds aren't removable
     if (SEED_TEMPLATES.some((t) => t.id === id)) {

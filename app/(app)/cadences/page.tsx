@@ -9,6 +9,7 @@ import {
   Mail,
   MessageSquare,
   Pause,
+  Pencil,
   Phone,
   Play,
   Plus,
@@ -1079,17 +1080,56 @@ function CreateCadenceForm({ onClose, onCreated }: { onClose: () => void; onCrea
                   custom templates -- operator can use a seed as a
                   starting point and share their tweaks. The export
                   endpoint enforces outreach:read which the gallery
-                  already requires to render. */}
+                  already requires to render.
+                  Slice 71: customs also get a rename pencil; seeds
+                  don't (they're immutable). Both icons sit to the
+                  LEFT of the delete X (right-6 / right-11 stacking). */}
               <a
                 href={`/api/cadences/templates/${t.id}/export`}
                 onClick={(e) => e.stopPropagation()}
-                className={`absolute top-1 ${t.source === "custom" ? "right-6" : "right-1"} rounded p-0.5 text-ink-tertiary opacity-0 transition-opacity hover:bg-accent-blue/15 hover:text-accent-blue group-hover:opacity-100`}
+                className={`absolute top-1 ${t.source === "custom" ? "right-11" : "right-1"} rounded p-0.5 text-ink-tertiary opacity-0 transition-opacity hover:bg-accent-blue/15 hover:text-accent-blue group-hover:opacity-100`}
                 title="Download template JSON"
                 aria-label="Export template"
                 download
               >
                 <Download className="h-3 w-3" />
               </a>
+              {t.source === "custom" && (
+                <button
+                  type="button"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    const nextName = window.prompt(
+                      `Rename custom template:`,
+                      t.name,
+                    );
+                    if (nextName === null) return; // cancelled
+                    const trimmed = nextName.trim();
+                    if (!trimmed || trimmed === t.name) return;
+                    try {
+                      const r = await fetch(`/api/cadences/templates/${t.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        credentials: "include",
+                        body: JSON.stringify({ name: trimmed }),
+                      });
+                      const d = await r.json().catch(() => ({}));
+                      if (!r.ok) throw new Error(d.error ?? `Rename failed (${r.status})`);
+                      if (d.template) {
+                        const draft = serverTemplateToDraft(d.template as ServerTemplate);
+                        setTemplates((prev) => prev.map((x) => (x.id === t.id ? draft : x)));
+                      }
+                    } catch (err) {
+                      alert(err instanceof Error ? err.message : "Rename failed");
+                    }
+                  }}
+                  className="absolute right-6 top-1 rounded p-0.5 text-ink-tertiary opacity-0 transition-opacity hover:bg-accent-amber/15 hover:text-accent-amber group-hover:opacity-100"
+                  title="Rename this custom template"
+                  aria-label="Rename template"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
               {/* Slice 56: delete button for custom templates only.
                   Seed templates can't be removed (the API rejects). */}
               {t.source === "custom" && (
